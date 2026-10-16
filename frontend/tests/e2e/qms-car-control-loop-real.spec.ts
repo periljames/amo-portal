@@ -84,7 +84,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   // The public CAR form is a governed stepper, not a long form: a prior
   // saved draft may leave a different completed step selected on reload.
   const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
-    .getByRole("button", { name: "Root cause", exact: true });
+    .getByRole("button", { name: /Root cause$/i });
   await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
   await rootCauseStep.click();
   await expect(structuredEditor(page, "Root cause analysis")).toBeVisible({ timeout: 30_000 });
