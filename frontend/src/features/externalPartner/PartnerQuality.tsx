@@ -11,6 +11,11 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
   const data=usePartnerLoad((signal)=>partnerRequest<QualityPage>(tenant,
     `quality?limit=15&offset=${offset}`,{signal}),`${tenant}:${offset}`);
   const [activeCar,setActiveCar]=useState<Car|null>(null);
+  const [carRequirement,setCarRequirement]=useState("");
+  const configuredRequirements=usePartnerLoad(signal=>partnerRequest<{items:{id:string;code:string;title:string}[]}>(
+    tenant,"documents/requirements",{signal}),tenant+":controlled-evidence-classes");
+  const carClasses=(configuredRequirements.value?.items||[]).filter(x=>
+    x.code==="CORRECTIVE_ACTION_EVIDENCE"||x.code==="AUDIT_EVIDENCE");
   const [activeRequest,setActiveRequest]=useState<AuditDocumentRequest|null>(null);
   const [requestFile,setRequestFile]=useState<File|null>(null);
   const [requestComment,setRequestComment]=useState("");
@@ -39,9 +44,12 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
   };
   const upload=(event:React.FormEvent)=>{
     event.preventDefault();if(!file||!activeCar)return;
+    if(!carRequirement||!carClasses.some(x=>x.id===carRequirement)){
+      setError("Select a Quality-configured corrective-action evidence class.");return;
+    }
     const controller=new AbortController();abortRef.current=controller;
     setError("");setNotice("");setBusy(true);setProgress(0);
-    void partnerUpload(tenant,csrf,file,{evidence_type:"CORRECTIVE_ACTION",
+    void partnerUpload(tenant,csrf,file,{requirement_id:carRequirement,
       related_kind:"ASSIGNMENT",related_id:activeCar.assignment_id},setProgress,controller.signal)
       .then(r=>{setNotice(`File ${r.filename} received. Quality must review and accept it before this CAR can be submitted with the evidence reference.`);
         setFile(null);data.reload();})
@@ -138,7 +146,13 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
           <label>Document<input type="file" required accept=".pdf,.docx,.png,.jpg,.jpeg,.txt"
             onChange={e=>setFile(e.target.files?.[0]||null)}/></label>
           {busy&&<div className="partner-progress"><progress max={100} value={progress}/><span>{progress}%</span></div>}
-          <div className="partner-buttons"><button type="submit" disabled={busy||!file}>Upload for separate Quality acceptance</button>
+          <label>Controlled document requirement<select required value={carRequirement}
+            onChange={e=>setCarRequirement(e.target.value)}>
+            <option value="">Select authorized CAR or audit evidence class</option>
+            {carClasses.map(x=><option key={x.id} value={x.id}>{x.title}</option>)}
+          </select></label>
+          {!carClasses.length&&<p>Quality must configure the corrective-action evidence requirement before a classified submission can be made.</p>}
+          <div className="partner-buttons"><button type="submit" disabled={busy||!file||!carRequirement}>Upload for separate Quality acceptance</button>
             {busy&&<button type="button" onClick={()=>abortRef.current?.abort()}>Cancel upload</button>}</div>
         </form>}
         <ActionNotice value={error} error/><ActionNotice value={notice}/>
