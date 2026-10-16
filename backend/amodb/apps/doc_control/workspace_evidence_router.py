@@ -358,8 +358,10 @@ async def upload_document_evidence_asset(
     date_token = datetime.utcnow().strftime("%Y%m%d")
     if shared_storage.shared_storage_enabled():
         try:
-            persisted = shared_storage.put_stream(
-                BytesIO(content),
+            from amodb.apps.platform import storage_quota_upload
+            persisted = storage_quota_upload.put_bytes(
+                db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
+                content=content,
                 key=f"doc-control-evidence/{tenant.amo_id}/{manual.id}/{date_token}/{uuid.uuid4().hex}_{filename}",
                 content_type=mime_type,
             )
