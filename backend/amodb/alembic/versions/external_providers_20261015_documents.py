@@ -102,6 +102,57 @@ def upgrade():
     )
     op.create_index("ix_ext_form_ack_tenant_req",
                     "external_provider_form_acknowledgements",["amo_id","requirement_id","occurred_at"])
+    op.create_table("external_provider_upload_sessions",
+        sa.Column("id",sa.String(36),primary_key=True),
+        sa.Column("amo_id",sa.String(36),sa.ForeignKey("amos.id",ondelete="RESTRICT"),nullable=False),
+        sa.Column("tenant_provider_id",sa.String(36),nullable=False),
+        sa.Column("identity_id",sa.String(36),sa.ForeignKey("external_identities.id",ondelete="RESTRICT"),nullable=False),
+        sa.Column("requirement_id",sa.String(36),nullable=False),
+        sa.Column("related_kind",sa.String(32),nullable=False),
+        sa.Column("related_id",sa.String(64)),
+        sa.Column("supersedes_submission_id",sa.String(36)),
+        sa.Column("filename",sa.String(255),nullable=False),
+        sa.Column("content_type",sa.String(128),nullable=False),
+        sa.Column("size_bytes",sa.BigInteger(),nullable=False),
+        sa.Column("sha256",sa.String(64),nullable=False),
+        sa.Column("valid_until",sa.Date()),
+        sa.Column("retry_key",sa.String(64),nullable=False),
+        sa.Column("state",sa.String(16),nullable=False,server_default="OPEN"),
+        sa.Column("completed_submission_id",sa.String(36),sa.ForeignKey("external_partner_evidence_submissions.id",ondelete="RESTRICT")),
+        sa.Column("created_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.Column("updated_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["amo_id","tenant_provider_id"],
+            ["external_tenant_providers.amo_id","external_tenant_providers.id"],ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id","requirement_id"],
+            ["external_provider_document_requirements.amo_id","external_provider_document_requirements.id"],ondelete="RESTRICT"),
+        sa.UniqueConstraint("amo_id","tenant_provider_id","identity_id","retry_key",
+            name="uq_ext_upload_retry_per_member"),
+        sa.UniqueConstraint("amo_id","tenant_provider_id","id",
+            name="uq_ext_upload_session_provider"),
+        sa.CheckConstraint("state IN ('OPEN','COMPLETED','EXPIRED')",name="ck_ext_upload_state"),
+        sa.CheckConstraint("size_bytes BETWEEN 1 AND 536870912",name="ck_ext_upload_max_size"),
+    )
+    op.create_table("external_provider_upload_parts",
+        sa.Column("id",sa.String(36),primary_key=True),
+        sa.Column("amo_id",sa.String(36),nullable=False),
+        sa.Column("tenant_provider_id",sa.String(36),nullable=False),
+        sa.Column("session_id",sa.String(36),nullable=False),
+        sa.Column("part_number",sa.Integer(),nullable=False),
+        sa.Column("object_uri",sa.Text(),nullable=False),
+        sa.Column("size_bytes",sa.Integer(),nullable=False),
+        sa.Column("sha256",sa.String(64),nullable=False),
+        sa.Column("created_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["amo_id","tenant_provider_id","session_id"],
+            ["external_provider_upload_sessions.amo_id","external_provider_upload_sessions.tenant_provider_id",
+             "external_provider_upload_sessions.id"],ondelete="RESTRICT"),
+        sa.UniqueConstraint("session_id","part_number",name="uq_ext_upload_part_index"),
+        sa.CheckConstraint("part_number BETWEEN 0 AND 63",name="ck_ext_upload_part_index"),
+        sa.CheckConstraint("size_bytes BETWEEN 1 AND 8388608",name="ck_ext_upload_chunk_size"),
+    )
+    op.create_index("ix_ext_upload_sessions_expiry","external_provider_upload_sessions",
+                    ["amo_id","state","created_at"])
+    op.create_index("ix_ext_upload_parts_session","external_provider_upload_parts",
+                    ["amo_id","session_id","part_number"])
     # Commercial lifecycle remains in existing QMS contract table.
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
         batch.add_column(sa.Column("counterparties_json", sa.JSON()))
@@ -116,13 +167,15 @@ def upgrade():
                                  ["amo_id","supplier_id","id"], ondelete="RESTRICT")
     if op.get_bind().dialect.name == "postgresql":
         for table in ("external_provider_document_requirements", "external_provider_document_events",
-                      "external_provider_form_acknowledgements"):
+                      "external_provider_form_acknowledgements",
+                      "external_provider_upload_sessions","external_provider_upload_parts"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY'))
             provider_clause = (""" AND (
                 tenant_provider_id = NULLIF(current_setting('app.external_provider_id',true),'')
                 OR current_setting('app.external_provider_id',true) = '__INTERNAL_QUALITY_REVIEW__'
-            )""" if table == "external_provider_form_acknowledgements" else "")
+            )""" if table in {"external_provider_form_acknowledgements",
+                                "external_provider_upload_sessions","external_provider_upload_parts"} else "")
             op.execute(sa.text(f"""CREATE POLICY "{table}_tenant" ON "{table}"
               USING (amo_id = NULLIF(current_setting('app.tenant_id',true), ''){provider_clause})
               WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id',true), ''){provider_clause})"""))
@@ -147,6 +200,10 @@ def downgrade():
         op.execute("DROP TRIGGER IF EXISTS ext_form_ack_immutable ON external_provider_form_acknowledgements")
         op.execute("DROP TRIGGER IF EXISTS ext_document_events_immutable ON external_provider_document_events")
         op.execute("DROP FUNCTION IF EXISTS external_document_events_append_only()")
+    op.drop_index("ix_ext_upload_parts_session",table_name="external_provider_upload_parts")
+    op.drop_table("external_provider_upload_parts")
+    op.drop_index("ix_ext_upload_sessions_expiry",table_name="external_provider_upload_sessions")
+    op.drop_table("external_provider_upload_sessions")
     op.drop_index("ix_ext_form_ack_tenant_req",table_name="external_provider_form_acknowledgements")
     op.drop_table("external_provider_form_acknowledgements")
     with op.batch_alter_table("quality_external_provider_contracts") as batch:
