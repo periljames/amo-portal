@@ -111,18 +111,6 @@ def _history(db,ctx,kind,id):
       WHERE amo_id=:amo AND supplier_id=:supplier AND entity_type=:kind AND entity_id=:id
       ORDER BY created_at,id""",amo=ctx["amo"],supplier=ctx["supplier"],kind=kind,id=str(id))
 
-def _notify_internal(db,ctx,kind,entity,action):
-    # Existing notification register; never leak internal recipient identities externally.
-    db.execute(text("""INSERT INTO external_partner_notifications
-       (id,amo_id,tenant_provider_id,identity_id,category,title,message,resource_kind,resource_id)
-       SELECT :id,g.amo_id,p.id,g.identity_id,'PROCUREMENT',:title,:message,:kind,:resource
-       FROM external_tenant_providers p
-       JOIN external_tenant_grants g ON g.amo_id=p.amo_id AND g.tenant_provider_id=p.id
-       WHERE p.amo_id=:amo AND p.supplier_id=:supplier AND g.status='ACTIVE'
-       LIMIT 1"""),{"id":str(uuid4()),"amo":ctx["amo"],"supplier":ctx["supplier"],
-       "title":"Procurement transaction updated","message":action,
-       "kind":kind,"resource":str(entity)})
-
 class Ack(BaseModel):
     reference: str | None = Field(default=None,max_length=128)
     note: str = Field(default="",max_length=2000)
@@ -256,16 +244,16 @@ def submit_quote(tenant_slug:str,rfq_id:int,payload:QuoteSubmit,request:Request,
         if not original:raise HTTPException(422,"Quote line is not part of this invitation")
         if line.uom.strip().upper()!=str(original["uom"]).upper():
             raise HTTPException(422,"Quoted unit must match the invited line; request clarification")
-        if line.part_number!=original["part_number"] and not original["alternates_allowed"]:
+        if (line.part_number or None)!=(original["part_number"] or None) and not original["alternates_allowed"]:
             raise HTTPException(409,"An alternate requires prior technical authorization")
         if line.quantity>float(original["quantity"])*10:
             raise HTTPException(422,"Unreasonable quantity: request clarification")
         if line.available_quantity>line.quantity:
             raise HTTPException(422,"Available quantity cannot exceed quoted quantity")
-        alternate=bool(line.alternate_proposal or line.part_number!=original["part_number"])
+        alternate=bool(line.alternate_proposal or (line.part_number or None)!=(original["part_number"] or None))
         types.add("PART" if original["part_number"] else "SERVICE")
         canonical.append(schemas.QuoteLineCreate(requisition_line_id=line.requisition_line_id,
-           supplier_part_number=line.part_number,manufacturer=line.manufacturer,
+           supplier_part_number=line.part_number or None,manufacturer=line.manufacturer,
            quantity=line.quantity,uom=line.uom,unit_price=line.unit_price,
            promised_date=line.promised_date,traceability_statement=line.traceability_statement,
            is_technically_compliant=not alternate,deviation=line.alternate_proposal))
@@ -469,7 +457,7 @@ def advise_shipment(tenant_slug:str,po_id:int,payload:Shipment,request:Request,d
     for item in payload.lines:
         source=lines.get(item.po_line_id)
         if not source:raise HTTPException(422,"Shipment line not on issued PO")
-        if item.part_number!=source["part_number"]:
+        if (item.part_number or None)!=(source["part_number"] or None):
             raise HTTPException(409,"Unapproved alternate part: request technical approval before shipment")
         if item.quantity>float(source["quantity"])-float(source["received_quantity"] or 0):
             raise HTTPException(409,"Shipment exceeds outstanding PO quantity")
@@ -550,7 +538,7 @@ def staff_inbox(amo_code:str,db:Session=Depends(get_db),
         "boundary":"No provider action authorizes award, PO, Stores receiving, Quality release or Finance payment"}
 
 class StaffDecision(BaseModel):
-    action: str = Field(pattern="^(REPLY|ACCEPT_DATE_PROPOSAL|REJECT_PROPOSAL|ACKNOWLEDGE|TECHNICAL_ALTERNATE_REVIEW)$")
+    action: str = Field(pattern="^(REPLY|ACCEPT_DATE_PROPOSAL|REJECT_PROPOSAL|ACKNOWLEDGE|REFER_ALTERNATE_TO_TECHNICAL)$")
     message: str = Field(min_length=8,max_length=3000)
     proposal_event_id: str | None = Field(default=None,max_length=36)
     idempotency_key: str = Field(min_length=12,max_length=80)
@@ -741,9 +729,6 @@ def import_governed_supplier_document(amo_code:str,submission_id:str,
         entity_type=(document_models.ProcurementDocumentEntityType.RFQ if kind=="RFQ"
             else document_models.ProcurementDocumentEntityType.PURCHASE_ORDER)
         entity_id=stage["related_id"]
-    canonical = ("procurement_rfqs" if entity_type==document_models.ProcurementDocumentEntityType.RFQ
-             else "procurement_purchase_orders")
-    extra = (" AND supplier_id=:supplier" if kind!="RFQ" else "")
     if kind=="RFQ":
         eligible=_row(db,"""SELECT r.id FROM procurement_rfqs r JOIN procurement_rfq_suppliers i
            ON i.rfq_id=r.id WHERE r.amo_id=:amo AND i.supplier_id=:supplier
@@ -768,7 +753,9 @@ def import_governed_supplier_document(amo_code:str,submission_id:str,
         original_filename=stage["filename"],stored_path=stage["dms_path"],
         mime_type=stage["content_type"],size_bytes=stage["size_bytes"],
         sha256=stage["sha256"],external_reference=submission_id,
-        dms_document_id=stage["dms_manual_id"],dms_revision_id=stage["dms_revision_id"],
+        # Staging originals are governed DMS *evidence assets*, not published manual
+        # revisions. Never represent their containing revision as the original.
+        dms_document_id=None,dms_revision_id=None,
         is_quality_evidence=quality_type,
         verification_status=(document_models.ProcurementDocumentVerificationStatus.PENDING
             if quality_type else document_models.ProcurementDocumentVerificationStatus.NOT_REQUIRED),
