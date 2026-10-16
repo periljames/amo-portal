@@ -61,7 +61,7 @@ function activeLocation(pathname: string): string {
 
 export function ReliabilityModuleShell({ children }: { children: React.ReactNode }): React.ReactElement {
   const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const base = `/maintenance/${encodeURIComponent(amoCode)}/reliability`;
   const active = activeLocation(pathname);
   const [compact, setCompact] = useState(false);
@@ -80,7 +80,7 @@ export function ReliabilityModuleShell({ children }: { children: React.ReactNode
           {RELIABILITY_GROUPS.map((group) => <section className="rel-shell__group" key={group.label}>
             <h2>{group.label}</h2>
             {group.items.map((item) => <NavLink
-              key={item.path} to={item.path ? `${base}/${item.path}` : base}
+              key={item.path} to={(item.path ? base + "/" + item.path : base) + (pathname.includes("/reliability/analytics/") && item.path.startsWith("analytics/") ? search : "")}
               end={item.path === ""}
               className={({ isActive }) => `rel-shell__link ${isActive || active === item.path ? "is-active" : ""}`}
               title={item.description || item.label}
