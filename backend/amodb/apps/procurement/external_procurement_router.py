@@ -228,6 +228,12 @@ def acknowledge_rfq(tenant_slug:str,rfq_id:int,payload:Ack,request:Request,db:Se
 def submit_quote(tenant_slug:str,rfq_id:int,payload:QuoteSubmit,request:Request,db:Session=Depends(get_db)):
     user,ctx=_session(db,request,tenant_slug,True)
     rfq=_rfq(db,ctx,rfq_id,True)
+    # Serialize submissions and revisions for this RFQ before reading the latest
+    # supplier revision. Locking only an existing quote cannot protect revision 1.
+    db.execute(text("""SELECT id FROM procurement_rfqs
+        WHERE amo_id=:amo AND id=:rfq FOR UPDATE"""),
+        {"amo":ctx["amo"],"rfq":rfq_id})
+    rfq=_rfq(db,ctx,rfq_id,True)
     existing=_row(db,"""SELECT id,entity_id FROM external_procurement_events
        WHERE amo_id=:amo AND supplier_id=:supplier AND idempotency_key=:key""",
        amo=ctx["amo"],supplier=ctx["supplier"],key=payload.idempotency_key)
