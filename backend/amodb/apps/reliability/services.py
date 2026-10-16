@@ -501,6 +501,7 @@ def list_alerts(
     *,
     amo_id: str,
     alert_status: Optional[models.ReliabilityAlertStatusEnum] = None,
+    query_text: str | None = None,
     sort_key: str | None = None,
     sort_dir: str = "desc",
     severity: Optional[models.ReliabilitySeverityEnum] = None,
@@ -508,6 +509,13 @@ def list_alerts(
     offset: int = 0,
 ) -> Sequence[models.ReliabilityAlert]:
     query = db.query(models.ReliabilityAlert).filter(models.ReliabilityAlert.amo_id == amo_id)
+    if query_text and query_text.strip():
+        escaped = query_text.strip()[:120].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        query = query.filter(or_(
+            models.ReliabilityAlert.alert_code.ilike(pattern, escape="\\"),
+            models.ReliabilityAlert.message.ilike(pattern, escape="\\"),
+        ))
     if alert_status is not None:
         query = query.filter(models.ReliabilityAlert.status == alert_status)
     if severity is not None:
@@ -680,6 +688,7 @@ def list_fracas_cases(
     *,
     amo_id: str,
     case_status: Optional[models.FRACASStatusEnum] = None,
+    query_text: str | None = None,
     sort_key: str | None = None,
     sort_dir: str = "desc",
     severity: Optional[models.ReliabilitySeverityEnum] = None,
@@ -687,6 +696,15 @@ def list_fracas_cases(
     offset: int = 0,
 ) -> Sequence[models.FRACASCase]:
     query = db.query(models.FRACASCase).filter(models.FRACASCase.amo_id == amo_id)
+    if query_text and query_text.strip():
+        escaped = query_text.strip()[:120].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        query = query.filter(or_(
+            models.FRACASCase.title.ilike(pattern, escape="\\"),
+            models.FRACASCase.description.ilike(pattern, escape="\\"),
+            models.FRACASCase.classification.ilike(pattern, escape="\\"),
+            models.FRACASCase.aircraft_serial_number.ilike(pattern, escape="\\"),
+        ))
     if case_status is not None:
         query = query.filter(models.FRACASCase.status == case_status)
     if severity is not None:
@@ -1197,12 +1215,21 @@ def list_engine_trend_statuses(
     *,
     amo_id: str,
     current_status: Optional[models.EngineTrendStatusEnum] = None,
+    query_text: str | None = None,
     sort_key: str | None = None,
     sort_dir: str = "desc",
     limit: int = 100,
     offset: int = 0,
 ) -> Sequence[models.EngineTrendStatus]:
     query = db.query(models.EngineTrendStatus).filter(models.EngineTrendStatus.amo_id == amo_id)
+    if query_text and query_text.strip():
+        escaped = query_text.strip()[:120].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        query = query.filter(or_(
+            models.EngineTrendStatus.aircraft_serial_number.ilike(pattern, escape="\\"),
+            models.EngineTrendStatus.engine_serial_number.ilike(pattern, escape="\\"),
+            models.EngineTrendStatus.engine_position.ilike(pattern, escape="\\"),
+        ))
     if current_status is not None:
         query = query.filter(models.EngineTrendStatus.current_status == current_status)
     return (
