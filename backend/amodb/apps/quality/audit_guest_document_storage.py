@@ -63,6 +63,7 @@ async def store_guest_document(
     amo_id: str,
     audit_id: str,
     request_id: str,
+    db=None,
 ) -> StoredAuditGuestDocument:
     filename = safe_filename(upload.filename)
     suffix = Path(filename).suffix.lower()
@@ -104,8 +105,14 @@ async def store_guest_document(
     reference = relative.as_posix()
     if use_shared_storage:
         try:
-            stored = shared_storage.put_file(
-                destination, key=f"qms-audit-guest-documents/{reference}", content_type=upload.content_type,
+            if db is None:
+                raise HTTPException(status_code=503, detail="Storage accounting context is required for shared evidence")
+            from amodb.apps.platform import storage_quota_upload
+            stored = storage_quota_upload.put_local_file(
+                db, tenant_id=str(amo_id), actor_id=None,
+                path=destination,
+                key=f"qms-audit-guest-documents/{reference}",
+                content_type=upload.content_type,
             )
             if int(stored.size_bytes) != total:
                 raise IOError("Shared storage size did not match uploaded evidence")
