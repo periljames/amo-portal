@@ -222,6 +222,11 @@ def _eligibility(db,work):
         if work["site_code"] not in (sites["approved_sites_json"] or []):
             raise HTTPException(409,"Contract does not approve this contracted maintenance location")
         req=work["requirements_json"] or {}
+        if work["function"].casefold() not in str(sites["scope_text"] or "").casefold() and not req.get("contract_function_approval_reference"):
+            raise HTTPException(409,"Written maintenance agreement does not identify the contracted function; Quality review of a specific function reference is required")
+        if scope["product_family"] not in ("ALL","*"):
+            if not req.get("product_family") or str(req["product_family"]).casefold()!=str(scope["product_family"]).casefold():
+                raise HTTPException(409,"Technical asset/product family is not covered by this approved contractor capability")
         if req.get("data_manual_id"):
             current=_one(db,"""SELECT r.id FROM manuals m
                 JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=:amo
@@ -448,10 +453,13 @@ def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
     amo=_staff(db,amo_code,user)
     if _role(user)!=MANAGERS[payload.work_type]:
         raise HTTPException(403,"The appointed Maintenance Manager for this work type must initiate contracted work")
-    if str(user.id)!=payload.technical_coordinator_id and not _one(db,
-        "SELECT id FROM users WHERE id=:id AND amo_id=:amo AND is_active=TRUE",
-        id=payload.technical_coordinator_id,amo=amo):
-        raise HTTPException(422,"Technical coordinator must be an active employee of this AMO")
+    coordinator=_one(db,"""SELECT id,CAST(role AS TEXT) AS role FROM users
+        WHERE id=:id AND amo_id=:amo AND is_active=TRUE""",
+        id=payload.technical_coordinator_id,amo=amo)
+    if not coordinator or coordinator["role"] not in {
+        *MANAGERS.values(),"PLANNING_ENGINEER","PRODUCTION_ENGINEER","MAINTENANCE_SUPERVISOR",
+        "CERTIFYING_ENGINEER"}:
+        raise HTTPException(422,"Designated coordinator must be an active authorized maintenance employee of this AMO")
     provider=_one(db,"""SELECT id FROM external_tenant_providers
        WHERE amo_id=:amo AND supplier_id=:supplier AND id=:provider""",
        amo=amo,supplier=payload.supplier_id,provider=payload.provider_id)
@@ -646,6 +654,8 @@ def download_work_data(tenant_slug:str,work_id:str,request:Request,db:Session=De
     if work["status"] in {"DRAFT","TECHNICAL_SCOPE_REVIEW","QUALIFICATION_AGREEMENT_CHECK",
                           "AWAITING_AUTHORIZATION","CANCELLED"}:
         raise HTTPException(403,"Technical data cannot be released before authorization")
+    if work["status"] not in {"CLOSED"}:
+        _eligibility(db,work)
     req=work["requirements_json"] or {}
     manual_id,revision_id=req.get("data_manual_id"),req.get("data_revision_id")
     if not manual_id or not revision_id:
