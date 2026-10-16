@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 
 import { listFormalProfiles, listFormalReports, type FormalPeriodType, type FormalProfile, type FormalReport } from "./reliabilityFormalReportingApi";
 import {
@@ -55,6 +56,11 @@ function tone(status: string): string {
 }
 
 const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const base = "/maintenance/" + encodeURIComponent(amoCode) + "/reliability";
+  const route = location.pathname.split("/reliability/")[1]?.split("/")[0] || "formal-reports";
+  const section = route === "programme-reports" ? "amp" : route === "report-distribution" ? "distribution" : "obligations";
   const defaults = useMemo(initialPeriod, []);
   const [profiles, setProfiles] = useState<FormalProfile[]>([]);
   const [reports, setReports] = useState<FormalReport[]>([]);
@@ -249,9 +255,15 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
         <button type="button" onClick={() => void perform("Governance registers refreshed.", () => loadAll())} disabled={busy}>Refresh registers</button>
       </header>
 
+      <nav className="rfg-workspace-nav" aria-label="Reporting governance workspaces">
+        {[["formal-reports", "Reporting obligations"], ["programme-reports", "AMP recommendations"],
+          ["report-distribution", "Publication & distribution"]].map(([path, title]) => <NavLink
+          key={path} to={base + "/" + path} className={route === path ? "is-active" : ""}>
+          {title}</NavLink>)}
+      </nav>
       {(error || message) && <div className={`rfg-banner ${error ? "error" : "success"}`} role={error ? "alert" : "status"}>{error || message}</div>}
 
-      <section className="rfg-panel" aria-labelledby="rfg-schedule-title">
+      {section === "obligations" && <section className="rfg-panel" aria-labelledby="rfg-schedule-title">
         <div className="rfg-panel-head"><div><p className="rfg-eyebrow">Calendar</p><h2 id="rfg-schedule-title">Reporting obligations</h2></div><span>{schedule.length}</span></div>
         <form className="rfg-form rfg-form--schedule" onSubmit={onCreateSchedule}>
           <label>Profile<select value={scheduleProfile} onChange={(event) => setScheduleProfile(event.target.value)} disabled={busy}>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.code} · {profile.version}</option>)}</select></label>
@@ -267,9 +279,9 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
           {schedule.map((row) => <tr key={row.id}><td><strong>{row.obligation_code}</strong><small>{row.name}</small></td><td>{row.period_start}<br />{row.period_end}</td><td>{row.due_date}</td><td><span className={`rfg-chip ${tone(row.effective_status)}`}>{row.effective_status}</span></td><td>{row.report_id || "—"}</td><td><select aria-label={`Status for ${row.obligation_code}`} value={row.status} onChange={(event) => void onScheduleStatus(row, event.target.value as ReportingScheduleStatus)} disabled={busy}>{SCHEDULE_STATES.map((state) => <option key={state}>{state}</option>)}</select></td></tr>)}
           {schedule.length === 0 && <tr><td colSpan={6}>No reporting obligations configured.</td></tr>}
         </tbody></table></div>
-      </section>
+      </section>}
 
-      <section className="rfg-panel" aria-labelledby="rfg-amp-title">
+      {section === "amp" && <section className="rfg-panel" aria-labelledby="rfg-amp-title">
         <div className="rfg-panel-head"><div><p className="rfg-eyebrow">Maintenance programme</p><h2 id="rfg-amp-title">AMP recommendations</h2></div><span>{amp.length}</span></div>
         <form className="rfg-form" onSubmit={onCreateAmp}>
           <label>Source report<select value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)}><option value="">Unlinked recommendation</option>{reports.map((item) => <option key={item.id} value={item.id}>{item.report_number} · Rev {item.revision} · {item.status}</option>)}</select></label>
@@ -286,9 +298,9 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
           const index = AMP_FLOW.indexOf(row.status); const next = AMP_FLOW[index + 1];
           return <article key={row.id} className="rfg-card"><div><strong>{row.title}</strong><span className={`rfg-chip ${tone(row.status)}`}>{row.status}</span></div><p>{row.summary}</p><small>{row.change_type}{row.authority_approval_required ? " · authority approval flagged" : ""}</small>{next && <button type="button" onClick={() => void advanceAmp(row)} disabled={busy}>Advance to {next.replaceAll("_", " ")}</button>}</article>;
         })}{amp.length === 0 && <p>No AMP recommendations recorded.</p>}</div>
-      </section>
+      </section>}
 
-      <section className="rfg-panel" aria-labelledby="rfg-publication-title">
+      {section === "distribution" && <section className="rfg-panel" aria-labelledby="rfg-publication-title">
         <div className="rfg-panel-head"><div><p className="rfg-eyebrow">Controlled copies</p><h2 id="rfg-publication-title">Publication chain & distribution</h2></div></div>
         <div className="rfg-publication-grid">
           <div>
@@ -306,7 +318,7 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
             <div className="rfg-distribution">{distribution.map((row) => <div key={row.id}><strong>{row.recipient_role || row.external_recipient_ref || (row.recipient_user_id ? "Selected person" : "") || "Controlled recipient"}</strong><span>Rev {row.revision} · {new Date(row.distributed_at).toLocaleString()}</span><small>{row.report_hash.slice(0, 16)}…</small></div>)}{selectedReportId && distribution.length === 0 && <p>No distribution records for this revision.</p>}</div>
           </div>
         </div>
-      </section>
+      </section>}
     </main>
   );
 };
