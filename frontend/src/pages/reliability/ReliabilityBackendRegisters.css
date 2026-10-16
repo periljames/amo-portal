@@ -25,3 +25,8 @@
 .rel-backend-register__empty,.rel-backend-register__loading{padding:1rem;opacity:.8}
 @media(max-width:650px){.rel-backend-register__tools form{flex-wrap:wrap}.rel-backend-register__tools>button{flex:1}.rel-backend-register__viewport{min-height:270px;max-height:65dvh}}
 @media print {.rel-backend-register__tools,.rel-backend-register__pager {display:none}.rel-backend-register__viewport{max-height:none;overflow:visible}}
+
+.rel-backend-register__sort {border:0!important;background:transparent!important;box-shadow:none;min-height:32px!important;padding:0!important;cursor:pointer;color:inherit;font:inherit;font-weight:700;white-space:nowrap;text-align:left}
+.rel-backend-register__sort:hover {color:#0f766e}
+.rel-backend-register__sort:focus-visible {outline:2px solid #0f766e;outline-offset:3px}
+.rel-backend-register__sort:disabled {cursor:wait;opacity:.6}
