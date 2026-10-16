@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page,type ProcurementPage} from "./partnerApi";
 import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import PartnerProcurementWorkspace from "./PartnerProcurementWorkspace";
 
 function Contracts({tenant,csrf,capabilities}:PartnerProps){
   const [search,setSearch]=useState("");const [offset,setOffset]=useState(0);
@@ -130,6 +131,6 @@ function WorkPreview({tenant}:PartnerProps){
 }
 export default function PartnerCommerce(props:PartnerProps&{section:"contracts"|"procurement"|"work"}){
   if(props.section==="contracts")return <Contracts {...props}/>;
-  if(props.section==="procurement")return <Procurement {...props}/>;
+  if(props.section==="procurement")return <PartnerProcurementWorkspace {...props}/>;
   return <WorkPreview {...props}/>;
 }
