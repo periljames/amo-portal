@@ -38,13 +38,15 @@ function filtersFromUrl(): DashboardFilters {
   const defaults = defaultFilters();
   const search = new URLSearchParams(window.location.search);
   const result = { ...defaults };
-  const fields: Array<[keyof DashboardFilters, string]> = [
-    ["periodStart", "period_start"], ["periodEnd", "period_end"], ["bucket", "bucket"],
+  const fields: Array<[Exclude<keyof DashboardFilters, "bucket">, string]> = [
+    ["periodStart", "period_start"], ["periodEnd", "period_end"],
     ["aircraft", "aircraft"], ["aircraftType", "aircraft_types"], ["ataChapter", "ata_chapters"],
     ["station", "stations"], ["eventType", "event_types"], ["severity", "severities"],
     ["sourceSystem", "source_systems"],
   ];
   fields.forEach(([name, key]) => { if (search.has(key)) result[name] = search.get(key) || ""; });
+  const bucket = search.get("bucket");
+  if (bucket === "AUTO" || bucket === "DAY" || bucket === "WEEK" || bucket === "MONTH") result.bucket = bucket;
   return result.periodStart <= result.periodEnd ? result : defaults;
 }
 
