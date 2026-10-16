@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import {
   getFracasCase,
   getReliabilityAlert,
@@ -153,8 +152,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
   }, [loadKey, route.entityId, route.view]);
 
   return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-      <main className="reliability-v2">
+    <main className="reliability-v2">
         <header className="reliability-v2__header">
           <div>
             <p className="reliability-v2__eyebrow">Continuing-airworthiness intelligence</p>
@@ -183,8 +181,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
           fracasCase,
           actions,
         })}
-      </main>
-    </DepartmentLayout>
+    </main>
   );
 };
 
