@@ -114,3 +114,39 @@ def test_allocation_cannot_shrink_below_active_usage(storage_db):
     with pytest.raises(ValueError, match="cannot fall below"):
         quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=49,
                        actor_id=None, reason="Downgrade")
+
+
+def test_finalized_upload_replay_returns_receipt_without_rewriting_object(storage_db):
+    from amodb.apps.platform import storage_quota_upload
+    from fastapi import HTTPException
+
+    quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100,
+                   actor_id=None, reason="Contract")
+    reservation = quota.reserve(storage_db, tenant_id="tenant-1",
+                                object_key="uploads/immutable.pdf",
+                                size_bytes=5, idempotency_key="same-operation")
+    digest = hashlib.sha256(b"first").hexdigest()
+    quota.finalize(storage_db, tenant_id="tenant-1",
+                   reservation_id=reservation.id,
+                   storage_uri="s3://test/uploads/immutable.pdf",
+                   checksum_sha256=digest)
+    storage_db.commit()
+
+    same_operation = quota.reserve(storage_db, tenant_id="tenant-1",
+                                   object_key="uploads/immutable.pdf",
+                                   size_bytes=5, idempotency_key="same-operation")
+    retained = storage_quota_upload._finalized_replay(
+        storage_db, same_operation, digest=digest,
+    )
+    assert retained.uri == "s3://test/uploads/immutable.pdf"
+    assert retained.size_bytes == 5
+    assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 5
+
+    # A retry with the same operation id but different bytes is not allowed
+    # to overwrite the object already committed to the ledger.
+    with pytest.raises(HTTPException) as exc:
+        storage_quota_upload._finalized_replay(
+            storage_db, same_operation, digest=hashlib.sha256(b"other").hexdigest(),
+        )
+    assert exc.value.status_code == 409
+    assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 5
