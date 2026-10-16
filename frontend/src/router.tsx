@@ -15,6 +15,7 @@ const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
+const ContractedWorkModule = lazy(() => import("./pages/maintenance/ContractedWorkModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -277,6 +278,7 @@ export const AppRouter: React.FC = () => {
     qmsRoute.kind === "unknown" &&
     !isSupportedDocumentReaderPath(location.pathname)
   ) return <QmsNotFoundRouteSurface />;
+  if (/^\\/maintenance\\/[^/]+\\/contracted-work(?:\\/|$)/.test(location.pathname)) return <Suspense fallback={<div className="page-loading" role="status">Loading contracted maintenance…</div>}><WorkspaceRequireAuth><ContractedWorkModule /></WorkspaceRequireAuth></Suspense>;
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;
