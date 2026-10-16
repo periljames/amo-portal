@@ -454,7 +454,7 @@ async def upload_part(tenant_slug:str,session_id:str,part_number:int,request:Req
                       db:Session=Depends(get_db)):
     user=partner._ctx(db,request,tenant_slug,cap="document.submit",write=True)
     ctx=partner._context(user)
-    session=_upload_session(db,ctx,session_id)
+    session=_upload_session(db,ctx,session_id,lock=True)
     if session["state"]!="OPEN":
         raise HTTPException(409,"Upload session no longer accepts parts")
     max_index=(session["size_bytes"]-1)//PART_BYTES
