@@ -167,7 +167,7 @@ def seed() -> None:
         )
         db.add(ci_license)
         db.flush()
-        for key in ("aerodoc_hybrid_dms", "doc_control"):
+        for key in ("aerodoc_hybrid_dms", "doc_control", "documents"):
             db.add(account_models.LicenseEntitlement(
                 license_id=ci_license.id, key=key, is_unlimited=True,
                 description="CI-only governed document-control access",
