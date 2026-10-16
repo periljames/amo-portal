@@ -422,7 +422,7 @@ def generate_archive_manifest_with_package(
                 source_system=item["source_system"],
                 content_hash=item["content_hash"],
                 retention_role=item["retention_role"],
-                metadata_json=item["metadata"],
+                metadata_json=jsonable_encoder(item["metadata"]),
             ))
         db.commit()
     except Exception:
