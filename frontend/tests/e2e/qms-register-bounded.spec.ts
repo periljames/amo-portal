@@ -105,7 +105,10 @@ function futureToken(): string {
 }
 
 function seedSession(storedToken: string) {
-  localStorage.setItem("amo_portal_token", storedToken);
+  // Runtime access tokens are session-scoped, not localStorage credentials.
+  // Keep the stubbed browser session consistent with the real auth contract.
+  sessionStorage.setItem("amo_portal_token", storedToken);
+  localStorage.removeItem("amo_portal_token");
   localStorage.setItem("amo_code", "demo");
   localStorage.setItem("amo_slug", "demo");
   localStorage.setItem("amo_department", "quality");
