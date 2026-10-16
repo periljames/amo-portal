@@ -213,6 +213,23 @@ def assert_quote_award_allowed(db: Session, *, amo_id: str, quote_id: int) -> No
     if not quote:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote was not found.")
 
+    # Supplier revisions and withdrawal stay visible in the canonical register,
+    # but an obsolete or withdrawn external quote cannot be awarded.
+    if inspect(db.get_bind()).has_table("external_procurement_quotes"):
+        _set_provider_tenant_context(db, amo_id=amo_id)
+        ext = db.execute(text("""SELECT status FROM external_procurement_quotes
+          WHERE amo_id=:amo AND supplier_id=:supplier AND canonical_quote_id=:quote"""),
+          {"amo":amo_id,"supplier":quote.supplier_id,"quote":quote_id}).mappings().first()
+        if ext and ext["status"]!="SUBMITTED":
+            raise HTTPException(status_code=409,
+                detail="Withdrawn or superseded external quotation cannot be awarded")
+        if ext and (quote.valid_until is None or quote.valid_until<date.today()):
+            raise HTTPException(status_code=409,
+                detail="External quotation validity has expired; obtain a current controlled revision")
+        if ext and any(not line.is_technically_compliant for line in quote.lines):
+            raise HTTPException(status_code=409,
+                detail="Proposed alternate/deviation needs an approved technical decision before award")
+
     requisition = quote.rfq.requisition if quote.rfq else None
     categories = {
         str(line.item_type or ("PART" if line.part_number else "SERVICE")).strip().upper()
