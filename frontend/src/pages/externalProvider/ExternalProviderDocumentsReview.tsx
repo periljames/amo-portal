@@ -39,6 +39,7 @@ type Submission={id:string;filename:string;status:string;evidence_type:string;
   legal_name:string;supplier_id:number;email:string;sha256:string;size_bytes:number;
   valid_until:string|null;form_revision_id:string|null;dms_revision_id:string|null;
   qms_evidence_id:string|null;review_note:string|null;created_at:string;
+  dms_evidence_asset_id:string|null;dms_retention_id:string|null;
   dms_retention_status:string|null;dms_legal_hold:boolean|null;dms_retention_until:string|null};
 type DmsOption={id:string;code:string;title:string;revision_id:string;rev_number:string};
 type Decision="ACCEPTED"|"RETURNED"|"REJECTED";
@@ -60,13 +61,22 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
   const [busy,setBusy]=useState("");
   const [error,setError]=useState("");const [notice,setNotice]=useState("");
   const [offset,setOffset]=useState(0);
+  const [canRegisterDms,setCanRegisterDms]=useState(false);
+  const [retentionManual,setRetentionManual]=useState("");
+  const [retentionClass,setRetentionClass]=useState("");
+  const [retentionUntil,setRetentionUntil]=useState("");
+  const [retentionReason,setRetentionReason]=useState("");
+  const [history,setHistory]=useState<Record<string,{action:string;occurred_at:string;details_json:unknown;actor_user_id:string|null}[]>>({});
+  const [historyOpen,setHistoryOpen]=useState("");
   const refresh=useCallback(async()=>{
-    const [policies,queue,docs]=await Promise.all([
+    const [policies,queue,docs,permissions]=await Promise.all([
       apiRequest<{items:Requirement[]}>(`${path}/requirements`,{cacheTtlMs:0}),
       apiRequest<{items:Submission[]}>(`${path}/submissions?limit=25&offset=${offset}`,{cacheTtlMs:0}),
       apiRequest<{items:DmsOption[]}>(`${path}/dms-options?limit=50`,{cacheTtlMs:0}),
+      apiRequest<{document_controller:boolean}>(`${path}/permissions`,{cacheTtlMs:0}),
     ]);
     setRequirements(policies.items);setSubmissions(queue.items);setDms(docs.items);
+    setCanRegisterDms(permissions.document_controller);
   },[path,offset]);
   useEffect(()=>{void refresh().catch(e=>setError(errorText(e)));},[refresh]);
   function loadRequirement(r:Requirement){
@@ -119,6 +129,31 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       const a=document.createElement("a");a.href=url;a.download=row.filename;
       document.body.appendChild(a);a.click();a.remove();
       window.setTimeout(()=>URL.revokeObjectURL(url),2000);
+    }catch(e){setError(errorText(e));}finally{setBusy("");}
+  }
+  async function loadHistory(row:Submission){
+    if(historyOpen===row.id){setHistoryOpen("");return;}
+    setBusy(row.id);setError("");
+    try{
+      const response=await apiRequest<{items:{action:string;occurred_at:string;details_json:unknown;actor_user_id:string|null}[]}>(
+        `${path}/submissions/${encodeURIComponent(row.id)}/history`,{cacheTtlMs:0});
+      setHistory(v=>({...v,[row.id]:response.items}));setHistoryOpen(row.id);
+    }catch(e){setError(errorText(e));}finally{setBusy("");}
+  }
+  async function registerDms(row:Submission){
+    if(!retentionManual||!retentionClass.trim()||retentionReason.trim().length<8){
+      setError("Choose a DMS manual, an approved retention class and a reason of at least 8 characters.");return;
+    }
+    setBusy(row.id);setError("");setNotice("");
+    try{
+      await apiRequest(`${path}/submissions/${encodeURIComponent(row.id)}/register-dms`,{
+        method:"POST",body:JSON.stringify({manual_id:retentionManual,
+          retention_class:retentionClass.trim().toUpperCase(),
+          retention_until:retentionUntil?new Date(retentionUntil+"T23:59:59Z").toISOString():null,
+          reason:retentionReason.trim()}),
+      });
+      setNotice("Exact original registered in DMS evidence assets and its existing retention/disposition register.");
+      setRetentionReason("");await refresh();
     }catch(e){setError(errorText(e));}finally{setBusy("");}
   }
   return <section className="vendor-card">
@@ -176,6 +211,20 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       </div>
     </form>}
     <h3>Submitted originals awaiting controlled review</h3>
+    {canRegisterDms&&<div className="vendor-form">
+      <h4>Document Control evidence retention</h4>
+      <p>Only Document Control registers originals and controls retention. Registration does not approve Quality evidence.</p>
+      <label className="vendor-field">Governed DMS manual<select value={retentionManual} onChange={e=>setRetentionManual(e.target.value)}>
+        <option value="">Choose a published DMS manual</option>
+        {dms.map(d=><option key={d.revision_id} value={d.id}>{d.code} · {d.title}</option>)}
+      </select></label>
+      <label className="vendor-field">DMS retention class<input required maxLength={64} value={retentionClass}
+        onChange={e=>setRetentionClass(e.target.value)}/></label>
+      <label className="vendor-field">Retain until (leave blank only when policy specifies no end date)<input type="date"
+        value={retentionUntil} onChange={e=>setRetentionUntil(e.target.value)}/></label>
+      <label className="vendor-field">Registration reason<textarea minLength={8} rows={2} value={retentionReason}
+        onChange={e=>setRetentionReason(e.target.value)}/></label>
+    </div>}
     {!submissions.length&&<p>No submissions in this page.</p>}
     <label className="vendor-field"><span>Reason for selected outcome</span><textarea value={reason}
       minLength={8} rows={2} onChange={e=>setReason(e.target.value)}/></label>
@@ -193,15 +242,27 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       {s.review_note&&<p>Review: {s.review_note}</p>}
       {s.qms_evidence_id&&<p>Canonical QMS evidence ID: {s.qms_evidence_id} (separate verification required)</p>}
       {s.dms_revision_id&&<p>Exact linked DMS revision: {s.dms_revision_id}</p>}
-      {s.dms_revision_id&&<p>DMS retention: {s.dms_retention_status||"Not registered"} · Legal hold: {s.dms_legal_hold?"Yes":"No"} · Until {s.dms_retention_until||"No prescribed date"} (manage disposition in DMS)</p>}
+      <p>DMS retention: {s.dms_retention_id?(s.dms_retention_status||"Registered"):"Not registered"}
+        {s.dms_retention_id&&` · Legal hold: ${s.dms_legal_hold?"Yes":"No"} · Until ${s.dms_retention_until||"No prescribed date"}`}
+        {" "}(legal hold and disposal are controlled in DMS)</p>
       <div className="vendor-actions">
         <button type="button" disabled={busy===s.id} onClick={()=>void download(s)}>Download original</button>
+        <button type="button" disabled={busy===s.id} onClick={()=>void loadHistory(s)}>
+          {historyOpen===s.id?"Hide history":"Review & provenance history"}</button>
+        {canRegisterDms&&!s.dms_retention_id&&s.status!=="PENDING_REVIEW"&&<button type="button"
+          disabled={busy===s.id||!retentionManual||!retentionClass.trim()||retentionReason.trim().length<8}
+          onClick={()=>void registerDms(s)}>Register original in DMS</button>}
         {s.status==="PENDING_REVIEW"&&<React.Fragment>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"ACCEPTED")}>Accept into QMS (pending verification)</button>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"RETURNED")}>Return for resubmission</button>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"REJECTED")}>Reject</button>
         </React.Fragment>}
       </div>
+      {historyOpen===s.id&&<div className="vendor-history" aria-label="Immutable submission event history">
+        {(history[s.id]||[]).map((event,index)=><p key={index}>
+          {new Date(event.occurred_at).toLocaleString()} · {event.action} · Actor {event.actor_user_id||"Provider"}
+          <code>{JSON.stringify(event.details_json)}</code></p>)}
+      </div>}
     </div>)}
     <div className="vendor-actions">
       <button disabled={!offset||Boolean(busy)} onClick={()=>setOffset(Math.max(0,offset-25))}>Previous</button>
