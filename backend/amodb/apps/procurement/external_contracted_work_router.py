@@ -121,6 +121,29 @@ def _event(db,work,action,reason,*,staff=None,identity=None,previous=None,target
     return eid,True
 
 
+def _notify_assigned_members(db,work,subject,message):
+    """Queue only for active, individually granted vendor members, never every supplier."""
+    grants=_all(db,"""SELECT g.object_scope_json,i.id AS identity_id
+        FROM external_tenant_grants g
+        JOIN external_organization_memberships m ON m.id=g.membership_id
+         AND m.organization_id=(SELECT organization_id FROM external_tenant_providers
+                                WHERE amo_id=g.amo_id AND id=g.tenant_provider_id)
+        JOIN external_identities i ON i.id=m.identity_id
+        WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider
+          AND g.status='ACTIVE' AND m.status='ACTIVE' AND i.status='ACTIVE'""",
+        amo=work["amo_id"],provider=work["provider_id"])
+    for grant in grants:
+        if str(work["id"]) not in {str(x) for x in
+                                  (grant["object_scope_json"] or {}).get("contracted_work",[])}:
+            continue
+        db.execute(text("""INSERT INTO external_partner_notifications
+          (id,amo_id,tenant_provider_id,identity_id,category,title,message,resource_kind,resource_id)
+          VALUES(:id,:amo,:provider,:identity,'MAINTENANCE',:title,:message,'CONTRACTED_WORK',:work)"""),
+          dict(id=str(uuid4()),amo=work["amo_id"],provider=work["provider_id"],
+               identity=grant["identity_id"],title=subject[:200],message=message,
+               work=str(work["id"])))
+
+
 def _technical_requirements(work):
     errors=[]
     for key in ("function","scope_text","site_code","contract_id","internal_work_reference",
@@ -586,6 +609,9 @@ def _transition(db,work,payload,*,user=None,identity=None):
     _event(db,work,action,payload.reason,staff=str(user.id) if user else None,
            identity=identity,previous=previous,target=target,details=payload.details,
            retry=payload.idempotency_key)
+    if user is not None and action in {"AUTHORIZE","DISPATCH","REWORK","REJECT","HOLD","RESUME","CANCEL","CLOSE"}:
+        _notify_assigned_members(db,work,f"Contracted work: {action.replace('_',' ').title()}",
+            f"{work['work_number']}: {payload.reason}")
     db.commit()
     return {"id":work["id"],"status":target,"version":payload.expected_version+1,
             "maintenance_release_issued":False}
@@ -887,5 +913,7 @@ def assign_partner_member(amo_code:str,work_id:str,grant_id:str,db:Session=Depen
         WHERE amo_id=:amo AND id=:id"""),dict(scopes=json.dumps(current),amo=amo,id=grant_id))
     _event(db,work,"MEMBER_ASSIGNED","Responsible manager assigned member to contracted work",
        staff=str(user.id),details={"grant_id":grant_id})
+    _notify_assigned_members(db,work,"Maintenance work assigned",
+        f"{work['work_number']} has been explicitly assigned to your account.")
     db.commit()
     return {"granted":True,"work_id":work_id,"grant_id":grant_id}
