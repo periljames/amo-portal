@@ -611,11 +611,21 @@ def staff_decision(amo_code:str,kind:str,entity_id:str,payload:StaffDecision,
        WHERE amo_id=:amo AND id=:id AND entity_type=:kind AND entity_id=:entity""",
        amo=amo,id=payload.proposal_event_id,kind=kind,entity=entity_id) if payload.proposal_event_id else None
     if payload.proposal_event_id and not proposal:raise HTTPException(404,"Related provider proposal unavailable")
+    if proposal and payload.action=="REFER_ALTERNATE_TO_TECHNICAL" and (
+        kind!="RFQ" or proposal["action"]!="ALTERNATE_REQUEST"):
+        raise HTTPException(422,"Refer only an actual invited RFQ alternate proposal")
+    if proposal and payload.action=="ACCEPT_DATE_PROPOSAL":
+        if proposal["supplier_id"] is None:
+            raise HTTPException(409,"Proposal is not tied to a supplier")
+        supplier_quality_control.assert_purchase_order_allowed(
+            db,amo_id=amo,po_id=int(entity_id))
     if payload.action=="ACCEPT_DATE_PROPOSAL":
         if kind!="PO" or not proposal or proposal["action"]!="DELIVERY_CHANGE":
             raise HTTPException(422,"Select the supplier's original PO delivery-date proposal")
         requested=proposal["details_json"].get("promised_date")
         if not requested:raise HTTPException(422,"No proposed delivery date")
+        if date.fromisoformat(requested)<date.today():
+            raise HTTPException(409,"An already elapsed proposed delivery date is not acceptable")
         db.execute(text("""UPDATE procurement_purchase_orders SET promised_delivery_date=:delivery,
             updated_at=NOW() WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id
             AND status NOT IN ('CANCELLED','CLOSED')"""),
@@ -624,6 +634,11 @@ def staff_decision(amo_code:str,kind:str,entity_id:str,payload:StaffDecision,
     if not proposal and payload.action!="REPLY":
         raise HTTPException(422,"Select an attributable provider proposal")
     ctx={"amo":amo,"supplier":proposal["supplier_id"] if proposal else None}
+    if ctx["supplier"] is not None:
+        seen=_row(db,"""SELECT id FROM external_procurement_events
+           WHERE amo_id=:amo AND supplier_id=:supplier AND idempotency_key=:key""",
+           amo=amo,supplier=ctx["supplier"],key=payload.idempotency_key)
+        if seen:return {"id":seen["id"],"retry":True,"internal_approval_preserved":True}
     if ctx["supplier"] is None:
         raise HTTPException(422,"A supplier-specific thread is required")
     eid,_=_event(db,ctx,kind,entity_id,payload.action,actor=str(user.id),
