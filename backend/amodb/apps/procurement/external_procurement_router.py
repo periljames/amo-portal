@@ -524,8 +524,8 @@ def cancel_undelivered_shipment(tenant_slug:str,shipment_id:str,payload:Ack,
           amo=ctx["amo"],po=sh["po_id"],ref=sh["shipment_reference"])
     if physical:raise HTTPException(409,"Stores already received this shipment; use the internal RMA/return workflow")
     db.execute(text("""UPDATE external_procurement_shipments SET status='CANCELLED'
-         WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id""",
-         amo=ctx["amo"],supplier=ctx["supplier"],id=shipment_id)
+         WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id"""),
+         {"amo":ctx["amo"],"supplier":ctx["supplier"],"id":shipment_id})
     eid,_=_event(db,ctx,"SHIPMENT",shipment_id,"CANCELLED",identity=ctx["person"],
        message=payload.note,details={"po_id":sh["po_id"]},key=payload.idempotency_key)
     _event(db,ctx,"PO",sh["po_id"],"SHIPMENT_CANCELLED",identity=ctx["person"],
