@@ -23,7 +23,7 @@ const sections=[
   {id:"contracts",name:"Contracts",cap:"contract.read"},
   {id:"qualification",name:"Qualification",cap:"profile.read"},
   {id:"quality",name:"Quality",cap:"task.read"},
-  {id:"procurement",name:"Procurement",cap:"task.read"},
+  {id:"procurement",name:"Procurement",cap:"procurement.read"},
   {id:"work",name:"Contracted work",cap:"task.read"},
   {id:"activity",name:"Notifications & activity",cap:"profile.read"},
 ] as const;
