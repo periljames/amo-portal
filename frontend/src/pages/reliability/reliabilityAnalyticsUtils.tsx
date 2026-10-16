@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import type { ChartCardProps, ChartPoint, ChartTableRow, DashboardFilters, DashboardMetric, DashboardResponse, EngineSeriesResponse, MetricStatus, SavedView } from "./reliabilityAnalyticsTypes";
 
 export const SAVED_VIEW_KEY = "amo.reliability.analytics.saved-views.v1";
@@ -236,10 +237,20 @@ function displayCell(value: unknown): string {
 }
 
 export function ChartCard({ id, eyebrow, title, description, empty, children, onExport, wide = false, tableRows = [], formulaCodes = [] }: ChartCardProps): React.ReactElement {
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
   const [showTable, setShowTable] = useState(false);
+  const [tableFilter, setTableFilter] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const cardRef = useRef<HTMLElement | null>(null);
   const columns = useMemo(() => primitiveColumns(tableRows), [tableRows]);
+  const filteredRows = useMemo(() => {
+    const term = tableFilter.trim().toLowerCase();
+    return term ? tableRows.filter((row) => columns.some((column) =>
+      String(row[column] ?? "").toLowerCase().includes(term))) : tableRows;
+  }, [tableFilter, tableRows, columns]);
+  const visibleRows = filteredRows.slice(tablePage * tablePageSize, (tablePage + 1) * tablePageSize);
 
   useEffect(() => {
     const update = () => setIsFullscreen(document.fullscreenElement === cardRef.current);
@@ -262,7 +273,7 @@ export function ChartCard({ id, eyebrow, title, description, empty, children, on
           <p className="reliability-v2__eyebrow">{eyebrow}</p>
           <h2>{title}</h2>
           <p>{description}</p>
-          {formulaCodes.length > 0 && <div className="reliability-analytics__formula-links" aria-label="Chart formula links">{formulaCodes.map((code) => <a href={`#formula-${code}`} key={code}>Formula: {code}</a>)}</div>}
+          {formulaCodes.length > 0 && <div className="reliability-analytics__formula-links" aria-label="Chart formula links">{formulaCodes.map((code) => <Link to={"/maintenance/" + encodeURIComponent(amoCode) + "/reliability/analytics/formulae#formula-" + encodeURIComponent(code)} key={code}>Formula: {code}</Link>)}</div>}
         </div>
         <div className="reliability-analytics__chart-actions">
           {tableRows.length > 0 && <button className="reliability-analytics__icon-button" type="button" aria-expanded={showTable} onClick={() => setShowTable((value) => !value)}>{showTable ? "Hide data" : "Data table"}</button>}
@@ -276,9 +287,24 @@ export function ChartCard({ id, eyebrow, title, description, empty, children, on
       </div>
       {showTable && tableRows.length > 0 && (
         <div className="reliability-analytics__chart-table" role="region" aria-label={`${title} data table`} tabIndex={0}>
+          <div className="rel-chart-table__controls">
+            <label>Find loaded data <input value={tableFilter}
+              onChange={(event) => { setTableFilter(event.target.value); setTablePage(0); }}
+              placeholder="Search chart source columns" /></label>
+            <span>{filteredRows.length} / {tableRows.length} loaded rows</span>
+            <label>Page size <select value={tablePageSize}
+              onChange={(event) => { setTablePageSize(Number(event.target.value)); setTablePage(0); }}>
+              <option value="25">25</option><option value="50">50</option><option value="100">100</option>
+            </select></label>
+            <button type="button" disabled={tablePage === 0}
+              onClick={() => setTablePage((old) => old - 1)}>Previous</button>
+            <span>Page {tablePage + 1}</span>
+            <button type="button" disabled={(tablePage + 1) * tablePageSize >= filteredRows.length}
+              onClick={() => setTablePage((old) => old + 1)}>Next</button>
+          </div>
           <table>
             <thead><tr>{columns.map((column) => <th key={column}>{column.replaceAll("_", " ")}</th>)}</tr></thead>
-            <tbody>{tableRows.map((row, index) => <tr key={`${id}-row-${index}`}>{columns.map((column) => <td key={column}>{displayCell(row[column])}</td>)}</tr>)}</tbody>
+            <tbody>{visibleRows.map((row, index) => <tr key={`${id}-row-${index}`}>{columns.map((column) => <td key={column}>{displayCell(row[column])}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )}

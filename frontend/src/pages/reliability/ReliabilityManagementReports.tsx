@@ -152,7 +152,7 @@ export function ReliabilityManagementReports(): React.ReactElement {
       });
       setSnapshot(result);
       setPreviewHtml(await readHtml(result.id));
-      navigate(`/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${result.id}`, { replace: true });
+      navigate(`/maintenance/${encodeURIComponent(amoCode)}/reliability/management-reports?snapshot=${result.id}`, { replace: true });
       setNotice(`Snapshot ${result.id} was retained. Opening this link later reads the same retained report rather than recalculating it.`);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "The management report could not be generated.");
@@ -161,7 +161,7 @@ export function ReliabilityManagementReports(): React.ReactElement {
 
   const copyLink = async () => {
     if (!snapshot) return;
-    const link = `${window.location.origin}/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${snapshot.id}`;
+    const link = `${window.location.origin}/maintenance/${encodeURIComponent(amoCode)}/reliability/management-reports?snapshot=${snapshot.id}`;
     try {
       await navigator.clipboard.writeText(link);
       setNotice("Authenticated retained-report link copied.");

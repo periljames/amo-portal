@@ -6,7 +6,7 @@ import hashlib
 import os
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Literal, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -201,6 +201,8 @@ def list_events(
     severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
     aircraft_serial_number: Optional[str] = None,
     q: Optional[str] = None,
+    sort_key: Optional[Literal["occurred_at", "aircraft", "severity", "ata", "event_type", "source", "id"]] = None,
+    sort_dir: Literal["asc", "desc"] = "desc",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -215,6 +217,8 @@ def list_events(
         query_text=q,
         limit=limit,
         offset=offset,
+        sort_key=sort_key,
+        sort_dir=sort_dir,
     )
 
 
@@ -377,6 +381,9 @@ def resolve_alert(
 @router.get("/alerts", response_model=List[schemas.ReliabilityAlertRead])
 def list_alerts(
     alert_status: Optional[reliability_models.ReliabilityAlertStatusEnum] = Query(default=None, alias="status"),
+    q: Optional[str] = Query(default=None, max_length=120),
+    sort_key: Optional[Literal["triggered_at", "severity", "status", "code", "id"]] = None,
+    sort_dir: Literal["asc", "desc"] = "desc",
     severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -387,9 +394,12 @@ def list_alerts(
         db,
         amo_id=_amo_id(current_user),
         alert_status=alert_status,
+        query_text=q,
         severity=severity,
         limit=limit,
         offset=offset,
+        sort_key=sort_key,
+        sort_dir=sort_dir,
     )
 
 
@@ -562,6 +572,9 @@ def verify_fracas_case(
 @router.get("/fracas/cases", response_model=List[schemas.FRACASCaseRead])
 def list_fracas_cases(
     case_status: Optional[reliability_models.FRACASStatusEnum] = Query(default=None, alias="status"),
+    q: Optional[str] = Query(default=None, max_length=120),
+    sort_key: Optional[Literal["updated_at", "opened_at", "aircraft", "severity", "status", "title", "id"]] = None,
+    sort_dir: Literal["asc", "desc"] = "desc",
     severity: Optional[reliability_models.ReliabilitySeverityEnum] = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -572,9 +585,12 @@ def list_fracas_cases(
         db,
         amo_id=_amo_id(current_user),
         case_status=case_status,
+        query_text=q,
         severity=severity,
         limit=limit,
         offset=offset,
+        sort_key=sort_key,
+        sort_dir=sort_dir,
     )
 
 
@@ -715,6 +731,9 @@ def compute_engine_trend_status(
 @router.get("/engine-trends/fleet-status", response_model=List[schemas.EngineTrendStatusRead])
 def list_engine_trend_statuses(
     current_status: Optional[reliability_models.EngineTrendStatusEnum] = None,
+    q: Optional[str] = Query(default=None, max_length=120),
+    sort_key: Optional[Literal["status", "aircraft", "engine_serial", "last_upload", "last_review", "id"]] = None,
+    sort_dir: Literal["asc", "desc"] = "desc",
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -724,8 +743,11 @@ def list_engine_trend_statuses(
         db,
         amo_id=_amo_id(current_user),
         current_status=current_status,
+        query_text=q,
         limit=limit,
         offset=offset,
+        sort_key=sort_key,
+        sort_dir=sort_dir,
     )
 
 

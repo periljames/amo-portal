@@ -1,0 +1,32 @@
+.rel-backend-register {display:grid;gap:.85rem;min-width:0}
+.rel-backend-register__header,.rel-backend-register__tools,.rel-backend-register__pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.75rem}
+.rel-backend-register__header h1{letter-spacing:-.03em;margin:.1rem 0}
+.rel-backend-register__header p:last-child{font-size:.85rem;opacity:.7;margin:.3rem 0 0}
+.rel-backend-register button {display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+  border:1px solid color-mix(in srgb,CanvasText 20%,transparent);border-radius:.44rem;padding:.55rem .75rem;
+  background:Canvas;color:CanvasText;min-height:40px;cursor:pointer}
+.rel-backend-register button:disabled{opacity:.4;cursor:not-allowed}
+.rel-backend-register__tools {justify-content:flex-start;padding:.85rem;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:.65rem;background:Canvas}
+.rel-backend-register__tools form{display:flex;flex:1;align-items:center;gap:.55rem}
+.rel-backend-register__tools form label{display:flex;align-items:center;gap:.4rem;flex:1}
+.rel-backend-register__tools input,.rel-backend-register__tools select{min-height:40px;min-width:0;padding:.55rem;border:1px solid color-mix(in srgb,CanvasText 25%,transparent);border-radius:.4rem;background:Canvas;color:CanvasText;width:100%}
+.rel-backend-register__status{display:flex;align-items:center;gap:.5rem;flex:1}
+.rel-backend-register__status select{max-width:280px}
+.rel-backend-register__scope {font-size:.75rem;opacity:.75;margin:0}
+.rel-backend-register__viewport{max-height:calc(100dvh - 320px);min-height:320px;overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain;border:1px solid color-mix(in srgb,CanvasText 13%,transparent);border-radius:.65rem;background:Canvas}
+.rel-backend-register__viewport table{border-collapse:separate;border-spacing:0;text-align:left;min-width:800px;width:100%;font-size:.78rem;font-variant-numeric:tabular-nums}
+.rel-backend-register__viewport th{position:sticky;top:0;z-index:1;background:color-mix(in srgb,Canvas 94%,CanvasText 6%);font-size:.7rem;color:CanvasText;white-space:nowrap}
+.rel-backend-register__viewport :is(td,th){padding:.64rem .72rem;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent);max-width:430px}
+.rel-backend-register__viewport tbody tr:hover{background:color-mix(in srgb,#38bdf8 6%,Canvas)}
+.rel-backend-register__viewport td a{color:#0f766e;font-weight:680}
+.rel-backend-register__pager{border-top:1px solid color-mix(in srgb,CanvasText 12%,transparent);padding-top:.6rem;font-size:.82rem}
+.rel-backend-register__pager>div{display:flex;gap:.5rem}
+.rel-backend-register__error{padding:.8rem;border:1px solid #be123c;border-radius:.5rem;display:flex;gap:.7rem}
+.rel-backend-register__empty,.rel-backend-register__loading{padding:1rem;opacity:.8}
+@media(max-width:650px){.rel-backend-register__tools form{flex-wrap:wrap}.rel-backend-register__tools>button{flex:1}.rel-backend-register__viewport{min-height:270px;max-height:65dvh}}
+@media print {.rel-backend-register__tools,.rel-backend-register__pager {display:none}.rel-backend-register__viewport{max-height:none;overflow:visible}}
+
+.rel-backend-register__sort {border:0!important;background:transparent!important;box-shadow:none;min-height:32px!important;padding:0!important;cursor:pointer;color:inherit;font:inherit;font-weight:700;white-space:nowrap;text-align:left}
+.rel-backend-register__sort:hover {color:#0f766e}
+.rel-backend-register__sort:focus-visible {outline:2px solid #0f766e;outline-offset:3px}
+.rel-backend-register__sort:disabled {cursor:wait;opacity:.6}
