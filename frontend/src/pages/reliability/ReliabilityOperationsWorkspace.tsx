@@ -22,6 +22,7 @@ import {
   type ReliabilityWorkbench,
 } from "../../services/reliability";
 import ReliabilityReportsView from "./ReliabilityReportsView";
+import { ReliabilityRegisterControls } from "./ReliabilityRegisterControls";
 import ReliabilityOperationalControl from "./ReliabilityOperationalControl";
 import { FracasGovernancePanel, OccurrenceProvenancePanel, ReliabilityAdvancedView, type AdvancedReliabilityViewId } from "./ReliabilityAdvancedViews";
 import "../../styles/reliability-v2.css";
@@ -257,14 +258,14 @@ function EventRegister({ rows, basePath }: { rows: ReliabilityEvent[]; basePath:
 }
 
 function EventTable({ rows, basePath }: { rows: ReliabilityEvent[]; basePath: string }) {
-  return <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>When</th><th>Aircraft</th><th>Event</th><th>ATA</th><th>Summary</th></tr></thead><tbody>
-    {rows.map((row) => <tr key={row.id}><td><Link to={`${basePath}/events/${row.id}`}>{displayDate(row.occurred_at)}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={severityClass(row.severity)}>{row.event_type}</span></td><td>{row.ata_chapter || "—"}</td><td>{row.description || row.reference_code || "No description"}</td></tr>)}
+  return <ReliabilityRegisterControls rows={rows} label="occurrences" queryText={(item) => [item.aircraft_serial_number, item.event_type, item.ata_chapter, item.description, item.reference_code].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>When</th><th>Aircraft</th><th>Event</th><th>ATA</th><th>Summary</th></tr></thead><tbody>
+    {visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/events/${row.id}`}>{displayDate(row.occurred_at)}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={severityClass(row.severity)}>{row.event_type}</span></td><td>{row.ata_chapter || "—"}</td><td>{row.description || row.reference_code || "No description"}</td></tr>)}
     {rows.length === 0 && <tr><td colSpan={5}>No occurrence records are available.</td></tr>}
-  </tbody></table></div>;
+  </tbody></table></div>}</ReliabilityRegisterControls>;
 }
 
 function AlertRegister({ rows, basePath }: { rows: ReliabilityAlert[]; basePath: string }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Technical disposition required" title="Alert register" meta={`${rows.length} loaded`} /><div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Alert</th><th>Severity</th><th>Status</th><th>Triggered</th><th>Message</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><Link to={`${basePath}/alerts/${row.id}`}>{row.alert_code}</Link></td><td><span className={severityClass(row.severity)}>{row.severity}</span></td><td><span className={statusClass(row.status)}>{row.status}</span></td><td>{displayDate(row.triggered_at)}</td><td>{row.message || "—"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No alerts are available.</td></tr>}</tbody></table></div></section>;
+  return <section className="reliability-v2__section"><SectionHeading eyebrow="Technical disposition required" title="Alert register" meta={`${rows.length} loaded`} /><ReliabilityRegisterControls rows={rows} label="alerts" queryText={(item) => [item.alert_code, item.message, item.status, item.severity].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Alert</th><th>Severity</th><th>Status</th><th>Triggered</th><th>Message</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/alerts/${row.id}`}>{row.alert_code}</Link></td><td><span className={severityClass(row.severity)}>{row.severity}</span></td><td><span className={statusClass(row.status)}>{row.status}</span></td><td>{displayDate(row.triggered_at)}</td><td>{row.message || "—"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No alerts are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls></section>;
 }
 
 function CaseRegister({ rows, basePath }: { rows: FracasCase[]; basePath: string }) {
@@ -272,11 +273,11 @@ function CaseRegister({ rows, basePath }: { rows: FracasCase[]; basePath: string
 }
 
 function CaseTable({ rows, basePath }: { rows: FracasCase[]; basePath: string }) {
-  return <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Case</th><th>Aircraft</th><th>Status</th><th>Severity</th><th>Updated</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><Link to={`${basePath}/cases/${row.id}`}>{row.title}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={statusClass(row.status)}>{row.status.replaceAll("_", " ")}</span></td><td><span className={severityClass(row.severity)}>{row.severity || "UNRATED"}</span></td><td>{displayDate(row.updated_at)}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No FRACAS cases are available.</td></tr>}</tbody></table></div>;
+  return <ReliabilityRegisterControls rows={rows} label="FRACAS cases" queryText={(item) => [item.title, item.aircraft_serial_number, item.status, item.severity].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Case</th><th>Aircraft</th><th>Status</th><th>Severity</th><th>Updated</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td><Link to={`${basePath}/cases/${row.id}`}>{row.title}</Link></td><td>{row.aircraft_serial_number || "Fleet"}</td><td><span className={statusClass(row.status)}>{row.status.replaceAll("_", " ")}</span></td><td><span className={severityClass(row.severity)}>{row.severity || "UNRATED"}</span></td><td>{displayDate(row.updated_at)}</td></tr>)}{rows.length === 0 && <tr><td colSpan={5}>No FRACAS cases are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls>;
 }
 
 function EngineRegister({ rows }: { rows: EngineTrend[] }) {
-  return <section className="reliability-v2__section"><SectionHeading eyebrow="Condition monitoring" title="Engine trend status" meta={`${rows.length} engines`} /><div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Aircraft</th><th>Position</th><th>Engine S/N</th><th>Status</th><th>Last upload</th><th>Last review</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.aircraft_serial_number}</td><td>{row.engine_position}</td><td>{row.engine_serial_number || "—"}</td><td><span className={statusClass(row.current_status)}>{row.current_status || "Not evaluated"}</span></td><td>{row.last_upload_date || "—"}</td><td>{row.last_review_date || "Not reviewed"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={6}>No engine trend status records are available.</td></tr>}</tbody></table></div></section>;
+  return <section className="reliability-v2__section"><SectionHeading eyebrow="Condition monitoring" title="Engine trend status" meta={`${rows.length} engines`} /><ReliabilityRegisterControls rows={rows} label="engine statuses" queryText={(item) => [item.aircraft_serial_number, item.engine_serial_number, item.engine_position, item.current_status].join(' ')}>{(visible) => <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>Aircraft</th><th>Position</th><th>Engine S/N</th><th>Status</th><th>Last upload</th><th>Last review</th></tr></thead><tbody>{visible.map((row) => <tr key={row.id}><td>{row.aircraft_serial_number}</td><td>{row.engine_position}</td><td>{row.engine_serial_number || "—"}</td><td><span className={statusClass(row.current_status)}>{row.current_status || "Not evaluated"}</span></td><td>{row.last_upload_date || "—"}</td><td>{row.last_review_date || "Not reviewed"}</td></tr>)}{rows.length === 0 && <tr><td colSpan={6}>No engine trend status records are available.</td></tr>}</tbody></table></div>}</ReliabilityRegisterControls></section>;
 }
 
 function EventDetail({ item, basePath }: { item: ReliabilityEvent; basePath: string }) {
