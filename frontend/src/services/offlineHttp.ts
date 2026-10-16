@@ -349,8 +349,13 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
       // queue ONLY the exact idempotent command (unchanged mutation ID/body).
       // The backend's fieldwork replay guard must resolve duplicates on recovery.
       // Caller-initiated cancellation and all other aborts remain real errors.
-      const timedOut = controller.signal.aborted
-        && String(controller.signal.reason?.message || "").startsWith("Request timed out");
+      // Both apiClient.fetchOnce and portalFetch maintain abort deadlines. The
+      // caller's deadline may fire first, so check its actual timeout reason
+      // as well; an ordinary route teardown has a different abort reason.
+      const timeoutReason = controller.signal.aborted
+        ? controller.signal.reason
+        : signal?.aborted ? signal.reason : null;
+      const timedOut = String(timeoutReason?.message || "").startsWith("Request timed out");
       if (timedOut && queueMutation && offline?.entityType === "qms-audit-checklist-item"
         && offline.requireDurable === true && Boolean(offline.idempotencyKey)) {
         notePortalNetworkFailure("audit-fieldwork-timeout");
