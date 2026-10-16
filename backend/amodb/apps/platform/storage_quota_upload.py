@@ -46,6 +46,18 @@ def _finalized_replay(db, reservation, *, digest: str):
     )
 
 
+def _tenant_scoped_key(tenant_id: str, key: str) -> str:
+    """Keep every tenant's physical S3 key space separate before writing."""
+    canonical = storage.normalise_key(key)
+    segments = canonical.split("/")
+    if len(segments) < 2 or str(tenant_id) not in segments[:2]:
+        raise HTTPException(
+            status_code=403,
+            detail="Object key must be scoped under the owning tenant",
+        )
+    return canonical
+
+
 def put_bytes(db, *, tenant_id: str, key: str, content: bytes,
               content_type: str | None, actor_id: str | None = None,
               operation_id: str | None = None):
@@ -53,6 +65,7 @@ def put_bytes(db, *, tenant_id: str, key: str, content: bytes,
         raise HTTPException(status_code=503, detail="Shared object storage must be enabled")
     from amodb.apps.quality.tenant_security import set_postgres_tenant_context
     set_postgres_tenant_context(db, amo_id=tenant_id, user_id=actor_id or "")
+    key = _tenant_scoped_key(tenant_id, key)
     digest = hashlib.sha256(content).hexdigest()
     try:
         reservation = storage_quota_service.reserve(
@@ -91,6 +104,7 @@ def put_local_file(db, *, tenant_id: str, key: str, path: Path,
         raise HTTPException(status_code=503, detail="Shared object storage must be enabled")
     from amodb.apps.quality.tenant_security import set_postgres_tenant_context
     set_postgres_tenant_context(db, amo_id=tenant_id, user_id=actor_id or "")
+    key = _tenant_scoped_key(tenant_id, key)
     size = path.stat().st_size
     digest = hashlib.sha256()
     with path.open("rb") as source:
