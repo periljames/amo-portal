@@ -344,6 +344,19 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
     return response;
   } catch (error) {
     if (isAbortError(error)) {
+      // The browser may remain connected to Wi-Fi while the API is unreachable.
+      // A timed-out governed checklist command may already have been committed;
+      // queue ONLY the exact idempotent command (unchanged mutation ID/body).
+      // The backend's fieldwork replay guard must resolve duplicates on recovery.
+      // Caller-initiated cancellation and all other aborts remain real errors.
+      const timedOut = controller.signal.aborted
+        && String(controller.signal.reason?.message || "").startsWith("Request timed out");
+      if (timedOut && queueMutation && offline?.entityType === "qms-audit-checklist-item"
+        && offline.requireDurable === true && Boolean(offline.idempotencyKey)) {
+        notePortalNetworkFailure("audit-fieldwork-timeout");
+        assertRequestScope(requestScope);
+        return queueRequest(cachePath, method, init, requestScope);
+      }
       if (cacheEnabled) {
         const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
         if (cached) return cached;

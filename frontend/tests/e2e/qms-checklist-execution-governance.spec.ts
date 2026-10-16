@@ -150,6 +150,9 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
 
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
   await expect(live).toBeVisible({ timeout: 30_000 });
+  // The table-first layout keeps the detailed auditor panel collapsed until requested.
+  await expect(live.getByRole("table", { name: "Checklist assessment table" })).toBeVisible();
+  await live.getByRole("button", { name: "Details for question 1", exact: true }).click();
   await expect(live.getByRole("heading", { name: "Verify authorization and competence records for sampled certifying staff." })).toBeVisible();
   await expect(live.getByText("NOT VERIFIED · v1").first()).toBeVisible();
 
@@ -161,10 +164,7 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await live.locator("details.qms-live-audit-focus__compliance > summary").click();
   await page.screenshot({ path: "test-results/fieldwork-compliance-expanded-proof.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  // Mobile retains the horizontally scrollable paper-style checklist matrix;
-  // its per-question details controls replace the superseded list drawer.
-  await expect(live.getByRole("region", { name: "Checklist assessment table" })).toBeVisible();
-  await expect(live.getByRole("button", { name: "Details for question 1" })).toBeVisible();
+  await expect(live.getByRole("table", { name: "Checklist assessment table" })).toBeVisible();
   await page.screenshot({ path: "test-results/fieldwork-mobile-proof.png", fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
 

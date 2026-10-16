@@ -210,12 +210,13 @@ test("two authenticated Quality browsers receive the same committed live-audit c
 
     await expect(pageA.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
     await expect(pageB.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
-    // The fieldwork workspace is table-first. Expand each question's governed
-    // compliance disclosure before asserting its authoritative assessment.
-    for (const auditPage of [pageA, pageB]) {
-      await expect(auditPage.getByRole("region", { name: "Live audit fieldwork workspace" })).toBeVisible({ timeout: 30_000 });
-      await auditPage.locator("details.qms-live-audit-focus__compliance > summary").click();
-      await expect(auditPage.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
+    // The Fieldwork matrix is the default; open the exact same governed item
+    // on both browsers and expand its verification inputs before checking SSE.
+    for (const page of [pageA, pageB]) {
+      await expect(page.getByRole("table", { name: "Checklist assessment table" })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Details for question 1", exact: true }).click();
+      await page.locator("details.qms-live-audit-focus__compliance > summary").click();
+      await expect(page.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
     }
 
     await expect(pageA.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
