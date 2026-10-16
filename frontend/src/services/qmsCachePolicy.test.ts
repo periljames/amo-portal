@@ -16,7 +16,7 @@ describe("QMS offline cache boundaries", () => {
       const path = `/api/maintenance/tenant-a/quality/audits/a1/${resource}`;
       expect(isQmsLiveAuthority(path)).toBe(true);
       expect(isPortalCacheablePath(path)).toBe(false);
-      const client = { clientState: { queries: [{ queryKey: ["qms", "audits/a1", resource] }] } };
+      const client = { clientState: { queries: [{ queryKey: ["qms", `audits/a1/${resource}`] }] } };
       expect(withoutQmsAuthority(client)?.clientState.queries).toEqual([]);
     },
   );
