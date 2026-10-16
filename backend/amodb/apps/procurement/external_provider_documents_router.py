@@ -194,6 +194,7 @@ class RequirementWrite(BaseModel):
     title: str = Field(min_length=2,max_length=255)
     description: str = Field(default="",max_length=4000)
     mandatory: bool = False
+    acknowledgement_required: bool = False
     expiry_required: bool = False
     reminder_days: int = Field(default=0,ge=0,le=365)
     form_manual_id: str | None = Field(default=None,max_length=36)
@@ -229,6 +230,8 @@ def save_requirement(amo_code:str,code:str,payload:RequirementWrite,
         raise HTTPException(422,"Invalid requirement category/code")
     if bool(payload.form_manual_id)!=bool(payload.form_revision_id):
         raise HTTPException(422,"Form manual and exact revision must be supplied together")
+    if payload.acknowledgement_required and not payload.form_revision_id:
+        raise HTTPException(422,"Acknowledgement requires a published form revision")
     if payload.form_manual_id:
         _staff_published_revision(db,amo,payload.form_manual_id,payload.form_revision_id,user)
     existing=_one(db,"""SELECT id,version FROM external_provider_document_requirements
@@ -240,20 +243,21 @@ def save_requirement(amo_code:str,code:str,payload:RequirementWrite,
         raise HTTPException(409,"Requirement does not exist for the supplied revision")
     id=existing["id"] if existing else str(uuid4())
     db.execute(text("""INSERT INTO external_provider_document_requirements
-        (id,amo_id,provider_kind,code,title,description,mandatory,expiry_required,
+        (id,amo_id,provider_kind,code,title,description,mandatory,acknowledgement_required,expiry_required,
          form_manual_id,form_revision_id,retention_policy_ref,enabled,reminder_days,created_by_user_id)
-        VALUES(:id,:amo,:kind,:code,:title,:description,:mandatory,:expiry,
+        VALUES(:id,:amo,:kind,:code,:title,:description,:mandatory,:ack,:expiry,
           :manual,:revision,:retention,:enabled,:reminder,:actor)
         ON CONFLICT (amo_id,provider_kind,code) DO UPDATE SET
           title=EXCLUDED.title,description=EXCLUDED.description,
-          mandatory=EXCLUDED.mandatory,expiry_required=EXCLUDED.expiry_required,
+          mandatory=EXCLUDED.mandatory,acknowledgement_required=EXCLUDED.acknowledgement_required,
+           expiry_required=EXCLUDED.expiry_required,
           form_manual_id=EXCLUDED.form_manual_id,
           form_revision_id=EXCLUDED.form_revision_id,
           retention_policy_ref=EXCLUDED.retention_policy_ref,
           reminder_days=EXCLUDED.reminder_days,
           enabled=EXCLUDED.enabled,version=external_provider_document_requirements.version+1,
           updated_at=NOW()"""),{"id":id,"amo":amo,"kind":kind,"code":key,"title":payload.title,
-          "description":payload.description,"mandatory":payload.mandatory,"expiry":payload.expiry_required,
+          "description":payload.description,"mandatory":payload.mandatory,"ack":payload.acknowledgement_required,"expiry":payload.expiry_required,
           "manual":payload.form_manual_id,"revision":payload.form_revision_id,
           "retention":payload.retention_policy_ref,"enabled":payload.enabled,
           "reminder":payload.reminder_days,"actor":str(user.id)})
@@ -269,13 +273,18 @@ def my_requirements(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     user=partner._ctx(db,request,tenant_slug,cap="document.read")
     ctx=partner._context(user)
     rows=_all(db,"""SELECT r.id,r.code,r.title,r.description,r.mandatory,
-        r.expiry_required,r.reminder_days,r.form_manual_id,r.form_revision_id,r.version
+        r.expiry_required,r.acknowledgement_required,r.reminder_days,r.form_manual_id,r.form_revision_id,r.version,
+        EXISTS(SELECT 1 FROM external_provider_form_acknowledgements a
+          WHERE a.amo_id=r.amo_id AND a.tenant_provider_id=:provider
+          AND a.identity_id=:person AND a.requirement_id=r.id
+          AND a.form_revision_id=r.form_revision_id) AS acknowledged_by_me
         FROM external_provider_document_requirements r
         LEFT JOIN quality_external_provider_profiles p
           ON p.amo_id=r.amo_id AND p.supplier_id=:supplier
         WHERE r.amo_id=:amo AND r.enabled=true
           AND (r.provider_kind='ALL' OR r.provider_kind=COALESCE(p.provider_kind,'SUPPLIER'))
-        ORDER BY r.mandatory DESC,r.code""",amo=ctx["amo"],supplier=ctx["supplier"])
+        ORDER BY r.mandatory DESC,r.code""",amo=ctx["amo"],supplier=ctx["supplier"],
+        provider=ctx["provider"],person=ctx["person"])
     for row in rows:
         # Form download is still checked against member-specific document grants.
         row["form_available"]=bool(row["form_manual_id"] and
@@ -348,6 +357,14 @@ def submit_document(tenant_slug:str,request:Request,db:Session=Depends(get_db),
     ctx=partner._context(user)
     auth.auth_limit(request,ctx["person"],"partner-document-submit")
     requirement=_requirement(db,ctx["amo"],ctx["supplier"],requirement_id)
+    if requirement["acknowledgement_required"]:
+        acknowledged=_one(db,"""SELECT id FROM external_provider_form_acknowledgements
+           WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:person
+             AND requirement_id=:req AND form_revision_id=:revision""",
+           amo=ctx["amo"],provider=ctx["provider"],person=ctx["person"],
+           req=requirement_id,revision=requirement["form_revision_id"])
+        if not acknowledged:
+            raise HTTPException(409,"Acknowledge this exact controlled form revision before submitting")
     if requirement["expiry_required"] and not valid_until:
         raise HTTPException(422,"This requirement needs an expiry date")
     if valid_until and valid_until<date.today():
