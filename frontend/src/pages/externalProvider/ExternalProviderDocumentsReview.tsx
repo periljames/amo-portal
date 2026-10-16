@@ -62,6 +62,7 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
   const [error,setError]=useState("");const [notice,setNotice]=useState("");
   const [offset,setOffset]=useState(0);
   const [canRegisterDms,setCanRegisterDms]=useState(false);
+  const [canQualityReview,setCanQualityReview]=useState(false);
   const [retentionManual,setRetentionManual]=useState("");
   const [retentionClass,setRetentionClass]=useState("");
   const [retentionUntil,setRetentionUntil]=useState("");
@@ -73,10 +74,11 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       apiRequest<{items:Requirement[]}>(`${path}/requirements`,{cacheTtlMs:0}),
       apiRequest<{items:Submission[]}>(`${path}/submissions?limit=25&offset=${offset}`,{cacheTtlMs:0}),
       apiRequest<{items:DmsOption[]}>(`${path}/dms-options?limit=50`,{cacheTtlMs:0}),
-      apiRequest<{document_controller:boolean}>(`${path}/permissions`,{cacheTtlMs:0}),
+      apiRequest<{document_controller:boolean;quality_reviewer:boolean}>(`${path}/permissions`,{cacheTtlMs:0}),
     ]);
     setRequirements(policies.items);setSubmissions(queue.items);setDms(docs.items);
     setCanRegisterDms(permissions.document_controller);
+    setCanQualityReview(permissions.quality_reviewer);
   },[path,offset]);
   useEffect(()=>{void refresh().catch(e=>setError(errorText(e)));},[refresh]);
   function loadRequirement(r:Requirement){
@@ -230,13 +232,13 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
         onChange={e=>setRetentionReason(e.target.value)}/></label>
     </div>}
     {!submissions.length&&<p>No submissions in this page.</p>}
-    <label className="vendor-field"><span>Reason for selected outcome</span><textarea value={reason}
-      minLength={8} rows={2} onChange={e=>setReason(e.target.value)}/></label>
-    <label className="vendor-field"><span>Optional published DMS revision link when accepting</span>
+    {canQualityReview&&<label className="vendor-field"><span>Reason for selected outcome</span><textarea value={reason}
+      minLength={8} rows={2} onChange={e=>setReason(e.target.value)}/></label>}
+    {canQualityReview&&<label className="vendor-field"><span>Optional published DMS revision link when accepting</span>
       <select value={selectedDms} onChange={e=>setSelectedDms(e.target.value)}>
         <option value="">Evidence reference only — QMS will review independently</option>
         {dms.map(d=><option key={d.revision_id} value={d.revision_id}>{d.code} · {d.title} · {d.rev_number}</option>)}
-      </select></label>
+      </select></label>}
     {submissions.map(s=><div key={s.id} className="vendor-review-item">
       <strong>{s.legal_name} · {s.filename}</strong>
       <small>{s.requirement_title||s.evidence_type} · {s.size_bytes} bytes · {s.status}</small>
@@ -258,7 +260,7 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
         {canRegisterDms&&!s.dms_retention_id&&s.status!=="PENDING_REVIEW"&&<button type="button"
           disabled={busy===s.id||!retentionManual||!retentionClass.trim()||retentionReason.trim().length<8}
           onClick={()=>void registerDms(s)}>Register original in DMS</button>}
-        {s.status==="PENDING_REVIEW"&&<React.Fragment>
+        {canQualityReview&&s.status==="PENDING_REVIEW"&&<React.Fragment>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"ACCEPTED")}>Accept into QMS (pending verification)</button>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"RETURNED")}>Return for resubmission</button>
           <button type="button" disabled={busy===s.id||reason.trim().length<8} onClick={()=>void review(s,"REJECTED")}>Reject</button>
