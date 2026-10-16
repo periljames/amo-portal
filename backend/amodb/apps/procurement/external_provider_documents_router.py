@@ -189,6 +189,48 @@ def _validate_file(path: Path, original: str, declared: str):
         raise HTTPException(415,"The file content does not match a safe document of its declared type")
 
 
+def _governed_procurement_upload(db,user,kind,item):
+    """Recheck supplier work eligibility before accepting commercial source files.
+
+    Existing provider/qualification evidence is unaffected. A disabled or
+    restricted supplier cannot stage a new invoice, quotation or shipment.
+    Restore the member RLS marker after the internal QMS lookup.
+    """
+    if kind not in {"RFQ","PO","SHIPMENT"}:
+        return
+    partner._cap(user,"procurement.respond")
+    from .supplier_quality_control import assert_supplier_usage_allowed
+    ctx=partner._context(user)
+    if kind=="RFQ":
+        category_sql="""SELECT CASE WHEN l.part_number IS NULL THEN 'SERVICE' ELSE 'PART' END
+          FROM procurement_requisition_lines l JOIN procurement_rfqs r
+            ON r.requisition_id=l.requisition_id
+          JOIN procurement_rfq_suppliers i ON i.rfq_id=r.id
+          WHERE r.amo_id=:amo AND i.supplier_id=:supplier AND CAST(r.id AS TEXT)=:id"""
+    else:
+        category_sql="""SELECT CASE WHEN l.part_number IS NULL THEN 'SERVICE' ELSE 'PART' END
+          FROM procurement_purchase_order_lines l JOIN procurement_purchase_orders p
+            ON p.id=l.purchase_order_id
+          WHERE p.amo_id=:amo AND p.supplier_id=:supplier AND CAST(p.id AS TEXT)=:id"""
+        if kind=="SHIPMENT":
+            parent=_one(db,"""SELECT po_id FROM external_procurement_shipments
+                 WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id""",
+                 amo=ctx["amo"],supplier=ctx["supplier"],id=item)
+            if not parent:
+                raise HTTPException(404,"Shipment no longer belongs to provider")
+            item=str(parent["po_id"])
+    categories=set(db.execute(text(category_sql),
+        {"amo":ctx["amo"],"supplier":ctx["supplier"],"id":item}).scalars().all())
+    if not categories:raise HTTPException(409,"No eligible issued transaction lines")
+    try:
+        assert_supplier_usage_allowed(db,amo_id=ctx["amo"],supplier_id=ctx["supplier"],
+                                      categories=categories,allow_controlled_override=False)
+    finally:
+        if db.get_bind().dialect.name=="postgresql":
+            db.execute(text("SELECT set_config('app.external_provider_id',:provider,true)"),
+                       {"provider":ctx["provider"]})
+
+
 def _staff(db, amo_code, user, manage=False):
     role=str(getattr(user.role,"value",user.role))
     accepted={"QUALITY_MANAGER"} if manage else {"QUALITY_MANAGER","QUALITY_OFFICER","DOCUMENT_CONTROL_OFFICER"}
@@ -389,6 +431,7 @@ def start_resumable_upload(tenant_slug:str,payload:UploadStart,request:Request,
         raise HTTPException(422,"Expired evidence is not current")
     if payload.related_kind!="PROVIDER":
         partner._require_existing_related(db,user,payload.related_kind,payload.related_id or "")
+        _governed_procurement_upload(db,user,payload.related_kind,payload.related_id or "")
     elif payload.related_id:
         raise HTTPException(422,"Provider-level evidence cannot refer to another record")
     original=Path(payload.filename).name
@@ -528,6 +571,7 @@ def complete_resumable_upload(tenant_slug:str,session_id:str,request:Request,
         if not ack:raise HTTPException(409,"Controlled form acknowledgement no longer valid")
     if session["related_kind"]!="PROVIDER":
         partner._require_existing_related(db,user,session["related_kind"],session["related_id"])
+        _governed_procurement_upload(db,user,session["related_kind"],session["related_id"])
     parts=_upload_parts(db,ctx,session_id)
     expected_count=(session["size_bytes"]+PART_BYTES-1)//PART_BYTES
     if len(parts)!=expected_count or [p["part_number"] for p in parts]!=list(range(expected_count)):
@@ -688,6 +732,7 @@ def submit_document(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         raise HTTPException(422,"Expired evidence cannot be submitted as current")
     if related_kind!="PROVIDER":
         partner._require_existing_related(db,user,related_kind,related_id)
+        _governed_procurement_upload(db,user,related_kind,related_id)
     elif related_id:
         raise HTTPException(422,"Provider-level documents must not specify a related record")
     if not re.fullmatch(r"[a-zA-Z0-9_-]{12,64}",idempotency_key):
