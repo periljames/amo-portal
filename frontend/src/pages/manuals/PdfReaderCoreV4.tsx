@@ -737,7 +737,7 @@ export default function PdfReaderCoreV4({
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
     navigationTimerRef.current = window.setTimeout(() => {
       window.requestAnimationFrame(() => {
-        if (pageIsAtReadingLine(page)) {
+        if (currentPageRef.current === page && pageIsAtReadingLine(page)) {
           settleNavigation(page);
         } else if (pendingPageRef.current === page) {
           pendingPageRef.current = null;
