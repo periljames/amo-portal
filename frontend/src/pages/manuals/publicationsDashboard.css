@@ -368,3 +368,34 @@
   .publications-upload-dialog > footer { align-items: stretch; flex-direction: column; }
   .publications-upload-dialog footer > div { display: grid; grid-template-columns: 1fr 1fr; }
 }
+
+/* Assigned reviews may contain long evidence pickers. Keep the dialog's entire
+   scrollport and its decision controls inside the visual viewport, including
+   smaller CI/browser windows. The backdrop itself must allow scroll fallback. */
+.publications-upload-backdrop:has(.publications-upload-dialog[aria-label="Assigned document review"]) {
+  align-items: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] {
+  box-sizing: border-box;
+  width: min(1120px, 100%);
+  height: min(92dvh, 980px);
+  min-height: 0;
+  max-height: calc(100dvh - 2rem);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] > .dc-form {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] .dc-form__actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+}
