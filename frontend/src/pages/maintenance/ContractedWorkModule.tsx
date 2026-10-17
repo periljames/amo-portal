@@ -38,6 +38,7 @@ export default function ContractedWorkModule(){
   const [loading,setLoading]=useState(true);const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");const [notice,setNotice]=useState("");
   const [newOpen,setNewOpen]=useState(false);
+  const [canCreate,setCanCreate]=useState(false);
   const [supplier,setSupplier]=useState("");
   const [form,setForm]=useState<Record<string,string>>({
     work_number:"",work_type:"WORKSHOP",work_title:"",function:"",scope_text:"",site_code:"",
@@ -47,13 +48,20 @@ export default function ContractedWorkModule(){
     purchase_order_id:"",data_manual_id:"",data_revision_id:"",governed_repair_order_reference:"",product_family:"",contract_function_approval_reference:"",state_of_registry:"",foreign_approval_reference:"",
     operator_requirements:"",release_wording:"",authority_acceptance_reference:"",
     safety_assessment_reference:"",operator_approval_reference:"",restriction_review_reference:"",
+    prior_written_acceptance_reference:"",
   });
   const [foreign,setForeign]=useState(false);const [authorityRequired,setAuthorityRequired]=useState(false);
   const [safetyRequired,setSafetyRequired]=useState(false);
+  const [operatorRequired,setOperatorRequired]=useState(false);
+  const [independentInspection,setIndependentInspection]=useState(false);
+  const [safetyReport,setSafetyReport]=useState(false);
+  const [furtherSubcontract,setFurtherSubcontract]=useState(false);
   const [decision,setDecision]=useState("");const [reason,setReason]=useState("");
   const [variationId,setVariationId]=useState("");const [variationDecision,setVariationDecision]=useState("APPROVED");
   const [variationData,setVariationData]=useState("");const [amendment,setAmendment]=useState("");
   const [variationCommercial,setVariationCommercial]=useState("");
+  const [variationOperator,setVariationOperator]=useState("");
+  const [variationAuthority,setVariationAuthority]=useState("");
   const [custodyType,setCustodyType]=useState("COMPONENT");const [custodyDescription,setCustodyDescription]=useState("");
   const [custodyPart,setCustodyPart]=useState("");const [custodySerial,setCustodySerial]=useState("");
   const [custodyQty,setCustodyQty]=useState("1");const [custodyUom,setCustodyUom]=useState("EA");
@@ -66,9 +74,10 @@ export default function ContractedWorkModule(){
   const load=useCallback(async()=>{
     setLoading(true);setError("");
     try{const [queue,opts]=await Promise.all([
-      apiRequest<{items:WorkList[]}>(root,{cacheTtlMs:0}),
+      apiRequest<{items:WorkList[];can_create:boolean}>(root,{cacheTtlMs:0}),
       apiRequest<Options>(root+"/options",{cacheTtlMs:0})]);
-      setItems(queue.items);setOptions(opts);
+      setItems(queue.items);setOptions(opts);setCanCreate(queue.can_create===true);
+      if(!queue.can_create)setNewOpen(false);
       setSelected(current=>queue.items.some(i=>i.id===current)?current:(queue.items[0]?.id||""));
     }catch(e){setError(e instanceof Error?e.message:"Maintenance register could not load");}
     finally{setLoading(false);}
@@ -94,7 +103,7 @@ export default function ContractedWorkModule(){
     try{
       const response=await apiRequest<{id?:string}>(root+endpoint,{method:"POST",body:JSON.stringify(body)});
       setNotice(message);setReason("");
-      if(endpoint==="")setSelected(response.id||"");
+      if(endpoint===""){setSelected(response.id||"");setNewOpen(false);}
       await load();await reloadDetail();
     }catch(e){setError(e instanceof Error?e.message:"The governed maintenance transaction was rejected");}
     finally{setBusy(false);}
@@ -120,12 +129,15 @@ export default function ContractedWorkModule(){
         contract_function_approval_reference:form.contract_function_approval_reference||null,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
         operator_requirements:form.operator_requirements,release_wording:form.release_wording,
         authority_approval_required:authorityRequired,authority_acceptance_reference:form.authority_acceptance_reference,
+        operator_approval_required:operatorRequired,operator_approval_reference:form.operator_approval_reference,
+        independent_inspection_required:independentInspection,safety_report_required:safetyReport,
+        further_subcontracting_requested:furtherSubcontract,
+        prior_written_acceptance_reference:form.prior_written_acceptance_reference,
         safety_assessment_required:safetyRequired,safety_assessment_reference:form.safety_assessment_reference,
         restriction_review_reference:form.restriction_review_reference,
         operator_approval_reference:form.operator_approval_reference,
       }
     },"Technical work order drafted. It cannot be dispatched until Maintenance and Quality approvals are recorded.");
-    setNewOpen(false);
   }
   return <main className="proc-section" style={{padding:"1.5rem",maxWidth:1400,margin:"auto"}}>
     <header className="proc-section__head"><div><h1>Contracted Maintenance</h1>
@@ -133,11 +145,11 @@ export default function ContractedWorkModule(){
       <Link to={`/maintenance/${encodeURIComponent(amoCode)}/procurement`}>Related Procurement</Link>
       {" · "}<Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-providers`}>Provider Quality</Link></div>
       <div><button onClick={()=>void load()} disabled={loading}>Refresh</button>{" "}
-        <button onClick={()=>setNewOpen(x=>!x)}>{newOpen?"Close form":"New controlled work order"}</button></div>
+        {canCreate&&<button onClick={()=>setNewOpen(x=>!x)}>{newOpen?"Close form":"New controlled work order"}</button>}</div>
     </header>
     {loading&&<p role="status">Loading contracted work and approved sources…</p>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
-    {newOpen&&<form className="partner-form" onSubmit={submitNew} style={{marginBlock:"1rem"}}>
+    {newOpen&&canCreate&&<form className="partner-form" onSubmit={submitNew} style={{marginBlock:"1rem"}}>
       <h2>Initiate technical contracted work</h2>
       <label>Contractor<select required value={supplier} onChange={e=>{setSupplier(e.target.value);setForm(v=>({...v,scope_id:"",contract_id:"",site_code:""}));}}>
         <option value="">Choose Quality-managed provider</option>
@@ -184,6 +196,12 @@ export default function ContractedWorkModule(){
       </>}
       <label><input type="checkbox" checked={authorityRequired} onChange={e=>setAuthorityRequired(e.target.checked)}/> Competent Authority acceptance/approval required</label>
       {authorityRequired&&<label>Authority approval/acceptance<input required value={form.authority_acceptance_reference} onChange={field("authority_acceptance_reference")}/></label>}
+      <label><input type="checkbox" checked={operatorRequired} onChange={e=>setOperatorRequired(e.target.checked)}/> Written operator technical approval required</label>
+      {operatorRequired&&<label>Operator technical approval reference<input required value={form.operator_approval_reference} onChange={field("operator_approval_reference")}/></label>}
+      <label><input type="checkbox" checked={independentInspection} onChange={e=>setIndependentInspection(e.target.checked)}/> Independent inspection evidence required for closure</label>
+      <label><input type="checkbox" checked={safetyReport} onChange={e=>setSafetyReport(e.target.checked)}/> Safety/occurrence report required for closure</label>
+      <label><input type="checkbox" checked={furtherSubcontract} onChange={e=>setFurtherSubcontract(e.target.checked)}/> Further subcontracting requested (requires prior written acceptance)</label>
+      {furtherSubcontract&&<label>Prior written acceptance reference<input required value={form.prior_written_acceptance_reference} onChange={field("prior_written_acceptance_reference")}/></label>}
       <label><input type="checkbox" checked={safetyRequired} onChange={e=>setSafetyRequired(e.target.checked)}/> Safety assessment required</label>
       {safetyRequired&&<label>Safety assessment reference<input required value={form.safety_assessment_reference} onChange={field("safety_assessment_reference")}/></label>}
       <label>Restriction review reference (if scope limitations apply)<input value={form.restriction_review_reference} onChange={field("restriction_review_reference")}/></label>
@@ -238,13 +256,16 @@ export default function ContractedWorkModule(){
           {variationId&&<form className="partner-form" onSubmit={e=>{e.preventDefault();void mutate(
             "/"+encodeURIComponent(work.id)+"/additional-work/"+encodeURIComponent(variationId)+"/decision",
             {decision:variationDecision,reason,technical_data:variationData||null,
-              amended_work_reference:amendment||null,commercial_variation_reference:variationCommercial||null},
+              amended_work_reference:amendment||null,commercial_variation_reference:variationCommercial||null,
+              operator_approval_reference:variationOperator||null,authority_approval_reference:variationAuthority||null},
             "Responsible Maintenance Manager decision preserved. Commercial changes do not replace technical scope authorization.");}}>
             <label>Decision<select value={variationDecision} onChange={e=>setVariationDecision(e.target.value)}><option>APPROVED</option><option>REJECTED</option></select></label>
             {variationDecision==="APPROVED"&&<>
               <label>Amended work authorization reference<input required value={amendment} onChange={e=>setAmendment(e.target.value)}/></label>
               <label>Approved maintenance-data reference<input required value={variationData} onChange={e=>setVariationData(e.target.value)}/></label>
-              <label>Separate commercial variation reference<input value={variationCommercial} onChange={e=>setVariationCommercial(e.target.value)}/></label>
+              <label>Separate commercial variation reference<input required={Boolean(detail?.additional_work.find(x=>x.id===variationId)?.commercial_reference)} value={variationCommercial} onChange={e=>setVariationCommercial(e.target.value)}/></label>
+              {work.requirements_json.operator_approval_required&&<label>Operator additional-work authorization reference<input required value={variationOperator} onChange={e=>setVariationOperator(e.target.value)}/></label>}
+              {work.requirements_json.authority_approval_required&&<label>Authority additional-work authorization reference<input required value={variationAuthority} onChange={e=>setVariationAuthority(e.target.value)}/></label>}
             </>}
             <label>Attributable decision basis<textarea required minLength={12} value={reason} onChange={e=>setReason(e.target.value)}/></label>
             <button disabled={busy||reason.trim().length<12}>Record Maintenance Manager decision</button></form>}
