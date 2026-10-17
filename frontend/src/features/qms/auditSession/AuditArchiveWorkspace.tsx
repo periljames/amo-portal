@@ -157,7 +157,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         manifest_id: governanceQuery.data?.manifest?.id || null,
       });
     },
-    onSuccess: () => { setHoldRelease(null); void success("Legal hold released and its reason and authority recorded."); },
+    onSuccess: () => { setHoldRelease(null); void success("Legal hold released with an append-only release event, including its reason and governing authority."); },
     onError: (cause) => failure(cause, "Legal hold release failed."),
   });
   const reviewMutation = useMutation({
