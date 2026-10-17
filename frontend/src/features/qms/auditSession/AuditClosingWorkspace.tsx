@@ -383,7 +383,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
           ) : null}
           {activeRevision?.status === "INTERNAL_REVIEW" ? <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canApprove || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "APPROVE" })}>Approve exact report revision</button><button type="button" disabled={!canGovern || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "RETURN" })}>Return to draft</button></div> : null}
-          {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> R{activeRevision.revision_no} is approved.</div> : null}
+          {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> R{activeRevision.revision_no} is approved and locked to SHA-256 {activeRevision.sha256}.</div> : null}
         </section>
         <section className={closingCardClass(4)} aria-current={activeClosingStep === 4 ? "step" : undefined}>
           <header><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision. Password re-auth is not treated as equivalent evidence.</small></div></header>
