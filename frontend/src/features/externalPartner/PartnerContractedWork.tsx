@@ -10,7 +10,7 @@ type Work={id:string;version:number;status:string;work_number:string;work_title:
   registration:string|null;part_number:string|null;serial_number:string|null;requirements_json:Record<string,string|boolean|null>;
   contract_id:string;purchase_order_id:number|null;site_code:string};
 type Detail={work:Work;inspection_checks:{criterion_index:number;criterion:string;result:string;filename:string|null;review_reason:string|null}[];history:{id:string;action:string;reason:string;created_at:string;from_state:string|null;to_state:string|null}[];
-  additional_work:{id:string;description:string;state:string;decision_reason:string|null}[];
+  additional_work:{id:string;description:string;state:string;decision_reason:string|null;approved_amended_work_reference:string|null;approved_commercial_variation_reference:string|null}[];
   custody:{id:string;item_type:string;description:string;quantity:number;uom:string;state:string;serial_batch:string|null}[];
   evidence:{id:string;category:string;filename:string;status:string;retention_status:string|null}[];
   closure_blockers:string[]};
@@ -138,7 +138,7 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
           <button disabled={busy||reason.trim().length<8}>Record provider receipt</button>
         </form>}
         <h3>Additional work decisions</h3>
-        {!detail.value?.additional_work.length?<p>No scope variations.</p>:detail.value.additional_work.map(x=><p key={x.id}>{x.state} · {x.description} · {x.decision_reason||"Decision pending; do not commence additional work"}</p>)}
+        {!detail.value?.additional_work.length?<p>No scope variations.</p>:detail.value.additional_work.map(x=><p key={x.id}>{x.state} · {x.description} · {x.decision_reason||"Decision pending; do not commence additional work"}{x.approved_amended_work_reference&&<small> · Authorized amended instruction: {x.approved_amended_work_reference}</small>}</p>)}
         <h3>Technical closure readiness</h3>
         {detail.value?.closure_blockers.length?<ul>{detail.value.closure_blockers.map((x,i)=><li key={i}>{x}</li>)}</ul>:<p>No outstanding record-reconciliation blockers in the current work projection. Only Safarilink may technically accept and close the order.</p>}
         <details><summary>Immutable technical history ({detail.value?.history.length||0})</summary>
