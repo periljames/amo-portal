@@ -94,7 +94,7 @@ const PdfDocument = Document as unknown as FC<Record<string, unknown>>;
 const PdfPage = Page as unknown as FC<Record<string, unknown>>;
 const PAGE_GAP = 18;
 const PAGE_TOP_INSET = 14;
-const NAVIGATION_TIMEOUT_MS = 4_000;
+const NAVIGATION_TIMEOUT_MS = 12_000;
 
 type PdfDocumentHandle = {
   numPages: number;
@@ -669,6 +669,9 @@ export default function PdfReaderCoreV4({
   }, [onPageChange, pageCount, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
+    // Do not let a transient virtualizer range at the old scroll offset
+    // reset an explicit distant-page request before the target has rendered.
+    if (pendingPageRef.current !== null) return;
     const viewport = viewportRef.current;
     if (!viewport || !pageCount) return;
     const anchor = viewport.scrollTop + PAGE_TOP_INSET;
@@ -723,18 +726,24 @@ export default function PdfReaderCoreV4({
     const page = clampPdfValue(requested, 1, pageCount);
     pendingPageRef.current = page;
     setNavigationTarget(page);
+    fastScrollingRef.current = false;
+    setFastScrolling(false);
+    currentPageRef.current = page;
+    setCurrentPage(page);
+    setPageInput(String(page));
+    onPageChange?.(page);
     setActionError("");
 
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
     navigationTimerRef.current = window.setTimeout(() => {
       window.requestAnimationFrame(() => {
-        synchronizePhysicalPage();
-        if (currentPageRef.current === page || pageIsAtReadingLine(page)) {
+        if (pageIsAtReadingLine(page)) {
           settleNavigation(page);
         } else if (pendingPageRef.current === page) {
           pendingPageRef.current = null;
           setNavigationTarget((current) => current === page ? null : current);
           setActionError(`Page ${page} could not be brought into view. Retry the navigation action.`);
+          synchronizePhysicalPage();
         }
         navigationTimerRef.current = null;
       });
@@ -747,6 +756,7 @@ export default function PdfReaderCoreV4({
     });
   }, [
     pageCount,
+    onPageChange,
     pageIsAtReadingLine,
     schedulePhysicalSync,
     settleNavigation,
