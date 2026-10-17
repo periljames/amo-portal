@@ -1578,7 +1578,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   }
                   onClick={() => saveMutation.mutate()}
                 >
-                  <Save size={15} /> {saveMutation.isPending ? "Saving…" : "Save audit definition"}
+                  <Save size={15} /> {saveMutation.isPending ? "Saving…" : "Save definition"}
                 </button>
               </div>
             ) : null}
