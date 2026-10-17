@@ -295,7 +295,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       const assertion = await getAssertion(decodeRequestOptions(ceremony.options));
       if (!assertion) throw new Error("Passkey approval was cancelled before an assertion was returned.");
       await verifyApprovedAuditReportSignature(amoCode, auditId, activeRevision.id, ceremony.challenge_id, serializeAssertionCredential(assertion), signReason);
-      setNotice("Report signed and ready to issue.");
+      setNotice(`Passkey approval recorded against the exact approved report SHA-256 ${activeRevision.sha256}. Report signed and ready to issue.`);
       await invalidateClosing();
     } catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Passkey report approval failed."); }
     finally { setCeremonyBusy(null); }
