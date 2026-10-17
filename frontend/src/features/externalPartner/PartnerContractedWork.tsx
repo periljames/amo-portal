@@ -9,7 +9,7 @@ type Work={id:string;version:number;status:string;work_number:string;work_title:
   data_reference:string;data_revision:string;inspections_json:string[];required_release:string;internal_work_reference:string;
   registration:string|null;part_number:string|null;serial_number:string|null;requirements_json:Record<string,string|boolean|null>;
   contract_id:string;purchase_order_id:number|null;site_code:string};
-type Detail={work:Work;history:{id:string;action:string;reason:string;created_at:string;from_state:string|null;to_state:string|null}[];
+type Detail={work:Work;inspection_checks:{criterion_index:number;criterion:string;result:string;filename:string|null;review_reason:string|null}[];history:{id:string;action:string;reason:string;created_at:string;from_state:string|null;to_state:string|null}[];
   additional_work:{id:string;description:string;state:string;decision_reason:string|null}[];
   custody:{id:string;item_type:string;description:string;quantity:number;uom:string;state:string;serial_batch:string|null}[];
   evidence:{id:string;category:string;filename:string;status:string;retention_status:string|null}[];
@@ -88,7 +88,11 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
           <div><strong>Controlled technical data</strong><p>{work.data_reference} · revision {work.data_revision}</p>
           {typeof work.requirements_json.data_manual_id==="string"&&<button type="button" onClick={()=>void downloadTechnicalData()}>Download assigned DMS technical original</button>}
           <small>Do not substitute superseded data, processes or unapproved parts.</small></div>
-          <div><strong>Mandatory inspection and release</strong>{work.inspections_json.map((x,i)=><p key={i}>{x}</p>)}<p>{work.required_release}</p></div>
+          <div><strong>Mandatory inspection and release</strong>
+            {(detail.value?.inspection_checks||[]).map(x=><p key={x.criterion_index}>{x.criterion_index+1}. {x.criterion}: {x.result}
+              {x.filename&&<small> · Reviewed report: {x.filename}</small>}</p>)}
+            <p>{work.required_release}</p><small>Only Safarilink reviews documentary compliance; this is not a contractor or Safarilink release.</small>
+          </div>
         </div>
         {work.requirements_json.foreign&&<p role="note">Foreign maintenance: State-of-Registry, operator and authority conditions must be met independently of Kenyan supplier approval.</p>}
         {canRespond&&allowed.length>0&&<form className="partner-form" onSubmit={e=>{e.preventDefault();if(!action||!work)return;void run("/transitions",{action,reason,expected_version:work.version,details:{},idempotency_key:key()},"Transaction recorded. Internal technical and Quality approvals remain independent.");}}>
