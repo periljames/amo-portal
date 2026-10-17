@@ -70,7 +70,7 @@ def _role(user):
 
 def _staff(db,amo_code,user):
     amo=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
-    if _role(user) not in set(MANAGERS.values())|QUALITY|STORES|{"DOCUMENT_CONTROL_OFFICER"}:
+    if _role(user) not in set(MANAGERS.values())|QUALITY|STORES|{"QUALITY_OFFICER","DOCUMENT_CONTROL_OFFICER"}:
         raise HTTPException(403,"An appointed maintenance, Quality, Stores or document-control role is required")
     if db.get_bind().dialect.name=="postgresql":
         db.execute(text("SELECT set_config('app.tenant_id',:amo,true)"),{"amo":amo})
@@ -392,7 +392,8 @@ def staff_queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current
     amo=_staff(db,amo_code,user)
     return {"items":_all(db,"""SELECT id,work_number,work_type,work_title,status,version,
             supplier_id,site_code,contract_id,updated_at FROM external_contracted_work
-          WHERE amo_id=:amo ORDER BY updated_at DESC LIMIT :limit""",amo=amo,limit=limit)}
+          WHERE amo_id=:amo ORDER BY updated_at DESC LIMIT :limit""",amo=amo,limit=limit),
+          "can_create":_role(user) in set(MANAGERS.values())}
 
 
 @staff_router.get("/options")
@@ -444,6 +445,7 @@ def assignable_grants(amo_code:str,work_id:str,db:Session=Depends(get_db),
         JOIN external_organization_memberships m ON m.id=g.membership_id
         JOIN external_identities i ON i.id=m.identity_id
         WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider AND g.status='ACTIVE'
+          AND m.status='ACTIVE' AND i.status='ACTIVE'
         ORDER BY i.email""",amo=amo,provider=work["provider_id"])}
 
 
@@ -686,7 +688,19 @@ def acknowledge_provider_custody(tenant_slug:str,work_id:str,item_id:str,payload
                                  request:Request,db:Session=Depends(get_db)):
     session,ctx=_partner(db,request,tenant_slug,True)
     work=_partner_work(db,session,ctx,work_id,lock=True)
+    replay=_one(db,"""SELECT action,reason,actor_identity_id,details_json
+       FROM external_contracted_work_events
+       WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:retry""",
+       amo=ctx["amo"],work=work_id,retry=payload.idempotency_key)
+    if replay:
+        if (replay["action"],replay["reason"],replay["actor_identity_id"]) != ("PROPERTY_RECEIVED_BY_PROVIDER",payload.message,ctx["person"]):
+            raise HTTPException(409,"Idempotency key reused for a different custody receipt")
+        if str((replay["details_json"] or {}).get("item_id")) != item_id:
+            raise HTTPException(409,"Receipt retry does not match the original custody item")
+        return {"id":item_id,"state":"RECEIVED_BY_PROVIDER","retry":True,"stores_release":False}
     if work["version"]!=payload.expected_version:raise HTTPException(409,"Work changed; reload custody")
+    if work["status"] in {"CANCELLED","CLOSED","DRAFT","TECHNICAL_SCOPE_REVIEW","QUALIFICATION_AGREEMENT_CHECK","AWAITING_AUTHORIZATION","AUTHORIZED"}:
+        raise HTTPException(409,"Provider receipt is not permitted at this work stage")
     if payload.kind!="PROGRESS":raise HTTPException(422,"Receipt acknowledgement is distinct from a technical finding")
     item=_one(db,"""SELECT id,state,stores_reference FROM external_contracted_custody
       WHERE amo_id=:amo AND work_id=:work AND id=:item FOR UPDATE""",
@@ -737,6 +751,13 @@ def provider_communication(tenant_slug:str,work_id:str,payload:ProviderNote,
                            request:Request,db:Session=Depends(get_db)):
     session,ctx=_partner(db,request,tenant_slug,True)
     work=_partner_work(db,session,ctx,work_id,lock=True)
+    replay=_one(db,"""SELECT action,reason,actor_identity_id FROM external_contracted_work_events
+       WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:retry""",
+       amo=ctx["amo"],work=work_id,retry=payload.idempotency_key)
+    if replay:
+        if (replay["action"],replay["reason"],replay["actor_identity_id"]) != (payload.kind,payload.message,ctx["person"]):
+            raise HTTPException(409,"Idempotency key reused for a different communication")
+        return {"recorded":True,"status":work["status"],"retry":True}
     if work["version"]!=payload.expected_version:raise HTTPException(409,"Work order changed; refresh")
     if work["status"] not in {"DISPATCHED","PROVIDER_ACCEPTED","IN_PROGRESS","WORK_COMPLETED",
         "RELEASE_SUBMITTED","REWORK_REQUIRED","ON_HOLD"}:
@@ -752,6 +773,16 @@ def request_additional(tenant_slug:str,work_id:str,payload:AdditionalRequest,req
                        db:Session=Depends(get_db)):
     session,ctx=_partner(db,request,tenant_slug,True)
     work=_partner_work(db,session,ctx,work_id,lock=True)
+    replay=_one(db,"""SELECT action,reason,actor_identity_id,details_json
+       FROM external_contracted_work_events
+       WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:retry""",
+       amo=ctx["amo"],work=work_id,retry=payload.idempotency_key)
+    if replay:
+        if (replay["action"],replay["reason"],replay["actor_identity_id"]) != ("ADDITIONAL_WORK_REQUESTED",payload.description,ctx["person"]):
+            raise HTTPException(409,"Idempotency key reused for a different request")
+        info=replay["details_json"] or {}
+        return {"id":info.get("additional_work_id"),"status":"AWAITING_SAFARILINK_TECHNICAL_DECISION",
+                "work_status":work["status"],"retry":True}
     if work["status"]!="IN_PROGRESS":
         raise HTTPException(409,"Additional work may be requested only during authorized maintenance")
     _eligibility(db,work)
@@ -911,7 +942,9 @@ def assign_partner_member(amo_code:str,work_id:str,grant_id:str,db:Session=Depen
     if _role(user)!=MANAGERS[work["work_type"]]:
         raise HTTPException(403,"Responsible Maintenance Manager must assign a contractor representative")
     grant=_one(db,"""SELECT g.id,g.object_scope_json,g.capabilities_json
-        FROM external_tenant_grants g JOIN external_tenant_providers p ON p.id=g.tenant_provider_id
+        FROM external_tenant_grants g JOIN external_tenant_providers p ON p.amo_id=g.amo_id AND p.id=g.tenant_provider_id
+        JOIN external_organization_memberships m ON m.id=g.membership_id AND m.status='ACTIVE'
+        JOIN external_identities i ON i.id=m.identity_id AND i.status='ACTIVE'
         WHERE g.amo_id=:amo AND g.id=:id AND g.status='ACTIVE'
           AND g.tenant_provider_id=:provider AND p.supplier_id=:supplier""",
         amo=amo,id=grant_id,provider=work["provider_id"],supplier=work["supplier_id"])
