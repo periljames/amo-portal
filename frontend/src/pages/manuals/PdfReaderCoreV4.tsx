@@ -1632,6 +1632,19 @@ export default function PdfReaderCoreV4({
       <div
         ref={viewportRef}
         className="pdfv3-viewport"
+        onWheelCapture={() => {
+          // Physical scrolling is an explicit user navigation decision. A
+          // preceding Contents/deep-link jump must not retain authority over
+          // the visible page when the reader starts scrolling manually.
+          if (pendingPageRef.current !== null) {
+            pendingPageRef.current = null;
+            setNavigationTarget(null);
+            if (navigationTimerRef.current !== null) {
+              window.clearTimeout(navigationTimerRef.current);
+              navigationTimerRef.current = null;
+            }
+          }
+        }}
         onScroll={handleViewportScroll}
       >
         {loadError ? (
