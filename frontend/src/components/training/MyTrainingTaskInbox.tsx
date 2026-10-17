@@ -21,7 +21,7 @@ const MyTrainingTaskInbox: React.FC = () => {
         <div className="card">
           <div className="card-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>
-              <h2>Assigned training tasks</h2>
+              <h2>My training tasks</h2>
               <p className="text-muted">Attendance follow-up, induction, controlled forms, assessments and experience actions assigned to you.</p>
             </div>
             <button type="button" className="icon-button" aria-label="Refresh tasks" onClick={() => void tasks.refetch()}>
