@@ -26,7 +26,7 @@ from .database import (
     dispose_engines,
     probe_database,
 )
-from .database_resilience import database_circuit
+from .database_resilience import database_circuit, is_database_disconnect
 from .db_capacity import connection_budget, validate_connection_budget
 from .query_metrics import begin_counting, end_counting, query_count
 from .security import (
@@ -479,6 +479,10 @@ async def meter_api_calls(request: Request, call_next):
         status_code = 503
         response = _pool_timeout_response()
     except OperationalError as exc:
+        # SQL errors such as deadlocks and missing module tables do not prove
+        # that the shared database is unavailable.
+        if not exc.connection_invalidated and not is_database_disconnect(exc.orig):
+            raise
         timeout_error = True
         status_code = 503
         if database_circuit.mark_failure(exc):
@@ -565,7 +569,7 @@ def health():
     return {"status": "ok"}
 
 @app.get("/livez", tags=["health"])
-def livez():
+async def livez():
     """Process liveness only; never claims that PostgreSQL is ready."""
     return {"status": "alive", "process": True}
 
@@ -646,7 +650,10 @@ def _readiness_response() -> JSONResponse:
     jobs_ok = not job_runtime["enabled"] or (
         job_runtime["running"] and bool(worker_families) and all(worker_families.values())
     )
-    healthy = db_ok and migrations_ok and jobs_ok
+    # Background worker families report their own faults. Routing the entire
+    # API out of service for one stopped worker prevents healthy modules and
+    # offline replay from recovering.
+    healthy = db_ok and migrations_ok
     circuit = database_circuit.snapshot()
     payload = {
         "status": "ok" if healthy else "degraded",
@@ -660,6 +667,7 @@ def _readiness_response() -> JSONResponse:
         "retryable": not healthy,
         "broker": realtime_gateway.health(),
         "jobs": job_runtime,
+        "jobs_ready": jobs_ok,
         "database_circuit": circuit,
         "connection_budget": connection_budget().payload(),
     }
