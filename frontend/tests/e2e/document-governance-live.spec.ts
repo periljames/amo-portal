@@ -288,6 +288,6 @@ test.describe("Document Control daily operating model", () => {
     await scan.getByRole("button", { name: /Sign in \/ return/i }).click();
     await expect(scan).toContainText("RETURNED", { timeout: 30_000 });
     await expect(scan).toContainText("Document Control shelf");
-    await expect(scan).toContainText("CHECK IN");
+    await expect(scan).toContainText("RETURN ·", { timeout: 30_000 });
   });
 });
