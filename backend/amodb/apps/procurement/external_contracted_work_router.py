@@ -554,7 +554,8 @@ def staff_detail(amo_code:str,work_id:str,db:Session=Depends(get_db),user=Depend
         elif action in STORES_ACTIONS and role in STORES:allowed.append(action)
         elif action in MANAGER_ACTIONS and role==MANAGERS[work["work_type"]]:
             allowed.append(action)
-    return {**_details(db,work),"allowed_actions":allowed}
+    return {**_details(db,work),"allowed_actions":allowed,
+            "can_review_inspections":_role(user)==MANAGERS[work["work_type"]]}
 
 
 def _transition(db,work,payload,*,user=None,identity=None):
