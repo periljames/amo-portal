@@ -84,6 +84,8 @@ def upgrade():
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("technical_data", sa.Text()),
         sa.Column("commercial_reference", sa.String(128)),
+        sa.Column("approved_amended_work_reference", sa.String(128)),
+        sa.Column("approved_commercial_variation_reference", sa.String(128)),
         sa.Column("operator_approval_reference", sa.String(128)),
         sa.Column("authority_approval_reference", sa.String(128)),
         sa.Column("state", sa.String(24), nullable=False, server_default="REQUESTED"),
