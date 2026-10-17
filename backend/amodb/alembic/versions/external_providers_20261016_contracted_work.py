@@ -112,6 +112,24 @@ def upgrade():
         sa.CheckConstraint("quantity > 0", name="ck_external_custody_qty"),
         sa.CheckConstraint("state IN ('REGISTERED','DISPATCHED','RECEIVED_BY_PROVIDER','CONSUMED','RETURNED','DISCREPANCY','RECONCILED')", name="ck_external_custody_state"),
     )
+    # A release or generic test-report attachment does not establish that each
+    # required inspection/test/hold point was reviewed against its own evidence.
+    op.create_table("external_contracted_inspection_checks",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("work_id", sa.String(36), sa.ForeignKey("external_contracted_work.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("criterion_index", sa.Integer(), nullable=False),
+        sa.Column("criterion", sa.Text(), nullable=False),
+        sa.Column("result", sa.String(24), nullable=False, server_default="PENDING"),
+        sa.Column("submission_id", sa.String(36), sa.ForeignKey("external_partner_evidence_submissions.id", ondelete="RESTRICT")),
+        sa.Column("review_reason", sa.Text()),
+        sa.Column("reviewed_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="RESTRICT")),
+        sa.Column("reviewed_at", sa.DateTime(timezone=True)),
+        sa.UniqueConstraint("amo_id","work_id","criterion_index", name="uq_external_work_inspection_index"),
+        sa.CheckConstraint("criterion_index >= 0", name="ck_external_inspection_index"),
+        sa.CheckConstraint("result IN ('PENDING','ACCEPTED','REJECTED')", name="ck_external_inspection_result"),
+    )
+    op.create_index("ix_ext_work_inspection", "external_contracted_inspection_checks", ["amo_id","work_id","result"])
     op.create_table("external_contracted_evidence_links",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="RESTRICT"), nullable=False),
@@ -127,7 +145,7 @@ def upgrade():
         batch.create_check_constraint("ck_ext_partner_upload_relation",
             "related_kind IN ('PROVIDER','CONTRACT','ASSIGNMENT','RFQ','PO','SHIPMENT','CONTRACTED_WORK')")
     if op.get_bind().dialect.name == "postgresql":
-        for table in ("external_contracted_work","external_contracted_work_events","external_contracted_additional_work","external_contracted_custody","external_contracted_evidence_links"):
+        for table in ("external_contracted_work","external_contracted_work_events","external_contracted_additional_work","external_contracted_custody","external_contracted_inspection_checks","external_contracted_evidence_links"):
             op.execute(sa.text(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY'))
             op.execute(sa.text(f"""CREATE POLICY "{table}_tenant" ON "{table}"
@@ -150,6 +168,6 @@ def downgrade():
         batch.drop_constraint("ck_ext_partner_upload_relation", type_="check")
         batch.create_check_constraint("ck_ext_partner_upload_relation",
             "related_kind IN ('PROVIDER','CONTRACT','ASSIGNMENT','RFQ','PO','SHIPMENT')")
-    for table in ("external_contracted_evidence_links","external_contracted_custody","external_contracted_additional_work",
+    for table in ("external_contracted_evidence_links","external_contracted_inspection_checks","external_contracted_custody","external_contracted_additional_work",
                   "external_contracted_work_events","external_contracted_work"):
         op.drop_table(table)
