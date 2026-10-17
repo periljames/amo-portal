@@ -38,10 +38,12 @@ html {
 
 body {
   color: var(--text-primary);
-  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-family-sans);
   font-size: 14px;
   line-height: 1.45;
 }
+.theme-toggle-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--surface-border); border-radius: var(--radius-sm); background: var(--surface-elevated); color: var(--text-primary); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.theme-toggle-btn svg { flex-shrink: 0; }
 
 button,
 input,

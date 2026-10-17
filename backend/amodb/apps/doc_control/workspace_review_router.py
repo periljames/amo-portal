@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from amodb.apps.resilience.offline_commands import offline_create
+from .workspace_router import _authorize_offline_review
+
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -46,7 +49,10 @@ def _effective_review_payload(
             detail="Periodic review must reference the current published revision",
         )
     get_revision(db, manual, effective_revision_id)
-    if payload.due_at <= utcnow():
+    due_at = payload.due_at
+    if due_at.tzinfo is not None:
+        due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
+    if due_at <= utcnow():
         raise HTTPException(
             status_code=422,
             detail="The next periodic review due date must be in the future",
@@ -70,7 +76,7 @@ def _effective_review_payload(
                 "review_id": existing.id,
             },
         )
-    return payload.model_copy(update={"revision_id": effective_revision_id})
+    return payload.model_copy(update={"revision_id": effective_revision_id, "due_at": due_at})
 
 
 def validate_review_completion(
@@ -158,6 +164,7 @@ def _create_review_follow_up(
 
 
 @router.post("/t/{tenant_slug}/reviews", include_in_schema=False)
+@offline_create("/doc-control/workspace/t/{tenant_slug}/reviews", dict, status_code=200, authorize=_authorize_offline_review)
 def create_effective_revision_review(
     tenant_slug: str,
     payload: schemas.ReviewPlanCreate,

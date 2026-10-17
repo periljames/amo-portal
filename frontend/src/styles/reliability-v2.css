@@ -496,3 +496,20 @@
     gap: .2rem;
   }
 }
+
+/* FRACAS case detail visualizes backend lifecycle state; no local stage mutations. */
+.rel-fracas-progress {padding:.85rem 1rem;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 13%,transparent);border-radius:.7rem;margin-bottom:.85rem}
+.rel-fracas-progress header {display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between}
+.rel-fracas-progress header strong {font-size:.93rem}
+.rel-fracas-progress header span {font-size:.77rem;color:color-mix(in srgb,CanvasText 63%,transparent)}
+.rel-fracas-progress ol {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.45rem;list-style:none;padding:0;margin:.9rem 0}
+.rel-fracas-progress li {display:flex;gap:.4rem;align-items:center;padding:.5rem .4rem;border-radius:.5rem;
+  border:1px solid color-mix(in srgb,CanvasText 15%,transparent);font-size:.77rem}
+.rel-fracas-progress li span {display:grid;place-items:center;border-radius:50%;height:25px;width:25px;flex:0 0 25px;background:#e2e8f0;color:#334155;font-size:.71rem;font-weight:750}
+.rel-fracas-progress li.is-complete {background:color-mix(in srgb,#059669 7%,Canvas)}
+.rel-fracas-progress li.is-complete span {background:#15803d;color:white}
+.rel-fracas-progress li.is-current {border-color:#0f766e;background:color-mix(in srgb,#0f766e 9%,Canvas);font-weight:750}
+.rel-fracas-progress li.is-current span {background:#0f766e;color:white}
+.rel-fracas-progress p {font-size:.75rem;opacity:.75;margin:0}
+@media(max-width:950px){.rel-fracas-progress ol {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:540px){.rel-fracas-progress ol {grid-template-columns:minmax(0,1fr)}}

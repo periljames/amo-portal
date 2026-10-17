@@ -369,6 +369,7 @@ const ReliabilityFormalReviewWorkspace: React.FC = () => {
         </div>
       )}
 
+      <details className="rfw-create-drawer"><summary>Start a new controlled Reliability report</summary>
       <section className="rfw-create" aria-labelledby="rfw-create-title">
         <div className="rfw-create-copy">
           <p className="rfw-eyebrow">New controlled period</p>
@@ -409,6 +410,7 @@ const ReliabilityFormalReviewWorkspace: React.FC = () => {
           <button type="submit" className="rfw-primary" disabled={busy || !profileId}>Create draft</button>
         </form>
       </section>
+      </details>
 
       <div className="rfw-grid">
         <aside className="rfw-library" aria-label="Formal report library">

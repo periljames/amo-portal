@@ -175,7 +175,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   };
 
   // Automatic audit-wide replay runs once per authenticated browser session
-  // via qmsAuditOfflineSync. This component only keeps its queue view fresh.
+  // via portalOfflineSync. This component only keeps its queue view fresh.
   // Avoid a second independent uploader racing the global replay.
 
   const upload = async () => {

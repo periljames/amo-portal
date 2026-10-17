@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, status
@@ -34,6 +36,7 @@ def _amo_id(current_user: account_models.User) -> str:
     response_model=schemas.InventoryLedgerRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/receive', schemas.InventoryLedgerRead, status_code=status.HTTP_201_CREATED)
 def receive_inventory(
     payload: schemas.InventoryReceiveRequest,
     db: Session = Depends(get_db),
@@ -60,6 +63,7 @@ def receive_inventory(
     response_model=List[schemas.InventoryLedgerRead],
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/inspect', List[schemas.InventoryLedgerRead], status_code=status.HTTP_201_CREATED)
 def inspect_inventory(
     payload: schemas.InventoryInspectRequest,
     db: Session = Depends(get_db),
@@ -85,6 +89,7 @@ def inspect_inventory(
     response_model=schemas.InventoryLedgerRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/transfer', schemas.InventoryLedgerRead, status_code=status.HTTP_201_CREATED)
 def transfer_inventory(
     payload: schemas.InventoryTransferRequest,
     db: Session = Depends(get_db),
@@ -109,6 +114,7 @@ def transfer_inventory(
     response_model=schemas.InventoryLedgerRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/issue', schemas.InventoryLedgerRead, status_code=status.HTTP_201_CREATED)
 def issue_inventory(
     payload: schemas.InventoryIssueRequest,
     db: Session = Depends(get_db),
@@ -133,6 +139,7 @@ def issue_inventory(
     response_model=schemas.InventoryLedgerRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/return', schemas.InventoryLedgerRead, status_code=status.HTTP_201_CREATED)
 def return_inventory(
     payload: schemas.InventoryReturnRequest,
     db: Session = Depends(get_db),
@@ -157,6 +164,7 @@ def return_inventory(
     response_model=schemas.InventoryLedgerRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/inventory/scrap', schemas.InventoryLedgerRead, status_code=status.HTTP_201_CREATED)
 def scrap_inventory(
     payload: schemas.InventoryScrapRequest,
     db: Session = Depends(get_db),

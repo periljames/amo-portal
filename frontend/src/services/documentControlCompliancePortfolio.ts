@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -95,7 +96,7 @@ export type ExternalAssessmentContext = {
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(authHeaders());
   if (init.body) headers.set("Content-Type", "application/json");
-  const response = await fetch(url, { ...init, headers, credentials: "same-origin" });
+  const response = await portalFetch(url, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let message = `The compliance request could not be completed (${response.status}).`;
     try {

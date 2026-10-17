@@ -154,7 +154,7 @@ export async function listWorkOrders(params?: {
 }
 
 export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderRead> {
-  // Creation stays server-controlled unless the API supplies a durable idempotency key.
+  // The shared transport supplies a durable key and the server commits its receipt atomically.
   return trackProductWorkflow({
     module: "work-orders",
     workflow: "work-order-create",
@@ -184,7 +184,7 @@ export async function listTasksForWorkOrder(workOrderId: number): Promise<TaskCa
 }
 
 export async function createTask(workOrderId: number, payload: TaskCreatePayload): Promise<TaskCardRead> {
-  // Creation stays live-only to avoid duplicate maintenance instructions.
+  // The registered create workflow queues durably and reuses its receipt key.
   return trackProductWorkflow({
     module: "work-orders",
     workflow: "task-card-create",

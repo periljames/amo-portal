@@ -3,6 +3,25 @@ import type { PublicationUploadPayload } from "./publications";
 import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
 
+export type ChecklistSourceReview = {
+  documents: Array<{ binding_id: string; document_code: string; filename: string; previous_count: number; question_count: number; items: ChecklistTemplateItem[] }>;
+  preview_sha256: string;
+  can_rebuild: boolean;
+  can_manage: boolean;
+  blocker: string | null;
+};
+
+export function reviewChecklistSource(amoCode: string, auditId: string) {
+  return apiRequest<ChecklistSourceReview>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings/source-review`),
+    { cacheTtlMs: 0, offline: { cache: false, allowStaleFallback: false } });
+}
+
+export function rebuildChecklistSource(amoCode: string, auditId: string, preview_sha256: string, reason: string) {
+  return apiRequest<{ question_count: number; requires_preparation_issue: boolean }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings/rebuild-source`),
+    { method: "POST", body: JSON.stringify({ preview_sha256, reason }), offline: { queueMutation: false } });
+}
+
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
 export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
 export type ChecklistResponseOption = {

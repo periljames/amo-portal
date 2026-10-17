@@ -23,7 +23,8 @@ import {
   type OfflineReplayProgress,
 } from "../../services/offlinePersistence";
 import { listPendingAuditEvidenceGroups, onOfflineAuditEvidenceChanged } from "../../services/qmsOfflineAuditEvidence";
-import { synchronizeAuditOfflineNow } from "../../services/qmsAuditOfflineSync";
+import { synchronizePortalOfflineNow } from "../../services/portalOfflineSync";
+import { classifyOfflineMutation } from "../../services/offlineCapabilities";
 import {
   isQmsFieldworkConflict,
   keepServerVersionForQmsFieldwork,
@@ -50,8 +51,19 @@ type IndicatorState = "online" | "offline" | "degraded" | "queued" | "syncing" |
 
 function entryLabel(entry: OfflineOutboxEntry): string {
   if (entry.entityType === "qms-audit-checklist-item") return "Audit checklist fieldwork";
-  const entity = entry.entityType?.replace(/-/g, " ") || "local change";
+  const rule = classifyOfflineMutation(entry.path, entry.method);
+  const entity = entry.entityType?.replace(/-/g, " ") || rule.label;
   return entity.replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function entryDescription(entry: OfflineOutboxEntry): string {
+  try {
+    const body = JSON.parse(entry.body || "{}");
+    for (const key of ["title", "course_name", "legal_name", "wo_number", "reference", "description", "notes"]) {
+      if (typeof body[key] === "string" && body[key].trim()) return body[key].trim().slice(0, 160);
+    }
+  } catch { /* Unreadable payloads retain their recovery controls. */ }
+  return "Saved on this device";
 }
 
 function formatLastReady(value: number | null): string {
@@ -81,6 +93,28 @@ export function OfflineSyncIndicator() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const online = connectivity.state === "ONLINE";
+  const modules = useMemo(() => {
+    const groups = new Map<string, { waiting: number; review: number }>();
+    for (const entry of entries) {
+      const rule = classifyOfflineMutation(entry.path, entry.method);
+      const moduleLabels: Record<string, string> = { training: "Training", tasks: "Tasks", fleet: "Fleet", work: "Maintenance",
+        technical_records: "Technical records", inventory: "Inventory", finance: "Finance", procurement: "Procurement", reliability: "Reliability", doc_control: "Document control" };
+      const label = rule.module ? moduleLabels[rule.module] || rule.module : rule.id.startsWith("qms-") ? "Quality audits" : rule.id.startsWith("roster-")
+        ? "Rostering" : rule.id.startsWith("work-task-") ? "Maintenance tasks"
+          : rule.id.startsWith("attendance-") ? "Attendance" : "Other changes";
+      const group = groups.get(label) || { waiting: 0, review: 0 };
+      if (entry.status === "failed" || entry.status === "conflict") group.review++;
+      else group.waiting++;
+      groups.set(label, group);
+    }
+    if (evidenceTotals.pending) {
+      const quality = groups.get("Quality audits") || { waiting: 0, review: 0 };
+      quality.waiting += evidenceTotals.pending - evidenceTotals.conflicts;
+      quality.review += evidenceTotals.conflicts;
+      groups.set("Quality audits", quality);
+    }
+    return [...groups.entries()];
+  }, [entries, evidenceTotals]);
 
   const refresh = useCallback(async () => {
     const [nextSummary, nextEntries, evidence] = await Promise.all([
@@ -102,7 +136,7 @@ export function OfflineSyncIndicator() {
     setManualSync(true);
     setActionError(null);
     try {
-      await synchronizeAuditOfflineNow();
+      await synchronizePortalOfflineNow();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -306,7 +340,36 @@ export function OfflineSyncIndicator() {
             <span><strong>{connectivity.attempt}</strong> retry attempt{connectivity.attempt === 1 ? "" : "s"}</span>
           </div>
 
+          {modules.length ? (
+            <ul className="portal-offline-recovery__modules" aria-label="Sync by module">
+              {modules.map(([label, group]) => (
+                <li key={label}>
+                  <strong>{label}</strong>
+                  <span>{group.waiting} waiting{group.review ? ` · ${group.review} need review` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="portal-offline-recovery__device-note">
+            Local changes stay on this device until the server confirms them. Your other connected devices receive saved updates after sync.
+          </p>
+
           {actionError ? <p className="portal-offline-recovery__error" role="alert">{actionError}</p> : null}
+
+          {entries.some((entry) => entry.status === "queued" || entry.status === "syncing") ? (
+            <details className="portal-offline-recovery__list">
+              <summary>Saved changes waiting to sync</summary>
+              {entries.filter((entry) => entry.status === "queued" || entry.status === "syncing").map((entry) => (
+                <article className="portal-offline-recovery__item" key={entry.id}>
+                  <div className="portal-offline-recovery__item-copy">
+                    <strong>{entryLabel(entry)}</strong>
+                    <span>{entryDescription(entry)}</span>
+                    <small>{entry.status === "syncing" ? "Syncing" : "Saved"} · {new Date(entry.createdAt).toLocaleString()}</small>
+                  </div>
+                </article>
+              ))}
+            </details>
+          ) : null}
 
           {reviewEntries.length ? (
             <div className="portal-offline-recovery__list">

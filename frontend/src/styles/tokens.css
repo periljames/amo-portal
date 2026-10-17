@@ -6,6 +6,7 @@
 :root,
 html[data-color-scheme="dark"],
 body[data-color-scheme="dark"] {
+  --font-family-sans: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   color-scheme: dark;
 
   /* Charcoal / graphite dark canvas (Origin-like depth; accents unchanged). */

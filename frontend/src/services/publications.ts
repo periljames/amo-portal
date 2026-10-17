@@ -4,6 +4,7 @@ import { apiPostForm } from "./crs";
 import type { ManualReadPayload } from "./manuals";
 import { readApiCache, writeApiCache } from "./offlinePersistence";
 import { getPdfReaderPerformanceProfile } from "./pdfPerformance";
+import { portalFetch } from "./offlineHttp";
 
 export type PublicationUploadPreview = {
   filename: string;
@@ -218,16 +219,16 @@ export async function readPersistedPublicationBootstrap(
   const key = readerCacheKey(tenantSlug, manualId, revisionId);
   const memory = publicationBootstrapMemory.get(key);
   if (memory) return memory;
-  const cached = await readApiCache<PublicationReaderBootstrap>(key).catch(() => null);
+  const cached = await readApiCache<PublicationReaderBootstrap>(key, true).catch(() => null);
   if (!cached?.value) return null;
   publicationBootstrapMemory.set(key, cached.value);
   return cached.value;
 }
 
-export function cachePublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string, payload: PublicationReaderBootstrap): void {
+export async function cachePublicationBootstrap(tenantSlug: string, manualId: string, revisionId: string, payload: PublicationReaderBootstrap): Promise<void> {
   const key = readerCacheKey(tenantSlug, manualId, revisionId);
   publicationBootstrapMemory.set(key, payload);
-  void writeApiCache(key, payload, READER_CACHE_MAX_AGE_MS);
+  await writeApiCache(key, payload, READER_CACHE_MAX_AGE_MS);
 }
 
 export async function previewPublicationUpload(tenantSlug: string, file: File): Promise<PublicationUploadPreview> {
@@ -257,7 +258,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
   const headers = new Headers(authHeaders());
   if (init.body !== undefined && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (init.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
-  const response = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers, credentials: "same-origin" });
+  const response = await portalFetch(path, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {
@@ -267,7 +268,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
     } catch {
       // Keep the HTTP status fallback when the response is not JSON.
     }
-    throw new Error(detail);
+    throw Object.assign(new Error(detail), { status: response.status });
   }
   return response;
 }
@@ -276,7 +277,7 @@ export async function getPublicationReaderBootstrap(tenantSlug: string, manualId
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-bootstrap`;
   const response = await authenticatedFetch(path);
   const payload = await response.json() as PublicationReaderBootstrap;
-  cachePublicationBootstrap(tenantSlug, manualId, revisionId, payload);
+  await cachePublicationBootstrap(tenantSlug, manualId, revisionId, payload);
   return payload;
 }
 
@@ -288,11 +289,40 @@ export function prefetchPublicationReader(tenantSlug: string, manualId: string, 
 }
 
 export async function getPublicationReaderContent(tenantSlug: string, manualId: string, revisionId: string, sectionIds: string[]): Promise<PublicationReaderContent> {
+  const ids = [...new Set(sectionIds.filter(Boolean))].sort();
+  const sectionKey = (id: string) => `${readerCacheKey(tenantSlug, manualId, revisionId)}:section:${encodeURIComponent(id)}`;
+  const cachedSections = async (): Promise<PublicationReaderContent | null> => {
+    if (!ids.length) return null;
+    const cached = await Promise.all(ids.map((id) => readApiCache<PublicationReaderContent>(sectionKey(id), true)));
+    if (cached.some((record) => !record)) return null;
+    return { sections: cached.flatMap((record) => record!.value.sections), blocks: cached.flatMap((record) => record!.value.blocks),
+      start: 0, limit: ids.length, returned_sections: ids.length };
+  };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    const cached = await cachedSections();
+    if (cached) return cached;
+  }
   const query = new URLSearchParams();
-  for (const sectionId of [...new Set(sectionIds.filter(Boolean))]) query.append("section_id", sectionId);
+  for (const sectionId of ids) query.append("section_id", sectionId);
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/reader-content?${query.toString()}`;
-  const response = await authenticatedFetch(path);
-  return response.json() as Promise<PublicationReaderContent>;
+  try {
+    const response = await authenticatedFetch(path);
+    const content = await response.json() as PublicationReaderContent;
+    await Promise.all(content.sections.map((section) => writeApiCache(sectionKey(section.id), {
+      ...content, sections: [section], blocks: content.blocks.filter((block) => block.section_id === section.id),
+      start: 0, limit: 1, returned_sections: 1,
+    }, READER_CACHE_MAX_AGE_MS)));
+    return content;
+  } catch (error) {
+    // Permission and validation failures must never fall back to an old copy.
+    const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
+    if (status && status < 500) throw error;
+    const message = error instanceof Error ? error.message : "";
+    if (!status && !/offline|could not be reached|cached copy/i.test(message)) throw error;
+    const cached = await cachedSections();
+    if (cached) return cached;
+    throw error;
+  }
 }
 
 export async function searchPublicationReader(tenantSlug: string, manualId: string, revisionId: string, query: string): Promise<PublicationSearchResult[]> {

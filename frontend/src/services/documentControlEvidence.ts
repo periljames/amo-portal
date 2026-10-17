@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -91,7 +92,7 @@ export async function listDocumentEvidenceAssets(
   const query = new URLSearchParams();
   if (revisionId) query.set("revision_id", revisionId);
   const suffix = query.size ? `?${query.toString()}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-assets${suffix}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -117,7 +118,7 @@ export async function uploadDocumentEvidenceAsset(
   form.set("category", input.category || "GENERAL");
   if (input.purpose?.trim()) form.set("purpose", input.purpose.trim());
   if (input.description?.trim()) form.set("description", input.description.trim());
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-assets`,
     {
       method: "POST",
@@ -131,7 +132,7 @@ export async function uploadDocumentEvidenceAsset(
 }
 
 export async function downloadDocumentEvidenceAsset(asset: DocumentEvidenceAsset): Promise<void> {
-  const response = await fetch(`${getApiBaseUrl()}${asset.download_url}`, {
+  const response = await portalFetch(`${getApiBaseUrl()}${asset.download_url}`, {
     headers: authHeaders(),
     credentials: "same-origin",
   });
@@ -153,7 +154,7 @@ export async function downloadDocumentEvidencePack(
   const query = new URLSearchParams();
   if (revisionId) query.set("revision_id", revisionId);
   const suffix = query.size ? `?${query.toString()}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack.zip${suffix}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -176,7 +177,7 @@ export async function queueDocumentEvidencePackJob(
   const query = new URLSearchParams();
   if (revisionId) query.set("revision_id", revisionId);
   const suffix = query.size ? `?${query.toString()}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs${suffix}`,
     { method: "POST", headers: authHeaders(), credentials: "same-origin" },
   );
@@ -189,7 +190,7 @@ export async function getDocumentEvidencePackJob(
   manualId: string,
   jobId: string,
 ): Promise<DocumentEvidencePackJob> {
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs/${encodeURIComponent(jobId)}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -202,7 +203,7 @@ export async function downloadDocumentEvidencePackJob(
   manualId: string,
   jobId: string,
 ): Promise<DocumentEvidencePackDownload> {
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/documents/${encodeURIComponent(manualId)}/evidence-pack-jobs/${encodeURIComponent(jobId)}/download`,
     { headers: authHeaders(), credentials: "same-origin" },
   );

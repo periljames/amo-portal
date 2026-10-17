@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 import shutil
@@ -177,6 +179,7 @@ def list_utilisation(tail_id: str, db: Session = Depends(get_db), current_user: 
 
 
 @router.post("/aircraft/{tail_id}/utilisation", response_model=schemas.AircraftUtilisationRead)
+@offline_create('/records/aircraft/{tail_id}/utilisation', schemas.AircraftUtilisationRead, status_code=200)
 def create_utilisation(tail_id: str, payload: schemas.AircraftUtilisationCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*EDITOR_ROLES))):
     if payload.tail_id != tail_id:
         raise HTTPException(status_code=400, detail="tail mismatch")
@@ -238,6 +241,7 @@ def list_maintenance_records(db: Session = Depends(get_db), current_user: User =
 
 
 @router.post("/maintenance-records", response_model=schemas.MaintenanceRecordRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/records/maintenance-records', schemas.MaintenanceRecordRead, status_code=status.HTTP_201_CREATED)
 def create_maintenance_record(payload: schemas.MaintenanceRecordCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*EDITOR_ROLES))):
     amo_id = current_user.effective_amo_id
     settings = _get_settings(db, amo_id)
@@ -269,6 +273,7 @@ def list_airworthiness_items(item_type: str, db: Session = Depends(get_db), curr
 
 
 @router.post("/airworthiness/{item_type}", response_model=schemas.AirworthinessItemRead)
+@offline_create('/records/airworthiness/{item_type}', schemas.AirworthinessItemRead, status_code=200)
 def create_airworthiness_item(item_type: str, payload: schemas.AirworthinessItemCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*EDITOR_ROLES))):
     item_type = item_type.upper()
     row = models.AirworthinessItem(amo_id=current_user.effective_amo_id, item_type=item_type, **payload.model_dump(exclude={"item_type"}))
@@ -414,6 +419,7 @@ def list_watchlists(db: Session = Depends(get_db), current_user: User = Depends(
 
 
 @router.post("/watchlists", response_model=schemas.WatchlistRead)
+@offline_create('/records/watchlists', schemas.WatchlistRead, status_code=200)
 def create_watchlist(payload: schemas.WatchlistCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
     row = models.AirworthinessWatchlist(amo_id=current_user.effective_amo_id, created_by_user_id=current_user.id, **payload.model_dump())
     db.add(row)
@@ -512,6 +518,7 @@ def list_compliance_actions(db: Session = Depends(get_db), current_user: User = 
 
 
 @router.post("/compliance-actions", response_model=schemas.ComplianceActionRead)
+@offline_create('/records/compliance-actions', schemas.ComplianceActionRead, status_code=200)
 def create_compliance_action(payload: schemas.ComplianceActionCreate, db: Session = Depends(get_db), current_user: User = Depends(require_roles(*PLANNING_EDITOR_ROLES))):
     amo_id = current_user.effective_amo_id
     match = db.query(models.AirworthinessPublicationMatch).filter_by(amo_id=amo_id, id=payload.publication_match_id).first()

@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { assertOfflineReplayAllowed, classifyOfflineMutation, offlineCommandRouteKey } from "./offlineCapabilities";
+import { OFFLINE_CREATE_ROUTES } from "./offlineCreateRoutes";
 
 describe("offline controlled-write policy", () => {
+  it.each(OFFLINE_CREATE_ROUTES)("automatically queues $id with its concrete server receipt key", (route) => {
+    const path = route.path.replace(/\{[^}]+\}/g, "test-id");
+    const rule = classifyOfflineMutation(path, "POST");
+    expect(rule.autoQueue).toBe(true);
+    expect(rule.module).toBe(route.module);
+    expect(offlineCommandRouteKey(path, "POST")).toBe(`portal.create:${path}`);
+    expect(classifyOfflineMutation(`https://portal.test${path}/?v=1`, "POST").id).toBe(rule.id);
+    expect(() => assertOfflineReplayAllowed(path, "POST", JSON.stringify({ title: "Offline record" }))).not.toThrow();
+  });
   it("allows only guarded draft operations", () => {
     expect(() => assertOfflineReplayAllowed(
       "/rostering/versions/ID-VERSION/assignments",
@@ -48,5 +58,10 @@ describe("offline controlled-write policy", () => {
     expect(classifyOfflineMutation("/anything/42", "DELETE").capability).toBe("live-only");
     expect(offlineCommandRouteKey("/rostering/versions/ID-V/assignments", "POST"))
       .toBe("rostering.version.assignment.create:ID-V");
+  });
+
+  it.each([null, "", "4", -1, 1.5, undefined])("rejects an invalid roster revision %s", (revision) => {
+    expect(() => assertOfflineReplayAllowed("/rostering/assignments/id", "PATCH",
+      JSON.stringify({ expected_state_revision: revision }))).toThrow();
   });
 });

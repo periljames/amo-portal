@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 import {
   BarChart3,
   BookOpen,
@@ -743,7 +744,11 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
               <main className="tenant-shell__main">
                 {showPollingErrorBanner ? <div className="tenant-shell__status-banner" role="status">Live data is temporarily delayed. Cached tenant data remains visible.</div> : null}
-                <div className="tenant-shell__content">{children}</div>
+                <div className="tenant-shell__content">
+                  <PortalErrorBoundary key={location.pathname} inline title="This workspace is unavailable">
+                    {children}
+                  </PortalErrorBoundary>
+                </div>
               </main>
             </div>
 

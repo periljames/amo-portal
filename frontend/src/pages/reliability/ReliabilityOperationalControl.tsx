@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { listAircraft, type AircraftRead } from "../../services/fleet";
 import { apiRequest } from "../../services/apiClient";
@@ -291,7 +292,17 @@ function fieldText(value: unknown): string {
 }
 
 export default function ReliabilityOperationalControl(): React.ReactElement {
-  const [view, setView] = useState<View>("overview");
+  const { amoCode = "UNKNOWN" } = useParams<{ amoCode?: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeView = location.pathname.split("/reliability/operations/")[1]?.split("/")[0] || "overview";
+  const initialView = VIEW_DEFINITIONS.some((item) => item.id === routeView) ? routeView as View : "overview";
+  const [view, setView] = useState<View>(initialView);
+  const navigateView = (next: View) => {
+    setView(next);
+    navigate("/maintenance/" + encodeURIComponent(amoCode) + "/reliability/operations/" + next);
+  };
+  useEffect(() => { setView(initialView); }, [initialView]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [aircraft, setAircraft] = useState<AircraftRead[]>([]);
@@ -423,7 +434,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
         type="button"
         className={view === item.id ? "is-active" : ""}
         aria-current={view === item.id ? "page" : undefined}
-        onClick={() => setView(item.id)}
+        onClick={() => navigateView(item.id)}
       >
         <span>{item.shortLabel}</span>
         <strong>{viewCount(item.id, summary)}</strong>
@@ -438,7 +449,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
     {pageLoading && <div className="reliability-v2__loading" role="status">Loading Reliability source controls…</div>}
     {!pageLoading && viewLoading && <div className="rel-ops__view-loading" role="status">Loading {activeDefinition.label.toLowerCase()}…</div>}
 
-    {!pageLoading && view === "overview" && <Overview summary={summary} readiness={readiness} onNavigate={setView} />}
+    {!pageLoading && view === "overview" && <Overview summary={summary} readiness={readiness} onNavigate={navigateView} />}
     {!pageLoading && !viewLoading && view === "flight" && <FlightView rows={flights} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
     {!pageLoading && !viewLoading && view === "deferrals" && <DeferralView rows={deferrals} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
     {!pageLoading && !viewLoading && view === "shop" && <ShopView rows={shop} aircraft={aircraft} run={run} saving={saving} onAction={setAction} />}
@@ -554,6 +565,8 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
   const [occurrenceTime, setOccurrenceTime] = useState(localDateTime());
   const [severity, setSeverity] = useState("MEDIUM");
   const [query, setQuery] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const calculatedDelay = delayMinutes(scheduledDeparture, actualDeparture);
   const isDelay = eventType === "TECHNICAL_DELAY";
@@ -600,7 +613,7 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Add Flight Operations occurrence <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New controlled occurrence</p><h3>Record the operational event once</h3></div><span>Delay is calculated from scheduled and actual departure.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Event classification" detail="Choose the operational outcome first. The form only asks for timing that applies to that event.">
@@ -636,11 +649,11 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving || timingInvalid || (isDelay && calculatedDelay == null)}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
-    <RegisterSection title="Flight Operations register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "APPROVED", "CLOSED"]}>
+    <RegisterSection title="Flight Operations register" count={filtered.length} query={query} onQuery={(next) => { setQuery(next); setTablePage(0); }} statusFilter={statusFilter} onStatusFilter={(next) => { setStatusFilter(next); setTablePage(0); }} statuses={["DRAFT", "APPROVED", "CLOSED"]}>
       <table className="reliability-v2__table rel-ops__table rel-ops__table--flight"><thead><tr><th>Event</th><th>Flight</th><th>Timing</th><th>Technical context</th><th>Status</th><th>Action</th></tr></thead><tbody>
-        {filtered.map((row) => <tr key={row.id}>
+        {filtered.slice(Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) * tablePageSize, (Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) + 1) * tablePageSize).map((row) => <tr key={row.id}>
           <td><strong>{row.record_number}</strong><small>{EVENT_LABELS[row.event_type] || row.event_type} · Rev {row.revision}</small></td>
           <td><strong>{row.flight_number}</strong><small>{row.origin_station || "—"} → {row.destination_station || "—"} · {row.aircraft_serial_number}</small></td>
           <td>{row.delay_minutes != null ? <><strong>{row.delay_minutes} min delay</strong><small>{displayDate(row.scheduled_departure_at)} → {displayDate(row.actual_departure_at)}</small></> : <><strong>{displayDate(row.occurred_at)}</strong><small>{row.dispatch_impact || "Operational event"}</small></>}</td>
@@ -651,11 +664,15 @@ function FlightView({ rows, aircraft, run, saving, onAction }: { rows: FlightOpe
         {!filtered.length && <tr><td colSpan={6}>No Flight Operations records match the current filters.</td></tr>}
       </tbody></table>
     </RegisterSection>
+    <RegisterPager total={filtered.length} page={tablePage} pageSize={tablePageSize}
+      onPage={setTablePage} onPageSize={(value) => { setTablePageSize(value); setTablePage(0); }} />
   </div>;
 }
 
 function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferral[]; aircraft: AircraftRead[]; run: RunMutation; saving: boolean; onAction: (action: ActionRequest) => void }) {
   const [query, setQuery] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [repeatUnit, setRepeatUnit] = useState("HOURS");
   const filtered = useMemo(() => rows.filter((row) => {
@@ -691,7 +708,7 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Record MEL/CDL deferral <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New controlled deferral</p><h3>Apply the approved MEL / CDL control</h3></div><span>Expiry is taken from the approved control basis, not guessed from a generic category.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Defect and approved item">
@@ -720,11 +737,11 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
-    <RegisterSection title="MEL / CDL register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "OPEN", "EXTENDED", "EXPIRED", "CLOSED"]}>
+    <RegisterSection title="MEL / CDL register" count={filtered.length} query={query} onQuery={(next) => { setQuery(next); setTablePage(0); }} statusFilter={statusFilter} onStatusFilter={(next) => { setStatusFilter(next); setTablePage(0); }} statuses={["DRAFT", "OPEN", "EXTENDED", "EXPIRED", "CLOSED"]}>
       <table className="reliability-v2__table rel-ops__table"><thead><tr><th>Deferral</th><th>Aircraft / defect</th><th>Control window</th><th>Status</th><th>Action</th></tr></thead><tbody>
-        {filtered.map((row) => <tr key={row.id}>
+        {filtered.slice(Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) * tablePageSize, (Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) + 1) * tablePageSize).map((row) => <tr key={row.id}>
           <td><strong>{row.deferral_number}</strong><small>{row.deferral_type} {row.category ? `Category ${row.category}` : ""} · Rev {row.revision}</small></td>
           <td><strong>{row.aircraft_serial_number}</strong><small>{row.item_reference} · {row.defect_reference}</small><details><summary>View defect</summary><p>{row.description}</p></details></td>
           <td><strong>{displayDate(row.expires_at)}</strong><small className={new Date(row.expires_at).getTime() < PAGE_OPENED_AT && row.status !== "CLOSED" ? "rel-ops__text-danger" : ""}>{relativeExpiry(row.expires_at)}</small><small>Applied {displayDate(row.applied_at)}</small></td>
@@ -734,12 +751,16 @@ function DeferralView({ rows, aircraft, run, saving, onAction }: { rows: Deferra
         {!filtered.length && <tr><td colSpan={5}>No deferrals match the current filters.</td></tr>}
       </tbody></table>
     </RegisterSection>
+    <RegisterPager total={filtered.length} page={tablePage} pageSize={tablePageSize}
+      onPage={setTablePage} onPageSize={(value) => { setTablePageSize(value); setTablePage(0); }} />
   </div>;
 }
 
 function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding[]; aircraft: AircraftRead[]; run: RunMutation; saving: boolean; onAction: (action: ActionRequest) => void }) {
   const [findingType, setFindingType] = useState("SHOP_FINDING");
   const [query, setQuery] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const filtered = useMemo(() => rows.filter((row) => {
     const haystack = `${row.shop_order_reference} ${row.part_number} ${row.component_serial_number} ${row.aircraft_serial_number || ""} ${row.event_type}`.toLowerCase();
@@ -772,7 +793,7 @@ function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding
   };
 
   return <div className="rel-ops__workspace">
-    <section className="rel-ops__editor">
+    <details className="rel-ops__capture"><summary>Register component shop finding <span>Open governed entry form</span></summary><section className="rel-ops__editor">
       <div className="rel-ops__section-head"><div><p className="reliability-v2__eyebrow">New shop outcome</p><h3>Record the test conclusion, not an assumed failure</h3></div><span>Release data is captured later, when the component is actually released.</span></div>
       <form className="rel-ops__form" onSubmit={(event) => void submit(event)}>
         <FieldGroup title="Component identity">
@@ -799,11 +820,11 @@ function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding
         </FieldGroup>
         <div className="rel-ops__form-actions"><button className="btn btn-primary" disabled={saving}>Create for approval</button></div>
       </form>
-    </section>
+    </section></details>
 
-    <RegisterSection title="Component-shop register" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "APPROVED", "RELEASED"]}>
+    <RegisterSection title="Component-shop register" count={filtered.length} query={query} onQuery={(next) => { setQuery(next); setTablePage(0); }} statusFilter={statusFilter} onStatusFilter={(next) => { setStatusFilter(next); setTablePage(0); }} statuses={["DRAFT", "APPROVED", "RELEASED"]}>
       <table className="reliability-v2__table rel-ops__table"><thead><tr><th>Shop order</th><th>Component</th><th>Conclusion</th><th>Disposition</th><th>Status</th><th>Action</th></tr></thead><tbody>
-        {filtered.map((row) => <tr key={row.id}>
+        {filtered.slice(Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) * tablePageSize, (Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) + 1) * tablePageSize).map((row) => <tr key={row.id}>
           <td><strong>{row.shop_order_reference}</strong><small>Rev {row.revision}{row.aircraft_serial_number ? ` · ${row.aircraft_serial_number}` : ""}</small></td>
           <td><strong>{row.part_number}</strong><small>S/N {row.component_serial_number}</small></td>
           <td><strong>{EVENT_LABELS[row.event_type] || row.event_type}</strong><small>{row.confirmed_failure == null ? "Decision not recorded" : row.confirmed_failure ? "Failure confirmed" : "Failure not confirmed"}</small></td>
@@ -814,11 +835,15 @@ function ShopView({ rows, aircraft, run, saving, onAction }: { rows: ShopFinding
         {!filtered.length && <tr><td colSpan={6}>No shop findings match the current filters.</td></tr>}
       </tbody></table>
     </RegisterSection>
+    <RegisterPager total={filtered.length} page={tablePage} pageSize={tablePageSize}
+      onPage={setTablePage} onPageSize={(value) => { setTablePageSize(value); setTablePage(0); }} />
   </div>;
 }
 
 function SmsView({ rows, aircraft, run, saving, onAction }: { rows: SmsOccurrence[]; aircraft: AircraftRead[]; run: RunMutation; saving: boolean; onAction: (action: ActionRequest) => void }) {
   const [query, setQuery] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const filtered = useMemo(() => rows.filter((row) => {
     const haystack = `${row.sms_reference} ${row.aircraft_serial_number || ""} ${row.risk_classification} ${row.description}`.toLowerCase();
@@ -864,9 +889,9 @@ function SmsView({ rows, aircraft, run, saving, onAction }: { rows: SmsOccurrenc
       </details>
     </section>
 
-    <RegisterSection title="SMS relevance queue" count={filtered.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["DRAFT", "ASSESSED"]}>
+    <RegisterSection title="SMS relevance queue" count={filtered.length} query={query} onQuery={(next) => { setQuery(next); setTablePage(0); }} statusFilter={statusFilter} onStatusFilter={(next) => { setStatusFilter(next); setTablePage(0); }} statuses={["DRAFT", "ASSESSED"]}>
       <table className="reliability-v2__table rel-ops__table"><thead><tr><th>Occurrence</th><th>Risk / investigation</th><th>Technical context</th><th>Reliability decision</th><th>Action</th></tr></thead><tbody>
-        {filtered.map((row) => <tr key={row.id}>
+        {filtered.slice(Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) * tablePageSize, (Math.min(tablePage, Math.max(0, Math.ceil(filtered.length / tablePageSize) - 1)) + 1) * tablePageSize).map((row) => <tr key={row.id}>
           <td><strong>{row.sms_reference}</strong><small>{displayDate(row.occurred_at)} · {row.aircraft_serial_number || "Fleet"}</small></td>
           <td><strong>{row.risk_classification}</strong><small>{row.investigation_status}</small></td>
           <td><details><summary>View source summary</summary><p>{row.description}</p></details></td>
@@ -876,6 +901,8 @@ function SmsView({ rows, aircraft, run, saving, onAction }: { rows: SmsOccurrenc
         {!filtered.length && <tr><td colSpan={5}>No SMS occurrences match the current filters.</td></tr>}
       </tbody></table>
     </RegisterSection>
+    <RegisterPager total={filtered.length} page={tablePage} pageSize={tablePageSize}
+      onPage={setTablePage} onPageSize={(value) => { setTablePageSize(value); setTablePage(0); }} />
   </div>;
 }
 
@@ -957,6 +984,8 @@ const WORKBOOK_FIELDS: Array<{ key: string; label: string; required?: boolean }>
 
 function WorkbookView({ imports, rows, selected, onSelect, run, saving, onAction }: { imports: WorkbookImport[]; rows: WorkbookRow[]; selected: WorkbookImport | null; onSelect: (id: string) => Promise<void>; run: RunMutation; saving: boolean; onAction: (action: ActionRequest) => void }) {
   const [query, setQuery] = useState("");
+  const [tablePage, setTablePage] = useState(0);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const sourceColumns = useMemo(() => Object.keys(rows[0]?.raw_json || {}), [rows]);
   const filteredRows = useMemo(() => rows.filter((row) => {
@@ -1033,9 +1062,9 @@ function WorkbookView({ imports, rows, selected, onSelect, run, saving, onAction
         <div className="rel-ops__stage-line" aria-label="Workbook workflow">
           {workbookStages(selected.status).map((stage) => <span key={stage.label} className={stage.state}>{stage.label}</span>)}
         </div>
-        <RegisterSection title={`${selected.original_filename} rows`} count={filteredRows.length} query={query} onQuery={setQuery} statusFilter={statusFilter} onStatusFilter={setStatusFilter} statuses={["PENDING", "VALID", "INVALID", "APPROVED", "REJECTED", "INGESTED"]} embedded>
+        <RegisterSection title={`${selected.original_filename} rows`} count={filteredRows.length} query={query} onQuery={(next) => { setQuery(next); setTablePage(0); }} statusFilter={statusFilter} onStatusFilter={(next) => { setStatusFilter(next); setTablePage(0); }} statuses={["PENDING", "VALID", "INVALID", "APPROVED", "REJECTED", "INGESTED"]} embedded>
           <table className="reliability-v2__table rel-ops__table rel-ops__table--workbook"><thead><tr><th>Source row</th><th>Mapped occurrence</th><th>Validation</th><th>Decision</th></tr></thead><tbody>
-            {filteredRows.map((row) => <tr key={row.id}>
+            {filteredRows.slice(Math.min(tablePage, Math.max(0, Math.ceil(filteredRows.length / tablePageSize) - 1)) * tablePageSize, (Math.min(tablePage, Math.max(0, Math.ceil(filteredRows.length / tablePageSize) - 1)) + 1) * tablePageSize).map((row) => <tr key={row.id}>
               <td><strong>{row.sheet_name} · row {row.source_row_number}</strong><details><summary>View raw values</summary><dl className="rel-ops__raw-values">{Object.entries(row.raw_json).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{fieldText(value)}</dd></div>)}</dl></details></td>
               <td><strong>{fieldText(row.mapped_json.event_type)}</strong><small>{fieldText(row.mapped_json.occurred_at)} · {fieldText(row.mapped_json.aircraft_serial_number)}</small><p>{fieldText(row.mapped_json.description)}</p></td>
               <td><span className={statusClass(row.status)}>{row.status}</span>{row.validation_errors_json.length ? <ul className="rel-ops__validation-list">{row.validation_errors_json.map((issue, index) => <li key={`${row.id}-${index}`}>{fieldText(issue)}</li>)}</ul> : <small>Canonical validation passed.</small>}</td>
@@ -1044,6 +1073,8 @@ function WorkbookView({ imports, rows, selected, onSelect, run, saving, onAction
             {!filteredRows.length && <tr><td colSpan={4}>No workbook rows match the current filters.</td></tr>}
           </tbody></table>
         </RegisterSection>
+    <RegisterPager total={filteredRows.length} page={tablePage} pageSize={tablePageSize}
+      onPage={setTablePage} onPageSize={(value) => { setTablePageSize(value); setTablePage(0); }} />
       </section>
     </>}
   </div>;
@@ -1054,6 +1085,23 @@ function workbookStages(status: string): Array<{ label: string; state: string }>
   const aliases: Record<string, string> = { UPLOADED: "Uploaded", MAPPED: "Mapped", IN_REVIEW: "Reconciled", APPROVED: "Approved", INGESTED: "Ingested" };
   const current = Math.max(order.indexOf(status), 0);
   return order.map((item, index) => ({ label: aliases[item], state: index < current ? "is-complete" : index === current ? "is-current" : "" }));
+}
+
+function RegisterPager({ total, page, pageSize, onPage, onPageSize }: {
+  total: number; page: number; pageSize: number;
+  onPage: (value: number) => void; onPageSize: (value: number) => void;
+}): React.ReactElement {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(page, totalPages - 1);
+  return <div className="rel-ops__pager" aria-label="Operational register pagination">
+    <span>{total ? current * pageSize + 1 : 0}–{Math.min(total, (current + 1) * pageSize)} of {total} matching loaded records</span>
+    <label>Rows <select value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}>
+      <option value={25}>25</option><option value={50}>50</option><option value={100}>100</option>
+    </select></label>
+    <button type="button" disabled={current === 0} onClick={() => onPage(current - 1)}>Previous</button>
+    <span>Page {current + 1} of {totalPages}</span>
+    <button type="button" disabled={current + 1 >= totalPages} onClick={() => onPage(current + 1)}>Next</button>
+  </div>;
 }
 
 function RegisterSection({ title, count, query, onQuery, statusFilter, onStatusFilter, statuses, children, embedded = false }: { title: string; count: number; query: string; onQuery: (value: string) => void; statusFilter: string; onStatusFilter: (value: string) => void; statuses: string[]; children: React.ReactNode; embedded?: boolean }) {

@@ -8,6 +8,8 @@ import {
 } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { isQmsLiveAuthority } from "./qmsCachePolicy";
+import { newOfflineIdempotencyKey } from "./offlinePersistence";
+import { classifyOfflineMutation } from "./offlineCapabilities";
 import {
   isProxyTransportFailureResponse,
   portalFetch,
@@ -60,16 +62,25 @@ let observedScope = "";
 let activeApiRequests = 0;
 const apiRequestWaiters: Array<() => void> = [];
 
-function acquireApiSlot(): Promise<void> {
+function acquireApiSlot(signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
   if (activeApiRequests < MAX_PARALLEL_API_REQUESTS) {
     activeApiRequests += 1;
     return Promise.resolve();
   }
-  return new Promise<void>((resolve) => {
-    apiRequestWaiters.push(() => {
+  return new Promise<void>((resolve, reject) => {
+    const cancel = () => {
+      const index = apiRequestWaiters.indexOf(enter);
+      if (index >= 0) apiRequestWaiters.splice(index, 1);
+      reject(new DOMException("Request was cancelled", "AbortError"));
+    };
+    const enter = () => {
+      signal?.removeEventListener("abort", cancel);
       activeApiRequests += 1;
       resolve();
-    });
+    };
+    apiRequestWaiters.push(enter);
+    signal?.addEventListener("abort", cancel, { once: true });
   });
 }
 
@@ -140,10 +151,12 @@ function clearExpiredCache(now = Date.now()): void {
 
 function clearPersistedApiCache(): void {
   if (typeof window === "undefined") return;
-  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
-    const key = window.sessionStorage.key(index);
-    if (key?.startsWith(PERSISTED_CACHE_PREFIX)) window.sessionStorage.removeItem(key);
-  }
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(PERSISTED_CACHE_PREFIX)) window.sessionStorage.removeItem(key);
+    }
+  } catch { /* Optional cache access must not turn a committed save into an error. */ }
 }
 
 export function clearApiResponseCache(): void {
@@ -159,9 +172,9 @@ export function clearQmsApiResponseCache(): void {
 
 function readPersistedCache(cacheKey: string, scope: string): CacheEntry | null {
   if (typeof window === "undefined") return null;
-  const raw = window.sessionStorage.getItem(persistedKey(cacheKey));
-  if (!raw) return null;
   try {
+    const raw = window.sessionStorage.getItem(persistedKey(cacheKey));
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as CacheEntry;
     if (parsed.scope !== scope || parsed.staleUntil <= Date.now()) {
       window.sessionStorage.removeItem(persistedKey(cacheKey));
@@ -170,7 +183,7 @@ function readPersistedCache(cacheKey: string, scope: string): CacheEntry | null 
     responseCache.set(cacheKey, parsed);
     return parsed;
   } catch {
-    window.sessionStorage.removeItem(persistedKey(cacheKey));
+    try { window.sessionStorage.removeItem(persistedKey(cacheKey)); } catch { /* Optional cache. */ }
     return null;
   }
 }
@@ -321,10 +334,13 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
     signal,
     ...rest
   } = options;
+  const method = getMethod(rest);
   const finalHeaders = new Headers(authHeaders(headers));
+  if ((offline?.queueMutation ?? classifyOfflineMutation(path, method).autoQueue) && !finalHeaders.has("Idempotency-Key")) {
+    finalHeaders.set("Idempotency-Key", offline?.idempotencyKey || newOfflineIdempotencyKey("mutation"));
+  }
   if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) finalHeaders.set("Content-Type", "application/json");
 
-  const method = getMethod(rest);
   if (!ensureAuthenticatedRequestAllowed()) {
     throw new ApiClientError(401, "Your session has ended. Sign in again to continue.", null);
   }
@@ -352,8 +368,9 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }
 
   const requestPromise = (async () => {
-    await acquireApiSlot();
+    await acquireApiSlot(signal);
     try {
+      if (scope !== currentApiCacheScope()) throw new DOMException("Account or AMO context changed", "AbortError");
       let lastError: unknown;
       for (let index = 0; index < urls.length; index += 1) {
         const url = urls[index];
@@ -364,16 +381,21 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
             timeoutMs,
             signal,
             {
-              cache: canUseCache,
-              cacheTtlMs: effectiveCacheTtlMs,
+              // Zero freshness requests still need a durable copy for offline
+              // work. Live authority and explicit cache opt-outs stay excluded.
+              cache: method === "GET" && offline?.cache !== false && !isQmsLiveAuthority(path),
+              cacheTtlMs: offline?.cacheTtlMs ?? effectiveCacheTtlMs,
               allowStaleFallback: offline?.allowStaleFallback !== false,
-              queueMutation: offline?.queueMutation === true,
+              queueMutation: offline?.queueMutation,
+              queueOnly: offline?.queueOnly,
               entityType: offline?.entityType,
               entityId: offline?.entityId,
               idempotencyKey: offline?.idempotencyKey,
               requireDurable: offline?.requireDurable === true,
             },
           );
+
+          if (scope !== currentApiCacheScope()) throw new DOMException("Account or AMO context changed", "AbortError");
 
           if (!response.ok) {
             const detail = errorMessageFromBody(response, responseBody);
@@ -420,7 +442,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
       releaseApiSlot();
     }
   })().finally(() => {
-    if (canUseCache) inFlightGets.delete(cacheKey);
+    if (canUseCache && inFlightGets.get(cacheKey) === requestPromise) inFlightGets.delete(cacheKey);
   });
 
   if (canUseCache) inFlightGets.set(cacheKey, requestPromise as Promise<unknown>);

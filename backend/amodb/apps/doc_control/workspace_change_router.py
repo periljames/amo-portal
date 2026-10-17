@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+from .workspace_router import _authorize_offline_change
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -176,6 +179,7 @@ def _verify_change_source(db: Session, *, tenant, payload: schemas.ChangeRequest
 
 
 @router.post("/t/{tenant_slug}/change-requests", include_in_schema=False)
+@offline_create("/doc-control/workspace/t/{tenant_slug}/change-requests", dict, status_code=200, authorize=_authorize_offline_change)
 def create_role_appropriate_change_request(
     tenant_slug: str,
     payload: schemas.ChangeRequestCreate,

@@ -1,4 +1,5 @@
 import { currentOfflineScope, listOfflineMutations } from "./offlinePersistence";
+import { getOrCreateDeviceStorageKey } from "./deviceStorageKey";
 import {
   listChecklistExecutionGovernance,
   type ChecklistExecutionGovernanceRow,
@@ -119,16 +120,7 @@ async function openDb(): Promise<IDBDatabase> {
 }
 
 async function encryptionKey(db: IDBDatabase): Promise<CryptoKey> {
-  const readTx = db.transaction(KEY_STORE, "readonly");
-  const existing = await requestResult(readTx.objectStore(KEY_STORE).get(KEY_ID)) as { id: string; key: CryptoKey } | undefined;
-  await transactionDone(readTx);
-  if (existing?.key) return existing.key;
-
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  const writeTx = db.transaction(KEY_STORE, "readwrite");
-  writeTx.objectStore(KEY_STORE).put({ id: KEY_ID, key, createdAt: Date.now() });
-  await transactionDone(writeTx);
-  return key;
+  return getOrCreateDeviceStorageKey(db, KEY_STORE, KEY_ID);
 }
 
 async function encryptText(key: CryptoKey, value: unknown): Promise<{ iv: string; data: string }> {

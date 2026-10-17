@@ -23,6 +23,8 @@ export type PortalOfflineOptions = {
   cacheTtlMs?: number;
   allowStaleFallback?: boolean;
   queueMutation?: boolean;
+  /** A guarded command depends on an earlier durable command in this queue. */
+  queueOnly?: boolean;
   entityType?: string;
   entityId?: string;
   idempotencyKey?: string;
@@ -93,7 +95,6 @@ const SENSITIVE_PATH_PARTS = [
   "password",
   "token",
   "/billing",
-  "/invoices",
   "/email-logs",
   "/email-settings",
   "/security",
@@ -235,7 +236,7 @@ async function queueRequest(
     entityId: init.offline?.entityId,
     idempotencyKey,
     scope: requestScope,
-    requireDurable: init.offline?.requireDurable === true,
+    requireDurable: true,
   });
   throw new OfflineQueuedError(operation);
 }
@@ -249,6 +250,19 @@ function combineAbortSignals(controller: AbortController, caller?: AbortSignal |
 }
 
 export async function portalFetch(path: string, init: PortalFetchInit = {}): Promise<Response> {
+  const capability = classifyOfflineMutation(normalizedCachePath(path), (init.method || "GET").toUpperCase());
+  const shouldQueue = init.offline?.queueMutation ?? capability.autoQueue === true;
+  if (shouldQueue) {
+    // The first network attempt and every replay must share the same receipt
+    // key. Generating it only after a transport failure loses that guarantee.
+    const headers = new Headers(init.headers);
+    const idempotencyKey = init.offline?.idempotencyKey || headers.get("Idempotency-Key")
+      || newOfflineIdempotencyKey("mutation");
+    headers.set("Idempotency-Key", idempotencyKey);
+    if (capability.autoQueue) headers.set("X-AMO-Offline-Command", "1");
+    headers.set("X-AMO-Silent-Error", "1");
+    init = { ...init, headers, offline: { ...init.offline, queueMutation: true, idempotencyKey, requireDurable: true } };
+  }
   const { timeoutMs, offline, signal, ...requestInit } = init;
   const method = (requestInit.method || "GET").toUpperCase();
   const isGet = method === "GET";
@@ -259,6 +273,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const requestScope = currentOfflineScope();
   const isAbsoluteTransportAttempt = /^https?:\/\//i.test(path);
   const connectivityState = getPortalConnectivity().state;
+  if (queueMutation && offline?.queueOnly) return queueRequest(cachePath, method, init, requestScope);
 
   if (connectivityState === "RECOVERING") {
     // Shared RECOVERING is advisory. Never serialize navigation or writes
@@ -272,7 +287,8 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   // must still be allowed to run; otherwise the fallback is blocked by the
   // very failure it is meant to recover from. Browser-online reads also bypass
   // stale shared OFFLINE state so navigation can recover without a health gate.
-  if (!networkAvailable(method) && !isAbsoluteTransportAttempt) {
+  const browserOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!networkAvailable(method) && (!isAbsoluteTransportAttempt || browserOffline)) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;
@@ -311,12 +327,13 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
           const value = await response.clone().json().catch(() => undefined);
           assertRequestScope(requestScope);
           if (value !== undefined) {
-            void writeApiCache(
+            await writeApiCache(
               cachePath,
               value,
               offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
               requestScope,
             );
+            assertRequestScope(requestScope);
           }
         }
       }
@@ -344,6 +361,19 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
     return response;
   } catch (error) {
     if (isAbortError(error)) {
+      // The browser may remain connected to Wi-Fi while the API is unreachable.
+      // A timed-out guarded command may already have been committed. Persist
+      // the exact original key/body so its server receipt resolves the outcome.
+      // Caller-initiated cancellation and all other aborts remain real errors.
+      const timedOut = controller.signal.aborted
+        && String(controller.signal.reason?.message || "").startsWith("Request timed out");
+      if (timedOut && queueMutation && isReplaySafeMutation(cachePath, method)
+        && offline?.requireDurable === true && Boolean(offline.idempotencyKey)) {
+        // A slow module is not proof of a portal-wide outage.
+        void probePortalReadiness();
+        assertRequestScope(requestScope);
+        return queueRequest(cachePath, method, init, requestScope);
+      }
       if (cacheEnabled) {
         const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
         if (cached) return cached;

@@ -40,6 +40,27 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("warms all module code with bounded concurrency and excludes authenticated data", async () => {
+    const assets: string[] = [];
+    let active = 0;
+    let peak = 0;
+    const { context } = worker(vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/portal-precache.json") return Response.json({ portalUrls: [
+        "/assets/training.js", "/assets/procurement.js", "/assets/records.css", "/accounts/me", "/api/private", "/documents/controlled.pdf",
+      ] });
+      assets.push(url);
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return new Response("code");
+    }));
+    await runInNewContext("Promise.all([precachePortal(), precachePortal()])", context);
+    expect(peak).toBe(2);
+    expect(assets.sort()).toEqual(["/assets/procurement.js", "/assets/records.css", "/assets/training.js"]);
+    await runInNewContext("precachePortal()", context);
+    expect(assets).toHaveLength(3);
+  });
   it("coalesces warmups, limits downloads to two, and never precaches API payloads", async () => {
     let active = 0;
     let peak = 0;

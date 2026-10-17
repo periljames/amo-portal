@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -83,7 +84,7 @@ export async function getDistributionPortfolio(
   if (options.page) query.set("page", String(options.page));
   if (options.perPage) query.set("per_page", String(options.perPage));
 
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/distribution-portfolio?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );

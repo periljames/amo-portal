@@ -63,7 +63,7 @@ def _clear_attachment_milestone_references(
             QualityCARMilestone.amo_id == amo_id,
             QualityCARMilestone.car_id == car_id,
         )
-        .with_for_update()
+        .with_for_update(of=QualityCARMilestone)
         .all()
     )
     for milestone in milestones:

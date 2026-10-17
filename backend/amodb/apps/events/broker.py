@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import queue
 import threading
 import time
@@ -37,6 +38,7 @@ class EventEnvelope:
 class EventBroker:
     def __init__(self, replay_size: int = 2000) -> None:
         self._subscribers: set[queue.Queue[EventEnvelope]] = set()
+        self._async_subscribers: dict[asyncio.Queue[EventEnvelope], asyncio.AbstractEventLoop] = {}
         self._history: Deque[EventEnvelope] = deque(maxlen=replay_size)
         self._lock = threading.Lock()
 
@@ -49,6 +51,22 @@ class EventBroker:
     def unsubscribe(self, q: queue.Queue[EventEnvelope]) -> None:
         with self._lock:
             self._subscribers.discard(q)
+
+    def subscribe_async(self) -> asyncio.Queue[EventEnvelope]:
+        q: asyncio.Queue[EventEnvelope] = asyncio.Queue(maxsize=400)
+        with self._lock:
+            self._async_subscribers[q] = asyncio.get_running_loop()
+        return q
+
+    def unsubscribe_async(self, q: asyncio.Queue[EventEnvelope]) -> None:
+        with self._lock:
+            self._async_subscribers.pop(q, None)
+
+    @staticmethod
+    def _deliver_async(q: asyncio.Queue[EventEnvelope], event: EventEnvelope) -> None:
+        if q.full():
+            q.get_nowait()
+        q.put_nowait(event)
 
     def replay_since(self, *, last_event_id: str, amo_id: Optional[str]) -> tuple[list[EventEnvelope], bool]:
         with self._lock:
@@ -72,6 +90,12 @@ class EventBroker:
         with self._lock:
             self._history.append(event)
             subscribers: Iterable[queue.Queue[EventEnvelope]] = list(self._subscribers)
+            async_subscribers = list(self._async_subscribers.items())
+        for async_q, loop in async_subscribers:
+            try:
+                loop.call_soon_threadsafe(self._deliver_async, async_q, event)
+            except RuntimeError:
+                self.unsubscribe_async(async_q)
         for q in subscribers:
             try:
                 q.put_nowait(event)
@@ -79,7 +103,7 @@ class EventBroker:
                 try:
                     _ = q.get_nowait()
                     q.put_nowait(event)
-                except queue.Empty:
+                except (queue.Empty, queue.Full):
                     pass
 
 

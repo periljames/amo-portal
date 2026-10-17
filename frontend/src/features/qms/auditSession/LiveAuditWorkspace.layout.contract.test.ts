@@ -2,15 +2,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const live = readFileSync(new URL("./LiveAuditWorkspace.tsx", import.meta.url), "utf8");
+const table = readFileSync(new URL("./AuditChecklistTable.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../../styles/qms-live-audit-workspace.css", import.meta.url), "utf8");
 
 describe("paper-familiar QMS Fieldwork table", () => {
   it("shows multiple questions and response choices together, retaining advanced details on demand", () => {
     expect(live).toContain('aria-label="Checklist assessment table"');
-    expect(live).toContain('className="qms-live-audit-focus__matrix-table"');
-    expect(live).toContain("visibleItems.map((item, index)");
-    expect(live).toContain("choices.map((option)");
-    expect(live).toContain("selectResponse(item, option)");
+    expect(table).toContain('className="qms-live-audit-focus__matrix-table audit-checklist-table"');
+    expect(table).toContain("props.items.map((item, index)");
+    expect(table).toContain("columns.map((column)");
+    expect(table).toContain("props.onResponse(item, option)");
     expect(live).toContain("selected && detailOpen");
     expect(live).toContain("<LiveAuditEvidenceStrip");
     expect(live).toContain('className="qms-live-audit-focus__compliance"');
@@ -27,7 +28,7 @@ describe("paper-familiar QMS Fieldwork table", () => {
     expect(handler).toContain("await updateMutation.mutateAsync");
     expect(handler).toContain("if (isOfflineQueuedError(error)) selectItem(nextItemId)");
     expect(live).toContain("localAnswers");
-    expect(live).toContain("server-confirmed");
+    expect(readFileSync(new URL("./AuditFieldworkHeader.tsx", import.meta.url), "utf8")).toContain("server-confirmed");
     expect(live).toContain("syncFieldworkNow");
     expect(live).toContain("prepareAuditOfflinePack");
     expect(live).toContain("onOfflineSyncComplete");
@@ -53,9 +54,9 @@ describe("paper-familiar QMS Fieldwork table", () => {
 
   it("retains search, filtering, stable numbering and accessible expanded details", () => {
     expect(live).toContain("itemNumberById");
-    expect(live).toContain('value="VERIFIED"');
+    expect(readFileSync(new URL("./AuditChecklistToolbar.tsx", import.meta.url), "utf8")).toContain('value="VERIFIED"');
     expect(live).toContain("setChecklistSearch");
-    expect(live).toContain("aria-expanded={expanded}");
+    expect(table).toContain("aria-expanded={expanded}");
     expect(live).toContain("Frozen checklist question differs from the execution question");
     expect(styles).toContain(":focus-visible");
   });

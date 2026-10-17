@@ -8,6 +8,7 @@
 import { ApiClientError, apiRequest, qualityPath } from "./apiClient";
 import { getToken, handleAuthFailure, getContext } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { portalFetch } from "./offlineHttp";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import {
   beginBackgroundLoading,
@@ -667,18 +668,15 @@ async function fetchJson<T>(
   const token = getToken();
   if (!options?.silent) beginBackgroundLoading();
   try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    const res = await portalFetch(path, {
       method: "GET",
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: "include",
-      signal: controller.signal,
+      timeoutMs: 20_000,
     });
-    window.clearTimeout(timeout);
 
     if (res.status === 401) {
       handleAuthFailure("expired");

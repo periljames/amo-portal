@@ -230,9 +230,11 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     await expect(page.getByLabel("Analysis method")).toBeVisible();
 
     await page.getByRole("button", { name: /Mapping & imports/ }).click();
-    await expect(page.getByRole("heading", { name: "Structured CSV / TSV import" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Field mapping and parity" })).toBeVisible();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "Workbook intake", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Controlled workbook import" })).toBeVisible();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "CSV staging", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Structured CSV / TSV import" })).toBeVisible();
     await page.getByLabel("CSV / TSV file").setInputFiles({ name: "daily-au.csv", mimeType: "text/csv", buffer: Buffer.from("event_date,aircraft_serial_number,title,flight_hours\n2026-08-07,5Y-SLK,Daily utilisation,6.25\n") });
     await page.getByRole("button", { name: "Audit and preview CSV" }).click();
     await expect(page.getByText("1 row(s) passed validation")).toBeVisible();
@@ -240,10 +242,11 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     await expect(page.getByText("1 row(s) were committed as controlled DRAFT records")).toBeVisible();
 
     await page.getByRole("button", { name: /Report layouts/ }).click();
-    await expect(page.getByRole("heading", { name: "Reliability management period report" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Report layouts" })).toBeVisible();
     await expect(page.getByRole("button", { name: /C208B-RP Cessna 208B Reliability Programme Report/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /DHC8-RP DHC8 Reliability Programme Report/ })).toBeVisible();
+    await page.locator(".rel-wp__task-nav").getByRole("link", { name: "Management reports", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Reliability management period report" })).toBeVisible();
     await page.getByRole("button", { name: "Q1" }).click();
     await page.getByRole("button", { name: "Full programme" }).click();
     await page.getByRole("button", { name: "Generate and retain management report" }).click();
@@ -251,6 +254,7 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     await expect(page).toHaveURL(/snapshot=42/);
     await expect(page.getByRole("button", { name: "Copy manager link" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Download controlled PDF" })).toBeVisible();
+    await page.screenshot({ path: "test-results/reliability-management-report-desktop.png", fullPage: true });
 
     const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
     expect(widths.document).toBeLessThanOrEqual(widths.viewport + 2);
@@ -262,5 +266,6 @@ test.describe("Reliability workbook parity representative-tenant UAT", () => {
     const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
     expect(widths.document).toBeLessThanOrEqual(widths.viewport + 2);
     await expect(page.getByRole("button", { name: /^AU\b/ })).toBeVisible();
+    await page.screenshot({ path: "test-results/reliability-workbook-mobile.png", fullPage: true });
   });
 });

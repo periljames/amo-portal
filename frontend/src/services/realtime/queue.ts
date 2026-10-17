@@ -3,6 +3,10 @@ import type { RealtimeEnvelope } from "./types";
 const DB_NAME = "amo-realtime";
 const STORE = "outbound";
 export const MAX_OUTBOUND_MESSAGES = 500;
+export type OutboundScope = Pick<RealtimeEnvelope, "amoId" | "userId">;
+function sameScope(row: OutboundScope, scope: OutboundScope): boolean {
+  return row.amoId === scope.amoId && row.userId === scope.userId;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -40,14 +44,21 @@ export async function queueOutbound(envelope: RealtimeEnvelope): Promise<void> {
   const db = await openDb();
   try {
     const clean = sanitizeOutbound(envelope);
-    const existing = await readAll(db);
-    const excess = Math.max(0, existing.length + (existing.some((row) => row.id === clean.id) ? 0 : 1) - MAX_OUTBOUND_MESSAGES);
-    const idsToRemove = existing.slice(0, excess).map((row) => row.id);
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
       const store = tx.objectStore(STORE);
-      for (const id of idsToRemove) store.delete(id);
-      store.put(clean);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const rows = request.result as RealtimeEnvelope[];
+        const duplicate = rows.find((row) => row.id === clean.id);
+        if ((duplicate && !sameScope(duplicate, clean))
+          || (!duplicate && rows.filter((row) => sameScope(row, clean)).length >= MAX_OUTBOUND_MESSAGES)) {
+          reject(new Error("The message queue is full or this message ID belongs to another account. Existing unsent messages were retained."));
+          tx.abort();
+          return;
+        }
+        store.put(clean);
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error("Realtime outbox transaction aborted"));
@@ -57,21 +68,25 @@ export async function queueOutbound(envelope: RealtimeEnvelope): Promise<void> {
   }
 }
 
-export async function loadOutbound(): Promise<RealtimeEnvelope[]> {
+export async function loadOutbound(scope: OutboundScope): Promise<RealtimeEnvelope[]> {
   const db = await openDb();
   try {
-    return await readAll(db);
+    return (await readAll(db)).filter((row) => sameScope(row, scope));
   } finally {
     db.close();
   }
 }
 
-export async function removeOutbound(id: string): Promise<void> {
+export async function removeOutbound(id: string, scope: OutboundScope): Promise<void> {
   const db = await openDb();
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).delete(id);
+      const store = tx.objectStore(STORE);
+      const request = store.get(id);
+      request.onsuccess = () => {
+        if (request.result && sameScope(request.result, scope)) store.delete(id);
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error("Realtime outbox transaction aborted"));

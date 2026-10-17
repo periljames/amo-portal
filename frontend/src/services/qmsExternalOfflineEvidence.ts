@@ -1,3 +1,4 @@
+import { getOrCreateDeviceStorageKey } from "./deviceStorageKey";
 import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
 import { getExternalAuditorFieldwork } from "./qmsAuditExternalAccess";
 import { createEvidenceMutationId, uploadExternalAuditorEvidence, type AuditEvidenceArtifact, type AuditEvidenceContext } from "./qmsAuditEvidence";
@@ -82,15 +83,7 @@ async function openDb(): Promise<IDBDatabase> {
 }
 
 async function keyFor(db: IDBDatabase): Promise<CryptoKey> {
-  const read = db.transaction(KEY_STORE, "readonly");
-  const existing = await requestResult(read.objectStore(KEY_STORE).get(KEY_ID)) as { id: string; key: CryptoKey } | undefined;
-  await transactionDone(read);
-  if (existing?.key) return existing.key;
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  const write = db.transaction(KEY_STORE, "readwrite");
-  write.objectStore(KEY_STORE).put({ id: KEY_ID, key, createdAt: Date.now() });
-  await transactionDone(write);
-  return key;
+  return getOrCreateDeviceStorageKey(db, KEY_STORE, KEY_ID);
 }
 
 async function sha256(file: File): Promise<string> {

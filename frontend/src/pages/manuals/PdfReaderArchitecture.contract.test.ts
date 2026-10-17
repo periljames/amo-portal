@@ -36,13 +36,13 @@ describe("controlled PDF reader architecture", () => {
     expect(reader).not.toContain("...current.map((index) => index + 1)");
   });
 
-  it("never starts a competing whole-document cache download automatically", () => {
+  it("recovers encrypted sources on browser disconnect and PDF transport failure", () => {
     expect(bridge).not.toContain("warmPdfSourceCache");
     expect(bridge).not.toContain("Promise.race");
     expect(bridge).toContain("savePdfSourceOffline");
     expect(bridge).toContain("readLatestCachedPdfSource");
-    expect(bridge).toContain("offline-recovery");
-    expect(bridge).toContain("network-recovery");
+    expect(bridge).toContain('window.addEventListener("offline", switchToOfflineSource)');
+    expect(bridge).toContain("recoverOfflineAfterLoadError");
     expect(reader).toContain("onSourceLoadError?.(error)");
     expect(bridge).toContain("resolved.reader_source_sha256 || resolved.source_sha256");
     expect(bridge).toContain("navigator.onLine === false");
