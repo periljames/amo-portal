@@ -164,7 +164,7 @@ test("learner My Training renders governed recurrent status without page overflo
   await prepare(page, "TECHNICIAN");
   await page.goto("/maintenance/tenant-a/training", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "My Training" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "My Training", exact: true })).toBeVisible();
   await expect(page.getByText("Human Factors Recurrent", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "My training tasks" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Upcoming sessions & waitlist" })).toBeVisible();
