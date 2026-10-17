@@ -249,7 +249,7 @@ const PublicAuditAccessPage: React.FC = () => {
 
   const acknowledgeReport = async () => {
     setReportBusy("acknowledge"); setError(null); setNotice(null);
-    try { await acknowledgeIssuedAuditReport(); setIssuedReport(await getIssuedAuditReportStatus()); setNotice("Issued-report receipt recorded against the exact issued revision."); }
+    try { await acknowledgeIssuedAuditReport(); setIssuedReport(await getIssuedAuditReportStatus()); setNotice("Issued-report receipt recorded against the exact issued revision and checksum."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Issued report acknowledgement failed."); }
     finally { setReportBusy(null); }
   };
