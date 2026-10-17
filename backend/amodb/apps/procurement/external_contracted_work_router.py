@@ -756,7 +756,7 @@ def acknowledge_provider_custody(tenant_slug:str,work_id:str,item_id:str,payload
     if len(payload.message.strip())<8:raise HTTPException(422,"Record receiving condition and count")
     db.execute(text("""UPDATE external_contracted_custody
        SET state='RECEIVED_BY_PROVIDER',updated_at=NOW()
-       WHERE amo_id=:amo AND work_id=:work AND id=:item""",
+       WHERE amo_id=:amo AND work_id=:work AND id=:item"""),
        {"amo":ctx["amo"],"work":work_id,"item":item_id})
     _event(db,work,"PROPERTY_RECEIVED_BY_PROVIDER",payload.message,
       identity=ctx["person"],details={"item_id":item_id,"stores_reference":item["stores_reference"]},
