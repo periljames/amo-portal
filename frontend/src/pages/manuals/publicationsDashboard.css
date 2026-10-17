@@ -212,10 +212,21 @@
 }
 
 .publications-upload-dialog[aria-label="Assigned document review"] {
-  display: flex;
-  flex-direction: column;
+  /* Review evidence can be extensive. Keep every decision reachable within
+     the viewport instead of allowing a nested flex panel to clip the footer. */
+  display: block;
+  overflow-x: hidden;
   overflow-y: auto;
+  max-height: calc(100dvh - 2rem);
   overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] .dc-form__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.75rem 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  background: var(--paper);
 }
 .publications-upload-dialog[aria-label="Assigned document review"] > header {
   flex: 0 0 auto;
