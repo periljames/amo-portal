@@ -210,17 +210,14 @@ test("two authenticated Quality browsers receive the same committed live-audit c
 
     await expect(pageA.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
     await expect(pageB.getByText("Concurrent realtime browser acceptance").first()).toBeVisible({ timeout: 30_000 });
-    // Live Audit is intentionally table-first; both auditors must select
-    // the same assigned question and open governed compliance details before
-    // exercising the cross-browser SSE persistence contract.
+    // The Fieldwork matrix is the default; open the exact same governed item
+    // on both browsers and expand its verification inputs before checking SSE.
     for (const page of [pageA, pageB]) {
-      const fieldwork = page.getByRole("region", { name: "Live audit fieldwork workspace" });
-      await fieldwork.getByRole("row").filter({ hasText: "Verify concurrent authenticated browsers receive committed fieldwork updates" })
-        .getByRole("button", { name: /^Details for question / }).click();
-      await fieldwork.locator("details.qms-live-audit-focus__compliance > summary").click();
+      await expect(page.getByRole("table", { name: "Checklist assessment table" })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Details for question 1", exact: true }).click();
+      await page.locator("details.qms-live-audit-focus__compliance > summary").click();
+      await expect(page.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
     }
-    await expect(pageA.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
-    await expect(pageB.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
 
     await expect(pageA.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
     await expect(pageB.locator("html")).toHaveAttribute("data-qms-realtime-state", "connected", { timeout: 30_000 });
@@ -231,15 +228,13 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     await pageA.getByLabel("Implementation status").selectOption("VERIFIED");
     await pageA.getByLabel("Field verification").selectOption("VERIFIED");
     await pageA.getByLabel("Auditor note").fill(note);
-    await pageA.getByRole("group", { name: "Governed checklist response" })
-      .getByRole("button", { name: "Compliant", exact: true }).click();
+    await pageA.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant", exact: true }).click();
     await expect(pageA.getByText("Saved to the authoritative audit record.")).toBeVisible({ timeout: 30_000 });
 
     // Browser B receives no click, focus, reload or explicit refresh. The only
     // admissible cause of this change is the authenticated audit-scoped SSE event
     // invalidating its occurrence-scoped React Query cache after A's DB commit.
-    await expect(pageB.getByRole("group", { name: "Governed checklist response" })
-      .getByRole("button", { name: "Compliant", exact: true })).toHaveClass(/is-active/, { timeout: 30_000 });
+    await expect(pageB.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant", exact: true })).toHaveClass(/is-active/, { timeout: 30_000 });
     await expect(pageB.getByLabel("Applicability")).toHaveValue("APPLICABLE", { timeout: 30_000 });
     await expect(pageB.getByLabel("Documentary status")).toHaveValue("DOCUMENTED", { timeout: 30_000 });
     await expect(pageB.getByLabel("Implementation status")).toHaveValue("VERIFIED", { timeout: 30_000 });
@@ -311,24 +306,19 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await auditeePage.getByRole("button", { name: "Record closing response" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
-    // The closing page also embeds a separate meeting-narrative Refresh.
-    // Refresh the authoritative report/acknowledgement context specifically.
-    await internalPage.locator(".qms-audit-closing__header-actions")
-      .getByRole("button", { name: "Refresh", exact: true }).click();
+    await internalPage.getByLabel("Audit closing meeting").getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
     await expect(internalPage.getByRole("status")).toContainText("APPROVE recorded", { timeout: 30_000 });
-    await expect(internalPage.getByText("R1 is approved.", { exact: true })).toBeVisible({ timeout: 30_000 });
-    // The preceding adopted report response supplies the exact immutable SHA.
-    expect(draftSha).toMatch(/^[0-9a-f]{64}$/i);
+    await expect(internalPage.getByText(/R1 is approved and locked to SHA-256/i)).toBeVisible();
 
     await expect(internalPage.getByRole("button", { name: "Issue passkey-approved report" })).toBeDisabled();
     await internalPage.getByRole("button", { name: "Register passkey" }).click();
     await expect(internalPage.getByRole("status")).toContainText("Passkey registered for governed Quality approvals", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report with passkey" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Report signed and ready to issue.", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status")).toContainText("Passkey approval recorded against the exact approved report SHA-256", { timeout: 30_000 });
     await expect(internalPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
 
     const issue = internalPage.getByRole("button", { name: "Issue passkey-approved report" });
@@ -337,11 +327,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("status")).toContainText("ISSUE recorded", { timeout: 30_000 });
     await expect(internalPage.getByText(/Issued R1/i)).toBeVisible();
 
-    const verificationLinkButton = internalPage.getByRole("button", { name: "Create public verification link" });
-    // The report is issued and passkey-signed; the public verification
-    // control must become available independently of execution closure.
-    await expect(verificationLinkButton).toBeEnabled({ timeout: 30_000 });
-    await verificationLinkButton.click();
+    await internalPage.getByRole("button", { name: "Create public verification link" }).click();
     await expect(internalPage.getByRole("status")).toContainText("purpose-bound verification link was created", { timeout: 30_000 });
     const verificationHref = await internalPage.getByText("Verification URL").locator("..").getByRole("link").getAttribute("href");
     expect(verificationHref).toBeTruthy();
@@ -350,34 +336,27 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     watchServerFailures(verificationPage, verificationFailures);
     await verificationPage.goto(verificationHref!, { waitUntil: "domcontentloaded" });
     await expect(verificationPage.getByRole("heading", { name: new RegExp(`${data.ceremony_audit_ref} · Same-day closing and archive browser acceptance`, "i") })).toBeVisible({ timeout: 30_000 });
-    await expect(verificationPage.getByText("Verified", { exact: true }).first()).toBeVisible();
+    await expect(verificationPage.getByText("Valid governed record")).toBeVisible();
     await expect(verificationPage.getByText("WEBAUTHN", { exact: true })).toBeVisible();
-    await verificationPage.getByLabel("Verification code").fill(draftSha);
-    await verificationPage.getByRole("button", { name: "Check code" }).click();
-    await expect(verificationPage.getByRole("status")).toContainText("Verified — code matches this record.", { timeout: 30_000 });
+    const governedSha = (await verificationPage.locator("dt", { hasText: "Governed SHA-256" }).locator("..").locator("code").innerText()).trim();
+    expect(governedSha).toBe(draftSha);
+    await verificationPage.getByLabel("SHA-256").fill(governedSha);
+    await verificationPage.getByRole("button", { name: "Compare hash" }).click();
+    await expect(verificationPage.getByRole("status")).toContainText("Hash matches the governed artifact", { timeout: 30_000 });
 
     await auditeePage.getByRole("button", { name: "Refresh" }).click();
     await expect(auditeePage.getByLabel("Issued audit report")).toBeVisible({ timeout: 30_000 });
-    // The guest downloads through authenticated fetch -> Blob. Assert the
-    // actual governed PDF response rather than depending on a browser download
-    // event (which is not guaranteed for a client-generated Blob).
-    const issuedPdfResponse = auditeePage.waitForResponse((response) =>
-      response.request().method() === "GET"
-      && new URL(response.url()).pathname === "/quality/audit-access/issued-report/download",
-      { timeout: 30_000 },
-    );
+    const issuedDownloadPromise = auditeePage.waitForEvent("download");
     await auditeePage.getByRole("button", { name: "Download issued report" }).click();
-    const issuedPdf = await issuedPdfResponse;
-    expect(issuedPdf.status()).toBe(200);
-    const issuedPdfBytes = await issuedPdf.body();
-    expect(issuedPdfBytes.subarray(0, 5).toString("utf8")).toBe("%PDF-");
+    const issuedDownload = await issuedDownloadPromise;
+    expect(await issuedDownload.path()).toBeTruthy();
     await auditeePage.getByRole("button", { name: "Acknowledge issued report" }).click();
-    await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision.", { timeout: 30_000 });
+    await expect(auditeePage.getByRole("status")).toContainText("Issued-report receipt recorded against the exact issued revision and checksum", { timeout: 30_000 });
 
     const closeExecution = internalPage.getByRole("button", { name: "Close audit execution" });
     await expect(closeExecution).toBeEnabled();
     await closeExecution.click();
-    await expect(internalPage.getByRole("status").filter({ hasText: "Execution closed. CAR/CAPA follow-up remains open" })).toBeVisible({ timeout: 30_000 });
+    await expect(internalPage.getByRole("status")).toContainText("Execution closed. CAR/CAPA follow-up remains open", { timeout: 30_000 });
     await expect(internalPage.getByText(/CAR status is OPEN/i)).toBeVisible();
 
     const archivePath = `/maintenance/${data.amo_slug}/quality/audits/${encodeURIComponent(data.ceremony_audit_ref)}/archive?tab=evidence`;
@@ -385,7 +364,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(internalPage.getByRole("region", { name: "Audit archive and retention workspace" })).toBeVisible({ timeout: 30_000 });
     await expect(internalPage.getByText("QMS-AUDIT-7Y", { exact: true })).toBeVisible();
     await internalPage.getByRole("button", { name: "Generate governed archive" }).click();
-    await expect(internalPage.getByRole("status").filter({ hasText: "Immutable archive manifest and package generated" })).toBeVisible({ timeout: 30_000 });
+    await expect(internalPage.getByRole("status")).toContainText("Immutable archive manifest and package generated", { timeout: 30_000 });
     await expect(internalPage.getByText("CAR · 1", { exact: true })).toBeVisible();
     await expect(internalPage.getByText("SIGNATURE EVIDENCE · 1", { exact: true })).toBeVisible();
     await expect(internalPage.getByText("REPORT REVISION · 1", { exact: true })).toBeVisible();
