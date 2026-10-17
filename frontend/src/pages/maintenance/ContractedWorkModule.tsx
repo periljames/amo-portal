@@ -17,7 +17,7 @@ type Detail={work:Work;allowed_actions:string[];can_review_inspections:boolean;
   inspection_checks:{criterion_index:number;criterion:string;result:string;submission_id:string|null;filename:string|null;review_reason:string|null}[];
   closure_blockers:string[];
   history:{id:string;action:string;from_state:string|null;to_state:string|null;reason:string;created_at:string}[];
-  additional_work:{id:string;description:string;state:string;decision_reason:string|null;technical_data:string|null;commercial_reference:string|null}[];
+  additional_work:{id:string;description:string;state:string;decision_reason:string|null;technical_data:string|null;commercial_reference:string|null;approved_amended_work_reference:string|null;approved_commercial_variation_reference:string|null}[];
   custody:{id:string;description:string;item_type:string;quantity:string;uom:string;state:string;serial_batch:string|null;stores_reference:string}[];
   evidence:{id:string;category:string;filename:string;status:string;retention_status:string|null}[]};
 type Candidate={id:string;filename:string;evidence_type:string;status:string;created_at:string};
@@ -285,6 +285,8 @@ export default function ContractedWorkModule(){
             {x.commercial_reference&&<small>Supplier revised quotation: {x.commercial_reference}</small>}
             {x.state==="REQUESTED"&&<button onClick={()=>setVariationId(x.id)}>Review technical variation</button>}
             {x.decision_reason&&<p>Decision: {x.decision_reason}</p>}
+            {x.approved_amended_work_reference&&<p>Authorized amended instruction: {x.approved_amended_work_reference}</p>}
+            {x.approved_commercial_variation_reference&&<p>Separate commercial variation: {x.approved_commercial_variation_reference}</p>}
           </div>)}
           {variationId&&<form className="partner-form" onSubmit={e=>{e.preventDefault();void mutate(
             "/"+encodeURIComponent(work.id)+"/additional-work/"+encodeURIComponent(variationId)+"/decision",
