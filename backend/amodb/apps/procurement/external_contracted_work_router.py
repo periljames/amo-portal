@@ -283,6 +283,8 @@ def _closure_blockers(db,work):
             or check["qms_status"]!="VERIFIED"
             or (check["qms_valid_until"] is not None and check["qms_valid_until"]<date.today())):
             blocked.append(f"Inspection/test criterion {check['criterion_index']+1} not independently evidenced and reviewed")
+    if any(x["state"]=="APPROVED" for x in additional) and "ADDITIONAL_WORK" not in valid:
+        blocked.append("Accepted governed amended-scope and additional-work evidence missing")
     for kind in ("MAINTENANCE_RELEASE","WORK_RECORD","TEST_RESULT"):
         if kind not in valid:blocked.append(f"Accepted governed {kind.lower()} evidence missing")
     req=work.get("requirements_json") or {}
@@ -879,10 +881,13 @@ def decide_additional(amo_code:str,work_id:str,request_id:str,payload:Additional
     db.execute(text("""UPDATE external_contracted_additional_work SET
       state=:state,reviewed_by_user_id=:actor,decision_reason=:reason,
       technical_data=:data,operator_approval_reference=:operator,
+      approved_amended_work_reference=:amended,
+      approved_commercial_variation_reference=:commercial,
       authority_approval_reference=:authority,updated_at=NOW()
       WHERE amo_id=:amo AND work_id=:work AND id=:id"""),
        dict(state=payload.decision,actor=str(user.id),reason=payload.reason,
             data=payload.technical_data,operator=payload.operator_approval_reference,
+            amended=payload.amended_work_reference,commercial=payload.commercial_variation_reference,
             authority=payload.authority_approval_reference,amo=amo,work=work_id,id=request_id))
     db.execute(text("""UPDATE external_contracted_work SET status='IN_PROGRESS',version=version+1,
       updated_at=NOW() WHERE amo_id=:amo AND id=:work"""),{"amo":amo,"work":work_id})
@@ -890,7 +895,11 @@ def decide_additional(amo_code:str,work_id:str,request_id:str,payload:Additional
       previous="ADDITIONAL_WORK_REQUESTED",target="IN_PROGRESS",
       details={"request_id":request_id,"amended_work_reference":payload.amended_work_reference,
         "technical_data":payload.technical_data,
-        "commercial_variation_reference":payload.commercial_variation_reference})
+        "commercial_variation_reference":payload.commercial_variation_reference,
+        "operator_approval_reference":payload.operator_approval_reference,
+        "authority_approval_reference":payload.authority_approval_reference})
+    _notify_assigned_members(db,work,"Contracted maintenance additional work: "+payload.decision,
+        f"{work['work_number']} — {payload.reason}. Only approved amended instructions authorize extra work.")
     db.commit()
     return {"id":request_id,"decision":payload.decision,"may_perform_additional_work":payload.decision=="APPROVED"}
 
