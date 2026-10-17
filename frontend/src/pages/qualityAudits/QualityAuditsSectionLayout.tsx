@@ -176,6 +176,7 @@ const QualityAuditsSectionLayout: React.FC<Props> = ({ title, subtitle, children
         ) : null}
 
         <section className="qa-workspace-main" data-assurance-workspace-section={activeId} aria-label="Current Assurance workspace">
+          {!calendarFocusMode && <header className="qa-workspace-current-page-heading"><h2>{title}</h2></header>}
           {children}
         </section>
       </div>
