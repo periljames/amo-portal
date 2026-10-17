@@ -228,7 +228,7 @@ test("audit register uses the paged closeout contract without per-audit fan-out"
   });
 
   await page.goto("/maintenance/demo/quality/audits/register", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("region", { name: "Findings register" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Findings Register", exact: true })).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => pagedRegisterRequests, { timeout: 10_000 }).toBe(1);
   expect(legacyRegisterRequests).toBe(0);
   expect(legacyFindingRequests).toBe(0);
@@ -289,7 +289,7 @@ test("evidence vault search uses one bounded canonical register request", async 
   });
 
   await page.goto("/maintenance/demo/quality/evidence-vault/search", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("region", { name: "Evidence Vault Search" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Evidence Vault", exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Audit closeout evidence", { exact: true })).toBeVisible();
   await expect.poll(() => boundedEvidenceRequests, { timeout: 10_000 }).toBe(1);
   expect(legacyBulkFindingRequests).toBe(0);
