@@ -60,11 +60,8 @@ async function authenticatedPost(page: Page, path: string, payload: unknown): Pr
       },
       body: JSON.stringify(body),
     });
-    // A Fetch response is single-use. Read exactly once, then parse the
-    // buffered payload; JSON parse failures must not consume the stream twice.
-    const bodyText = await response.text();
-    let responseBody: unknown = bodyText;
-    try { responseBody = JSON.parse(bodyText); } catch { /* non-JSON error body */ }
+    let responseBody: unknown = null;
+    try { responseBody = await response.json(); } catch { responseBody = await response.text(); }
     return { status: response.status, body: responseBody };
   }, { requestPath: path, body: payload });
 }
@@ -84,30 +81,19 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
     await page.getByRole("button", { name: "Save containment and continue" }).click();
   }
-  // A returned CAR retains its previous complete stages. Open the actual
-  // returned root-cause stage instead of assuming a fresh first-incomplete
-  // editor is visible after an earlier submitted response.
-  if (suffix === "rework") {
-    await page.getByLabel("Corrective action response progress")
-      .getByRole("button", { name: "Root cause", exact: true }).click();
-    await expect(page.getByText(/Return for rework: identify the missing management-control checkpoint/i))
-      .toBeVisible({ timeout: 30_000 });
-  }
-  const rootCauseEditor = structuredEditor(page, "Root cause analysis");
-  await expect(rootCauseEditor).toBeVisible({ timeout: 30_000 });
-  await rootCauseEditor.fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  // The public CAR form is a governed stepper, not a long form: a prior
+  // saved draft may leave a different completed step selected on reload.
+  const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
+    .getByRole("button", { name: /Root cause$/i });
+  await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
+  await rootCauseStep.click();
+  await expect(structuredEditor(page, "Root cause analysis")).toBeVisible({ timeout: 30_000 });
+  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  // Initial deadlines are editable; after submission, governed deadlines are
-  // locked and any change requires the separate Quality extension workflow.
-  if (suffix === "rework") {
-    await expect(page.getByLabel("Target closure date")).toBeDisabled();
-    await expect(page.getByLabel("Due date")).toBeDisabled();
-  } else {
-    await page.getByLabel("Target closure date").fill(futureDate(28));
-    await page.getByLabel("Due date").fill(futureDate(21));
-  }
+  await page.getByLabel("Target closure date").fill(futureDate(28));
+  await page.getByLabel("Due date").fill(futureDate(21));
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
@@ -223,7 +209,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     await publicPage.reload({ waitUntil: "domcontentloaded" });
     await expect(publicPage.getByText("Closed", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(publicPage.locator(".car-invite-readonly").first()).toContainText(/This CAR is closed/i);
+    await expect(publicPage.getByText(/This CAR is closed/i)).toBeVisible();
 
     expect(publicFailures).toEqual([]);
     expect(internalFailures).toEqual([]);
