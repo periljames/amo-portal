@@ -796,6 +796,32 @@ def decide_supplier(
     reason = (payload.reason or "").strip()
     if len(reason) < 8:
         raise HTTPException(status_code=422, detail="Supplier decisions require an attributable rationale of at least 8 characters.")
+
+    # Phase 4 cannot be bypassed through legacy procurement decision endpoints.
+    # Only the Quality Manager's fully validated case decision installs this
+    # transaction-local marker; provider sessions never reach this service.
+    if action in {"APPROVE", "CONDITIONALLY_APPROVE", "REACTIVATE"}:
+        from sqlalchemy import inspect as sa_inspect, text as sa_text
+        if sa_inspect(db.get_bind()).has_table("quality_provider_qualification_cases"):
+            governed = db.execute(sa_text("""
+                SELECT EXISTS(
+                    SELECT 1 FROM quality_provider_qualification_cases
+                    WHERE amo_id=:amo AND supplier_id=:supplier
+                ) OR EXISTS(
+                    SELECT 1 FROM quality_provider_qualification_policies
+                    WHERE amo_id=:amo AND category=upper(:kind)
+                )
+            """),{"amo":amo_id,"supplier":supplier.id,
+                  "kind":str(getattr(supplier.supplier_type,"value",supplier.supplier_type))}).scalar()
+            if governed and not (
+                db.info.get("phase4_qualification_approval")==
+                (str(amo_id),int(supplier.id))
+            ):
+                raise HTTPException(409,detail={
+                    "code":"QMS_QUALIFICATION_DECISION_REQUIRED",
+                    "message":"Quality approval or reinstatement requires a completed independently reviewed qualification case",
+                })
+
     if action not in {"APPROVE", "CONDITIONALLY_APPROVE", "REACTIVATE"}:
         return procurement_service.decide_supplier(
             db,
@@ -834,6 +860,7 @@ def decide_supplier(
     )
     supplier.status = target_status
     supplier.is_active = True
+    supplier.external_import_pending_activation = False
     supplier.approved_at = now
     supplier.approved_by_user_id = actor_user_id
     supplier.suspended_at = None

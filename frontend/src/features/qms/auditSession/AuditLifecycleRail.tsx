@@ -132,7 +132,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
       </nav>
 
       {sessionQuery.data && viewingOtherStage ? (
-        <div className="qms-audit-session-rail__authority" role="status">
+        <div className="qms-audit-session-rail__authority" role="note" aria-label="Current workflow stage">
           <span>
             Current workflow stage: <strong>{sessionQuery.data.current_stage_label}</strong>
             {routeStage ? (

@@ -423,11 +423,15 @@ class ContractCreate(BaseModel):
     controlled_document_id: str | None = Field(default=None, max_length=64)
     controlled_document_revision: str | None = Field(default=None, max_length=64)
     owner_user_id: str | None = None
+    supersedes_contract_id: str | None = Field(default=None,max_length=36)
+    change_reason: str | None = Field(default=None,max_length=2000)
 
     @model_validator(mode="after")
     def validate_dates(self) -> "ContractCreate":
         if self.effective_on and self.expires_on and self.expires_on < self.effective_on:
             raise ValueError("Contract expiry cannot be before its effective date.")
+        if self.supersedes_contract_id and len((self.change_reason or "").strip())<8:
+            raise ValueError("An amendment or renewal reason is required when referencing an earlier agreement.")
         return self
 
 
@@ -801,6 +805,25 @@ def transition_external_provider(
             detail=f"Provider transition {current} → {target} is not allowed.",
         )
     if target in {"APPROVED", "CONDITIONALLY_APPROVED"}:
+        # This older QMS transition must not bypass the independent
+        # evaluation and qualification case decisions introduced in Phase 4.
+        from amodb.apps.procurement import supplier_governance_service
+        evaluated = supplier_governance_service._latest_valid_evaluation(
+            db, amo_id=ctx.amo_id, supplier_id=provider_id)
+        if not evaluated or (target == "APPROVED" and evaluated.status != "APPROVED"):
+            raise HTTPException(status_code=409,detail=
+                "Current independently reviewed supplier evaluation is required for Quality approval")
+        if inspect(db.get_bind()).has_table("quality_provider_qualification_cases"):
+            phase4 = db.execute(text("""
+                SELECT EXISTS(SELECT 1 FROM quality_provider_qualification_cases
+                    WHERE amo_id=:amo AND supplier_id=:supplier)
+                    OR EXISTS(SELECT 1 FROM quality_provider_qualification_policies
+                    WHERE amo_id=:amo AND category=upper(:kind))
+            """),{"amo":ctx.amo_id,"supplier":provider_id,
+                   "kind":str(provider.get("provider_kind") or "")}).scalar()
+            if phase4:
+                raise HTTPException(status_code=409,detail=
+                    "Use the independently reviewed QMS qualification case decision to approve or reinstate")
         if provider.get("contract_required") and not _active_contract_exists(db, amo_id=ctx.amo_id, provider_id=provider_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -819,6 +842,8 @@ def transition_external_provider(
             """
             UPDATE procurement_suppliers
             SET status = :target,
+                is_active = CASE WHEN :approved AND external_import_pending_activation THEN TRUE ELSE is_active END,
+                external_import_pending_activation = CASE WHEN :approved THEN FALSE ELSE external_import_pending_activation END,
                 approved_at = CASE WHEN :approved THEN NOW() ELSE approved_at END,
                 approved_by_user_id = CASE WHEN :approved THEN :actor ELSE approved_by_user_id END,
                 suspended_at = CASE WHEN :suspended THEN NOW() ELSE suspended_at END,
@@ -886,6 +911,15 @@ def create_provider_contract(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    if payload.supersedes_contract_id:
+        predecessor=db.execute(text("""
+            SELECT id,status FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier AND id=:prior
+        """),{"amo":ctx.amo_id,"supplier":provider_id,
+              "prior":payload.supersedes_contract_id}).mappings().first()
+        if not predecessor or predecessor["status"]=="DRAFT":
+            raise HTTPException(status_code=422,
+                detail="Only an earlier executed agreement for this provider can be renewed or amended.")
     contract_id = str(uuid.uuid4())
     try:
         db.execute(
@@ -895,11 +929,13 @@ def create_provider_contract(
                     id, amo_id, supplier_id, contract_number, title, status, scope_text,
                     effective_on, expires_on, termination_notice_days, renewal_terms,
                     controlled_document_id, controlled_document_revision, owner_user_id,
+                    supersedes_contract_id, change_reason,
                     version, created_by_user_id, updated_by_user_id, created_at, updated_at
                 ) VALUES (
                     :id, :amo_id, :supplier_id, :contract_number, :title, 'DRAFT', :scope_text,
                     :effective_on, :expires_on, :notice_days, :renewal_terms,
                     :controlled_document_id, :controlled_document_revision, :owner_user_id,
+                    :supersedes, :change_reason,
                     1, :actor, :actor, NOW(), NOW()
                 )
                 """
@@ -918,6 +954,8 @@ def create_provider_contract(
                 "controlled_document_id": payload.controlled_document_id,
                 "controlled_document_revision": payload.controlled_document_revision,
                 "owner_user_id": payload.owner_user_id,
+                "supersedes":payload.supersedes_contract_id,
+                "change_reason":payload.change_reason,
                 "actor": ctx.user_id,
             },
         )
@@ -955,6 +993,9 @@ def transition_provider_contract(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    # Tenant-authorized Quality may inspect external staging under FORCE RLS.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
     lock_suffix = " FOR UPDATE" if db.get_bind().dialect.name == "postgresql" else ""
     row = db.execute(
         text(
@@ -971,7 +1012,53 @@ def transition_provider_contract(
     target = payload.target_status
     if target not in _CONTRACT_TRANSITIONS.get(current, set()):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Contract transition {current} → {target} is not allowed.")
+    if target == "SUPERSEDED":
+        successor=db.execute(text("""
+            SELECT 1 FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND supplier_id=:supplier
+              AND supersedes_contract_id=:prior AND status='ACTIVE'
+              AND (expires_on IS NULL OR expires_on>=CURRENT_DATE)
+            LIMIT 1
+        """),{"amo":ctx.amo_id,"supplier":provider_id,"prior":contract_id}).first()
+        if not successor:
+            raise HTTPException(status_code=409,
+                detail="Supersession requires an active, controlled successor agreement")
     if target == "ACTIVE":
+        # The agreement is a separate commercial control. It can become
+        # ACTIVE only after an executed, exact DMS revision is linked to
+        # independently verified Quality evidence. It does not authorize work.
+        valid_executed = db.execute(text("""
+            SELECT 1 FROM quality_external_provider_contracts c
+            JOIN manuals m ON m.id=c.controlled_document_id
+            JOIN manual_tenants t ON t.id=m.tenant_id AND t.amo_id=c.amo_id
+            JOIN manual_revisions r ON r.id=m.current_published_rev_id AND r.manual_id=m.id
+              AND (r.id=c.controlled_document_revision OR r.rev_number=c.controlled_document_revision)
+            JOIN external_partner_evidence_submissions s
+              ON s.id=c.signed_evidence_submission_id AND s.amo_id=c.amo_id
+              AND s.status='ACCEPTED' AND s.related_kind='CONTRACT'
+              AND s.related_id=c.id AND s.sha256=r.source_sha256
+              AND s.dms_evidence_asset_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM document_evidence_assets a
+                JOIN document_retention_dispositions d
+                  ON d.source_type='EVIDENCE_ASSET' AND d.source_id=a.id
+                  AND d.tenant_id=a.tenant_id
+                WHERE a.tenant_id=s.amo_id AND a.id=s.dms_evidence_asset_id
+                  AND a.sha256=s.sha256 AND d.id=s.dms_retention_id
+                  AND d.status!='DISPOSED'
+              )
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=c.amo_id AND p.supplier_id=c.supplier_id
+            JOIN quality_external_provider_evidence e ON e.id=s.qms_evidence_id
+              AND e.amo_id=c.amo_id AND e.supplier_id=c.supplier_id
+              AND e.status='VERIFIED'
+              AND (e.valid_until IS NULL OR e.valid_until >= CURRENT_DATE)
+            WHERE c.amo_id=:amo AND c.supplier_id=:supplier AND c.id=:contract
+              AND r.status_enum='PUBLISHED' AND r.published_at IS NOT NULL
+        """), {"amo":ctx.amo_id,"supplier":provider_id,"contract":contract_id}).first()
+        if not valid_executed:
+            raise HTTPException(status_code=409,
+                detail="Activate only an executed DMS-current agreement with a matching signed original independently verified in QMS")
         effective_on = row.get("effective_on")
         expires_on = row.get("expires_on")
         if expires_on and expires_on < _today():
@@ -986,6 +1073,7 @@ def transition_provider_contract(
                 approved_by_user_id = CASE WHEN :target = 'ACTIVE' THEN :actor ELSE approved_by_user_id END,
                 approved_at = CASE WHEN :target = 'ACTIVE' THEN NOW() ELSE approved_at END,
                 transition_reason = :reason,
+                terminated_at = CASE WHEN :target = 'TERMINATED' THEN NOW() ELSE terminated_at END,
                 version = version + 1,
                 updated_by_user_id = :actor,
                 updated_at = NOW()
@@ -1115,6 +1203,9 @@ def decide_provider_evidence(
     _require_tables(db)
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id)
+    # QMS verification needs explicit authorized visibility into staging.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.external_provider_id','__INTERNAL_QUALITY_REVIEW__',true)"))
     row = db.execute(
         text("SELECT * FROM quality_external_provider_evidence WHERE amo_id = :amo_id AND supplier_id = :provider_id AND id = :id"),
         {"amo_id": ctx.amo_id, "provider_id": provider_id, "id": evidence_id},
@@ -1127,6 +1218,29 @@ def decide_provider_evidence(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rejected or superseded evidence cannot be re-verified; link a new authoritative revision.")
     if target == "VERIFIED" and row.get("valid_until") and row["valid_until"] < _today():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Expired evidence cannot be verified as current.")
+    # Phase 5 staged provider originals may be VERIFIED only through canonical
+    # QMS, after the tenant/provider-scoped intake decision is ACCEPTED.
+    intake = None
+    if row["source_system"] == "EXTERNAL_PROVIDER_STAGING" and target == "VERIFIED":
+        intake = db.execute(text("""
+            SELECT s.id,s.supersedes_submission_id,s.requirement_id,s.sha256
+            FROM external_partner_evidence_submissions s
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=s.amo_id AND p.supplier_id=:supplier
+            WHERE s.amo_id=:amo AND s.id=:submission AND s.qms_evidence_id=:qms
+              AND s.status='ACCEPTED' AND s.dms_evidence_asset_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM document_retention_dispositions d
+                JOIN document_evidence_assets a ON a.id=d.source_id
+                  AND a.tenant_id=d.tenant_id AND a.sha256=s.sha256
+                WHERE d.tenant_id=s.amo_id AND d.id=s.dms_retention_id
+                  AND d.source_type='EVIDENCE_ASSET'
+                  AND d.source_id=s.dms_evidence_asset_id AND d.status!='DISPOSED'
+              )
+        """), {"amo":ctx.amo_id,"supplier":provider_id,
+               "submission":row["source_id"],"qms":evidence_id}).mappings().first()
+        if not intake:
+            raise HTTPException(status_code=409, detail="Provider original requires accepted intake and governed DMS retention before QMS verification")
     db.execute(
         text(
             """
@@ -1148,6 +1262,40 @@ def decide_provider_evidence(
             "id": evidence_id,
         },
     )
+    # Supersession follows successful independent QMS verification, not merely
+    # upload/acceptance. Keep both previous originals and append-only history.
+    if intake and intake["supersedes_submission_id"]:
+        former = db.execute(text("""
+            SELECT s.id,s.qms_evidence_id,s.status,s.requirement_id,s.related_kind,s.related_id
+            FROM external_partner_evidence_submissions s
+            JOIN external_tenant_providers p ON p.id=s.tenant_provider_id
+              AND p.amo_id=s.amo_id AND p.supplier_id=:supplier
+            WHERE s.amo_id=:amo AND s.id=:old FOR UPDATE
+        """), {"amo":ctx.amo_id,"supplier":provider_id,
+               "old":intake["supersedes_submission_id"]}).mappings().first()
+        if not former or former["requirement_id"] != intake["requirement_id"]:
+            raise HTTPException(status_code=409,detail="Replacement submission provenance no longer matches")
+        if former["qms_evidence_id"]:
+            db.execute(text("""
+                UPDATE quality_external_provider_evidence
+                SET status='SUPERSEDED',updated_at=NOW()
+                WHERE amo_id=:amo AND supplier_id=:supplier
+                AND id=:old_qms AND status IN ('PENDING','VERIFIED','EXPIRED')
+            """), {"amo":ctx.amo_id,"supplier":provider_id,
+                   "old_qms":former["qms_evidence_id"]})
+        if former["status"]=="ACCEPTED":
+            db.execute(text("""
+                UPDATE external_partner_evidence_submissions SET status='SUPERSEDED'
+                WHERE amo_id=:amo AND id=:old AND status='ACCEPTED'
+            """), {"amo":ctx.amo_id,"old":former["id"]})
+            db.execute(text("""
+                INSERT INTO external_provider_document_events
+                (id,amo_id,submission_id,actor_user_id,action,details_json)
+                VALUES(:id,:amo,:former,:actor,'SUPERSEDED_BY_VERIFIED',CAST(:details AS JSON))
+            """), {"id":str(uuid.uuid4()),"amo":ctx.amo_id,"former":former["id"],
+                  "actor":ctx.user_id,"details":__import__("json").dumps(
+                      {"replacement_submission_id":intake["id"],
+                       "replacement_qms_evidence_id":evidence_id})})
     audit_services.log_event(
         db,
         amo_id=ctx.amo_id,

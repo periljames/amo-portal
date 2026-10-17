@@ -20,6 +20,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import {getCachedUser} from "../../services/auth";
 
 import {
   createExternalProvider,
@@ -42,6 +43,8 @@ import {
   type ProviderStatus,
 } from "../../services/qmsProviders";
 import "../../styles/qms-external-providers.css";
+import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
+import ProviderAgreementControls from "./ProviderAgreementControls";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
@@ -66,7 +69,7 @@ const PROVIDER_STATUSES: ProviderStatus[] = [
 ];
 const PROVIDER_RISKS: ProviderRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
-type DetailTab = "overview" | "approval" | "contracts" | "evidence" | "monitoring";
+type DetailTab = "overview" | "approval" | "contracts" | "evidence" | "monitoring" | "qualification";
 
 function titleCase(value: string | null | undefined): string {
   return String(value || "")
@@ -202,7 +205,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ contract_number: "", title: "", scope_text: "", effective_on: "", expires_on: "", termination_notice_days: "" });
+  const [form, setForm] = useState({ contract_number: "", title: "", scope_text: "", effective_on: "", expires_on: "", termination_notice_days: "", supersedes_contract_id: "", change_reason: "" });
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -216,8 +219,10 @@ function ContractPanel({ amoCode, provider, onChanged }: {
         effective_on: form.effective_on || null,
         expires_on: form.expires_on || null,
         termination_notice_days: form.termination_notice_days ? Number(form.termination_notice_days) : null,
+        supersedes_contract_id: form.supersedes_contract_id || null,
+        change_reason: form.supersedes_contract_id ? form.change_reason : null,
       });
-      setForm({ contract_number: "", title: "", scope_text: "", effective_on: "", expires_on: "", termination_notice_days: "" });
+      setForm({ contract_number: "", title: "", scope_text: "", effective_on: "", expires_on: "", termination_notice_days: "", supersedes_contract_id: "", change_reason: "" });
       setOpen(false);
       await onChanged();
     } catch (err) {
@@ -253,6 +258,14 @@ function ContractPanel({ amoCode, provider, onChanged }: {
         <form className="qms-provider-form qms-provider-inline-form" onSubmit={create}>
           <label>Contract number<input required value={form.contract_number} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
           <label>Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+          <label className="is-wide">Amend or renew an earlier agreement (optional)
+            <select value={form.supersedes_contract_id} onChange={(e) => setForm({ ...form, supersedes_contract_id: e.target.value, change_reason: "" })}>
+              <option value="">New independent agreement</option>
+              {provider.contracts.filter(c => c.status !== "DRAFT").map(c => <option key={c.id} value={c.id}>{c.contract_number} · {c.title}</option>)}
+            </select></label>
+          {form.supersedes_contract_id && <label className="is-wide">Documented reason for amendment or renewal
+            <textarea minLength={8} required value={form.change_reason} onChange={(e) => setForm({ ...form, change_reason: e.target.value })} />
+          </label>}
           <label className="is-wide">Controlled scope<textarea required value={form.scope_text} onChange={(e) => setForm({ ...form, scope_text: e.target.value })} /></label>
           <label>Effective date<input type="date" value={form.effective_on} onChange={(e) => setForm({ ...form, effective_on: e.target.value })} /></label>
           <label>Expiry date<input type="date" value={form.expires_on} onChange={(e) => setForm({ ...form, expires_on: e.target.value })} /></label>
@@ -269,12 +282,16 @@ function ContractPanel({ amoCode, provider, onChanged }: {
               <div className="qms-provider-record__title"><strong>{contract.contract_number}</strong><span>{contract.title}</span><StatusPill value={contract.effective_status} /></div>
               <p>{contract.scope_text}</p>
               <div className="qms-provider-meta"><span>Effective {dateLabel(contract.effective_on)}</span><span>Expires {dateLabel(contract.expires_on)}</span>{contract.termination_notice_days != null && <span>{contract.termination_notice_days} day notice</span>}</div>
+              {contract.supersedes_contract_id && <p>Supersedes prior agreement: {provider.contracts.find(item => item.id === contract.supersedes_contract_id)?.contract_number || contract.supersedes_contract_id}</p>}
+              {contract.change_reason && <p>Amendment / renewal reason: {contract.change_reason}</p>}
             </div>
             <div className="qms-provider-record__actions">
               {contract.status === "DRAFT" && <button disabled={busy === contract.id} onClick={() => transition(contract, "ACTIVE")}>Activate</button>}
               {contract.status === "ACTIVE" && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUSPENDED")}>Suspend</button>}
               {["ACTIVE", "SUSPENDED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "TERMINATED")}>Terminate</button>}
+              {["ACTIVE", "SUSPENDED", "EXPIRED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUPERSEDED")}>Supersede with active renewal</button>}
             </div>
+            <ProviderAgreementControls amoCode={amoCode} contract={contract} onChanged={onChanged} />
           </article>
         ))}
       </div>
@@ -372,6 +389,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   onBack: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
+  const qualityManager=getCachedUser()?.role==="QUALITY_MANAGER";
   const [provider, setProvider] = useState<ProviderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -417,7 +435,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   if (loading) return <div className="qms-provider-loading"><RefreshCw className="is-spinning" size={20} />Loading governed provider record…</div>;
   if (!provider) return <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error || "Provider record is unavailable."}</div>;
 
-  const tabs: Array<[DetailTab, string]> = [["overview", "Overview"], ["approval", "Approval & scope"], ["contracts", "Contracts"], ["evidence", "Evidence"], ["monitoring", "Monitoring"]];
+  const tabs: Array<[DetailTab, string]> = [["overview", "Overview"], ["approval", "Approval & scope"], ["contracts", "Contracts"], ["evidence", "Evidence"], ["monitoring", "Monitoring"], ["qualification", "Qualification & surveillance"]];
   const approvalBlocked = provider.contract_required && provider.active_contract_count === 0;
 
   return (
@@ -456,7 +474,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
           </section>
           <section className="qms-provider-detail-section">
             <div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Lifecycle decision</span><h3>Change provider state</h3></div></div>
-            {provider.allowed_transitions.length === 0 ? <div className="qms-provider-empty">No further lifecycle transitions are available.</div> : (
+            {!qualityManager ? <div className="qms-provider-empty">Quality lifecycle approval and restriction are reserved for the appointed Quality Manager.</div> : provider.allowed_transitions.length === 0 ? <div className="qms-provider-empty">No further lifecycle transitions are available.</div> : (
               <div className="qms-provider-transition">
                 <label>Next state<select value={transitionTarget} onChange={(e) => setTransitionTarget(e.target.value as ProviderStatus)}><option value="">Select state</option>{provider.allowed_transitions.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select></label>
                 <label>Attributable reason<textarea value={transitionReason} onChange={(e) => setTransitionReason(e.target.value)} placeholder="Explain the approval, restriction, suspension or reinstatement decision." /></label>
@@ -483,6 +501,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
 
       {tab === "contracts" && <ContractPanel amoCode={amoCode} provider={provider} onChanged={load} />}
       {tab === "evidence" && <EvidencePanel amoCode={amoCode} provider={provider} onChanged={load} />}
+      {tab === "qualification" && <ProviderQualificationWorkspace amoCode={amoCode} supplierId={provider.id} />}
       {tab === "monitoring" && (
         <div className="qms-provider-detail-grid">
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Review cycle</span><h3>Oversight</h3></div></div><dl className="qms-provider-definition-list"><div><dt>Last reviewed</dt><dd>{dateLabel(provider.last_reviewed_on)}</dd></div><div><dt>Next review</dt><dd className={provider.review_due ? "is-alert" : ""}>{dateLabel(provider.next_review_due_on)}</dd></div><div><dt>Interval</dt><dd>{provider.review_interval_days ? `${provider.review_interval_days} days` : "Not set"}</dd></div></dl></section>
@@ -497,7 +516,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const detailMatch = location.pathname.match(/\/suppliers\/(\d+)(?:\/(overview|approval|contracts|evidence|monitoring))?\/?$/i);
+  const detailMatch = location.pathname.match(/\/suppliers\/(\d+)(?:\/(overview|approval|contracts|evidence|monitoring|qualification))?\/?$/i);
   const detailId = detailMatch ? Number(detailMatch[1]) : null;
   const detailTab = (detailMatch?.[2]?.toLowerCase() || "overview") as DetailTab;
   const [summary, setSummary] = useState<ProviderGovernanceSummary | null>(null);

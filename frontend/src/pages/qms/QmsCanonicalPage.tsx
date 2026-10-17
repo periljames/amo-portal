@@ -114,7 +114,7 @@ function QmsCanonicalContent(): React.ReactElement {
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
   if (isEvidenceRegister) {
     return assuranceWorkspace(
-      "Evidence",
+      "Evidence Vault",
       "Objective evidence and retained assurance records.",
       <QmsRegisterPage embedded />
     );

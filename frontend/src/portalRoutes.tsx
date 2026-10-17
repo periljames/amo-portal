@@ -155,6 +155,10 @@ const TechnicalRecordsPages = {
 
 
 const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
+const ExternalProviderPortalPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderPortalPage"));
+const ExternalPartnerPage = lazyDefault(() => import("./features/externalPartner/ExternalPartnerPage"));
+const ExternalProviderQualityPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderQualityPage"));
+const ExternalProviderDmsPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderDmsPage"));
 const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
 const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
 const PlatformUsersPage = lazyDefault(() => import("./pages/platform/PlatformUsersPage"));
@@ -465,6 +469,17 @@ export const AppRouter: React.FC = () => {
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+      {/* External principals are authenticated by a separate HttpOnly cookie,
+          never the staff JWT or employee RequireAuth hierarchy. */}
+      <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
+      <Route path="/partner/:tenant/*" element={<ExternalPartnerPage />} />
+      <Route path="/maintenance/:amoCode/quality/external-accounts"
+        element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
+
+      {/* Document Control retains authority for external originals, legal hold,
+          and disposition; this route is not subject to unrelated QMS audit roles. */}
+      <Route path="/maintenance/:amoCode/doc-control/provider-evidence"
+        element={<RequireAuth><ExternalProviderDmsPage /></RequireAuth>} />
 
       {/* Platform superuser control plane */}
       <Route

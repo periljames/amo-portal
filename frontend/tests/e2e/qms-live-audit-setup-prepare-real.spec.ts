@@ -68,6 +68,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await setup.getByRole("textbox", { name: "Criteria", exact: true }).fill("Approved QMS manual, controlled procedures and applicable aviation regulatory requirements.");
     await setup.getByLabel("Auditee", { exact: true }).fill("Preparation Journey Auditee");
     await setup.getByLabel("Auditee email", { exact: true }).fill("prepare.auditee@example.com");
+    await setup.getByLabel("Notify auditee", { exact: true }).check();
     await setup.getByLabel("Planned start date", { exact: true }).fill(futureDate(30));
     await setup.getByLabel("Planned end date", { exact: true }).fill(futureDate(31));
     await setup.getByLabel("Reminder (days)", { exact: true }).fill("5");
@@ -109,7 +110,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
     const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
-    await noticeCard.locator("summary").click();
+    await noticeCard.locator(":scope > summary").click();
     await expect(noticeCard).toHaveAttribute("open", "");
     await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });

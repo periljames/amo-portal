@@ -74,7 +74,7 @@ export default function AuditChecklistTable(props: Props) {
             </td>
             <td className="audit-checklist-table__details"><button type="button" aria-expanded={expanded}
               data-detail-item={item.checklist_item_id} aria-controls={props.detailsId}
-              aria-label={`Evidence and details for question ${number}`} onClick={() => props.onOpenDetails(item)}><span>{expanded ? "Close" : "Details"}</span>{item.evidence_references?.length ? <span>{item.evidence_references.length}</span> : null}{expanded ? <ChevronUp size={13} aria-hidden /> : <ArrowUpRight size={13} aria-hidden />}</button></td>
+              aria-label={`Details for question ${number}`} title="Evidence and response details" onClick={() => props.onOpenDetails(item)}><span>{expanded ? "Close" : "Details"}</span>{item.evidence_references?.length ? <span>{item.evidence_references.length}</span> : null}{expanded ? <ChevronUp size={13} aria-hidden /> : <ArrowUpRight size={13} aria-hidden />}</button></td>
           </tr>
         </Fragment>;
       })}{!props.items.length ? <tr><td colSpan={span}>No questions match this filter.</td></tr> : null}</tbody>

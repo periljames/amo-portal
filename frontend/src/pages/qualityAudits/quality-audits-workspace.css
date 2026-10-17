@@ -994,3 +994,20 @@ body[data-color-scheme="dark"] .qa-workspace-rail__tab:not(.qa-workspace-rail__t
   color: inherit !important;
   font-weight: 780 !important;
 }
+
+/* The Quality context shell intentionally suppresses the outer AuditPageShell
+   header. Retain the current destination's accessible, visible page heading
+   without restoring duplicate breadcrumbs/toolbars in that global shell. */
+.qa-workspace-current-page-heading { display: none; }
+html.quality-context-active .qa-workspace-current-page-heading {
+  display: block;
+  padding: 0.2rem 0 0.5rem;
+  margin-bottom: 0.35rem;
+}
+html.quality-context-active .qa-workspace-current-page-heading h2 {
+  font-size: clamp(1.05rem, 1.25vw, 1.3rem);
+  line-height: 1.3;
+  font-weight: 700;
+  color: var(--qms-text, inherit);
+  margin: 0;
+}

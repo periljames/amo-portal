@@ -1983,20 +1983,21 @@ def update_audit_document_request(
     if not (_is_quality_admin(current_user) or _audit_allows_user_by_audit(audit, current_user.id) or audit.auditee_user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Insufficient privileges to update this document request")
     data = payload.model_dump(exclude_unset=True)
-    review_change = False
+    # The legacy free-form PATCH must not bypass the governed evidence upload,
+    # reviewer authorization and source-revision checks used by Prepare.
+    # In particular, a client-supplied file_ref is not proof of a stored file.
+    if "status" in data or "file_ref" in data:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Document status and submission evidence are governed. "
+                "Use the audit's governed-document-requests review endpoint "
+                "and the controlled evidence submission workflow."
+            ),
+        )
     for field, value in data.items():
-        if field == "status" and value in {"ACCEPTED", "REJECTED", "WAIVED"}:
-            _require_audit_access(current_user, audit)
-            item.reviewed_by_user_id = current_user.id
-            item.reviewed_at = datetime.now(timezone.utc)
-            review_change = True
-        if field == "file_ref" and value:
-            item.uploaded_by_user_id = current_user.id
-            item.uploaded_at = datetime.now(timezone.utc)
-            if "status" not in data:
-                item.status = "UPLOADED"
         setattr(item, field, value)
-    audit_services.log_event(db, amo_id=audit.amo_id, actor_user_id=current_user.id, entity_type="quality_document_request", entity_id=str(item.id), action="review" if review_change else "update", after={"status": item.status}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=review_change)
+    audit_services.log_event(db, amo_id=audit.amo_id, actor_user_id=current_user.id, entity_type="quality_document_request", entity_id=str(item.id), action="update", after={"status": item.status}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=False)
     db.commit()
     db.refresh(item)
     return item
@@ -7444,6 +7445,13 @@ def _close_legacy_cap_for_car(
     verified_at: datetime,
 ) -> None:
     if not getattr(car, "finding_id", None):
+        return
+    # Post-cutover migration c8d1e2f3a4b5 renamed this legacy CAP
+    # table, and gated migration d9e2f3a4b5c6 may delete it.
+    # The authoritative quality_cars/finding closure must not query a
+    # retired table. Only synchronize during an actual legacy coexistence.
+    from sqlalchemy import inspect as sa_inspect
+    if not sa_inspect(db.get_bind()).has_table("qms_corrective_actions"):
         return
     cap = (
         db.query(models.QMSCorrectiveAction)

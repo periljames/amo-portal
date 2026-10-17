@@ -68,6 +68,8 @@ export type ProviderContract = {
   renewal_terms?: string | null;
   controlled_document_id?: string | null;
   controlled_document_revision?: string | null;
+  supersedes_contract_id?: string | null;
+  change_reason?: string | null;
   owner_user_id?: string | null;
   approved_by_user_id?: string | null;
   approved_at?: string | null;

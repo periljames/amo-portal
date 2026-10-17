@@ -211,6 +211,26 @@
   border-bottom: 0;
 }
 
+.publications-upload-dialog[aria-label="Assigned document review"] {
+  /* Review evidence can be extensive. Keep every decision reachable within
+     the viewport instead of allowing a nested flex panel to clip the footer. */
+  display: block;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(100dvh - 2rem);
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] .dc-form__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.75rem 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  background: var(--paper);
+}
+.publications-upload-dialog[aria-label="Assigned document review"] > header {
+  flex: 0 0 auto;
+}
 .publications-upload-dialog h2 { margin: 0; font-size: 1.05rem; }
 .publications-upload-dialog header p { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--ink) 62%, transparent); font-size: 0.7rem; }
 .publications-upload-dialog header > button,
@@ -347,4 +367,35 @@
   .publications-upload-fields label.wide { grid-column: auto; }
   .publications-upload-dialog > footer { align-items: stretch; flex-direction: column; }
   .publications-upload-dialog footer > div { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
+/* Assigned reviews may contain long evidence pickers. Keep the dialog's entire
+   scrollport and its decision controls inside the visual viewport, including
+   smaller CI/browser windows. The backdrop itself must allow scroll fallback. */
+.publications-upload-backdrop:has(.publications-upload-dialog[aria-label="Assigned document review"]) {
+  align-items: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] {
+  box-sizing: border-box;
+  width: min(1120px, 100%);
+  height: min(92dvh, 980px);
+  min-height: 0;
+  max-height: calc(100dvh - 2rem);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] > .dc-form {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] .dc-form__actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
 }

@@ -43,6 +43,14 @@ def materialize_document_file(record) -> Path:
     raw = str(getattr(record, "stored_path", "") or "")
     if not raw:
         raise HTTPException(status_code=409, detail="This evidence record is a reference link and has no retained file to download.")
+    if getattr(getattr(record, "source", None), "value", getattr(record, "source", None)) == "SUPPLIER_PORTAL":
+        # This is an immutable shared provider original, also under DMS custody.
+        # It may be backed by object storage or a configured shared local root.
+        # Validate its checksum and never treat it as a Procurement-owned copy.
+        try:
+            return storage.materialize(raw, expected_sha256=getattr(record, "sha256", None))
+        except (FileNotFoundError, ValueError, OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=404, detail="The retained supplier original is unavailable.") from exc
     if raw.startswith("s3://"):
         try:
             return storage.materialize(raw, expected_sha256=getattr(record, "sha256", None))
@@ -53,6 +61,10 @@ def materialize_document_file(record) -> Path:
 
 def discard_promoted_file(record) -> None:
     raw = str(getattr(record, "stored_path", "") or "")
+    if getattr(getattr(record, "source", None), "value", getattr(record, "source", None)) == "SUPPLIER_PORTAL":
+        # The referenced source belongs to provider intake/DMS. Procurement
+        # must never remove it, even when a linked metadata record is voided.
+        return
     if raw.startswith("s3://"):
         try:
             storage.delete(raw)

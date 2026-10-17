@@ -1508,7 +1508,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <span>Planned end time</span>
                 <input
                   type="time"
-                  min={draft.plannedStartTime || "09:00"}
+                  min={draft.plannedEnd === draft.plannedStart ? (draft.plannedStartTime || "09:00") : "09:00"}
                   max="17:00"
                   step={900}
                   disabled={!canManage}
@@ -1554,6 +1554,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label className="qms-audit-setup-stage__reschedule-reason">
                 <span>Reason for rescheduling</span>
                 <textarea
+                  aria-label="Reason for rescheduling"
                   rows={2}
                   value={rescheduleReason}
                   onChange={(event) => setRescheduleReason(event.target.value)}

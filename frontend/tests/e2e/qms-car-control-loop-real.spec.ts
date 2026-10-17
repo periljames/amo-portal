@@ -92,8 +92,13 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  await page.getByLabel("Target closure date").fill(futureDate(28));
-  await page.getByLabel("Due date").fill(futureDate(21));
+  // The issued CAR can lock its authoritative deadlines. Public respondents must
+  // use the controlled deadline-change request rather than silently rewriting them.
+  for (const [label, offset] of [["Target closure date", 28], ["Due date", 21]] as const) {
+    const field = page.getByLabel(label, { exact: true });
+    if (await field.isEnabled()) await field.fill(futureDate(offset));
+    else await expect(field).toBeDisabled();
+  }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({

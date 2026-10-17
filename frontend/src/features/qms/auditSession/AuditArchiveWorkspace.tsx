@@ -157,7 +157,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         manifest_id: governanceQuery.data?.manifest?.id || null,
       });
     },
-    onSuccess: () => { setHoldRelease(null); void success("Legal hold released and its reason and authority recorded."); },
+    onSuccess: () => { setHoldRelease(null); void success("Legal hold released with an append-only release event, including its reason and governing authority."); },
     onError: (cause) => failure(cause, "Legal hold release failed."),
   });
   const reviewMutation = useMutation({
@@ -255,7 +255,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
       {localError ? <div className="qms-audit-archive__message is-error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {notice ? <div className="qms-audit-archive__message" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
-      {!governance.archive_readiness?.ready ? <div className="qms-audit-archive__blocker" role="status"><AlertTriangle size={16} /><div><strong>Archive generation is locked</strong><ul>{governance.archive_readiness?.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>) || <li>Refresh to verify archive readiness.</li>}</ul><a href={auditSessionPath(amoCode, auditKey, "follow-up")}>Review follow-up requirements</a></div></div> : null}
+      {!governance.archive_readiness?.ready ? <div className="qms-audit-archive__blocker" role="alert"><AlertTriangle size={16} /><div><strong>Archive generation is locked</strong><ul>{governance.archive_readiness?.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>) || <li>Refresh to verify archive readiness.</li>}</ul><a href={auditSessionPath(amoCode, auditKey, "follow-up")}>Review follow-up requirements</a></div></div> : null}
 
       <div className="qms-audit-archive__grid">
         <main>

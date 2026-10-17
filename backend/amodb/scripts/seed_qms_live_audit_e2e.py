@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from docx import Document
 import sys
 import uuid
 
@@ -298,6 +299,27 @@ def seed() -> None:
         )
         db.add(dms_checklist)
         db.flush()
+        # The preparation binder re-reads the exact uploaded Word/PDF original,
+        # verifies its SHA-256 and extracts questions. A populated published
+        # revision without a retained source must fail closed, even in CI.
+        source_path = FIXTURE_PATH.parent / "qms-live-audit-controlled-checklist.docx"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_document = Document()
+        source_document.add_heading("Fieldwork verification", level=1)
+        source_table = source_document.add_table(rows=1, cols=6)
+        for column, label in enumerate(("No.", "Fieldwork verification", "S", "U", "N/C", "N/A")):
+            source_table.rows[0].cells[column].text = label
+        for number, question in (
+            ("1", "Verify the current authorization and competence evidence is available for sampled personnel."),
+            ("2", "Verify the sampled controlled procedure is the current effective revision."),
+        ):
+            cells = source_table.add_row().cells
+            cells[0].text = number
+            cells[1].text = question
+        source_document.save(str(source_path))
+        source_bytes = source_path.read_bytes()
+        source_digest = hashlib.sha256(source_bytes).hexdigest()
+
         dms_revision = manual_models.ManualRevision(
             id=DMS_CHECKLIST_REVISION_ID,
             manual_id=dms_checklist.id,
@@ -309,6 +331,11 @@ def seed() -> None:
             created_at=now,
             published_at=now,
             immutable_locked=True,
+            source_filename=source_path.name,
+            source_storage_path=str(source_path),
+            source_type_enum=manual_models.ManualSourceType.DOCX,
+            source_mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            source_sha256=source_digest,
         )
         db.add(dms_revision)
         db.flush()
@@ -443,7 +470,7 @@ def seed() -> None:
             amo_id=amo.id,
             domain=QMSDomain.AMO,
             kind=QMSAuditKind.INTERNAL,
-            status=QMSAuditStatus.IN_PROGRESS,
+            status=QMSAuditStatus.PLANNED if os.getenv("QMS_E2E_PREPARE_UNSTARTED") == "1" else QMSAuditStatus.IN_PROGRESS,
             audit_ref=REALTIME_AUDIT_REF,
             reference_family="QAR",
             unit_code="MO",
@@ -457,7 +484,7 @@ def seed() -> None:
             planned_end=date.today() + timedelta(days=2),
             planned_start_time=time(9, 0),
             planned_end_time=time(17, 0),
-            actual_start=date.today(),
+            actual_start=None if os.getenv("QMS_E2E_PREPARE_UNSTARTED") == "1" else date.today(),
             lead_auditor_user_id=user_a.id,
             observer_auditor_user_id=user_b.id,
             notify_auditors=False,
@@ -572,7 +599,10 @@ def seed() -> None:
             return revision
 
         issue_preparation(audit, user_a)
-        issue_preparation(realtime_audit, user_a)
+        # Setup/Prepare acceptance starts before the first governed issue.
+        # Real-time fieldwork journeys still require the issued baseline.
+        if os.getenv("QMS_E2E_PREPARE_UNSTARTED") != "1":
+            issue_preparation(realtime_audit, user_a)
         issue_preparation(ceremony_audit, user_a)
 
         db.add(QualityAuditClosingNarrative(
