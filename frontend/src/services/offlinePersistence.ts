@@ -559,7 +559,13 @@ export async function enqueueOfflineMutation(input: EnqueueOfflineMutationInput)
       const prior = [...pending].reverse().find((candidate) => {
         if (candidate.entityType !== input.entityType || candidate.entityId !== input.entityId
           || candidate.path !== input.path || candidate.status !== "queued" || candidate.attempts !== 0) return false;
-        try { return (JSON.parse(candidate.body || "{}") as { operation?: string }).operation === "CHECKLIST_UPDATE"; }
+        try {
+          const previous = JSON.parse(candidate.body || "{}");
+          const incoming = JSON.parse(input.body!);
+          // A later command may depend on this assessment or an intervening
+          // finding. Only same-base drafts can replace one another.
+          return previous.operation === "CHECKLIST_UPDATE" && previous.base_version === incoming.base_version;
+        }
         catch { return false; }
       });
       if (prior) {

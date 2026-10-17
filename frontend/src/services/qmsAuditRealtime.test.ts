@@ -52,11 +52,17 @@ describe("QMS audit realtime SSE parser", () => {
     });
 
     try {
-      const { startQmsAuditRealtimeStream, publishQmsRealtimeEvent } = await import("./qmsAuditRealtime");
+      const { startQmsAuditRealtimeStream, publishQmsRealtimeEvent, publishQmsRealtimeState } = await import("./qmsAuditRealtime");
       const seen: string[] = [];
+      const states: string[] = [];
+      publishQmsRealtimeState("offline");
       const stop = startQmsAuditRealtimeStream({
         onEvent: (event) => { seen.push(event.event); },
+        onState: (state) => states.push(state),
       });
+      expect(states).toEqual(["offline"]);
+      publishQmsRealtimeState("connected");
+      expect(states).toEqual(["offline", "connected"]);
       publishQmsRealtimeEvent({
         event: "qms.audit.updated",
         data: { type: "qms.audit.updated", metadata: { auditId: "a1", module: "quality" } },

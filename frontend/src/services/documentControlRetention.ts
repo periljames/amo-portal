@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -88,7 +89,7 @@ async function message(response: Response, fallback: string): Promise<string> {
 async function request<T>(tenant: string, suffix: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(authHeaders());
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${getApiBaseUrl()}${basePath(tenant)}${suffix}`, {
+  const response = await portalFetch(`${getApiBaseUrl()}${basePath(tenant)}${suffix}`, {
     ...init,
     headers,
     credentials: "same-origin",

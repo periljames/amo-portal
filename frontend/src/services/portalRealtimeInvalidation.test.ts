@@ -18,4 +18,15 @@ describe("cross-device event invalidation", () => {
     expect(queryMatchesRealtimeMarkers(["qms-audit", "amo"], markers)).toBe(false);
     expect(realtimeQueryMarkers({ type: "presence.typing", entityType: "presence" })).toEqual([]);
   });
+  it.each(["qms-current-dms-checklists", "qms-canonical-document-control-documents", "qms-audit-preparation-readiness", "checklist-evidence-candidates"])("refreshes dependent %s when DMS approvals change", (key) => {
+    const markers = realtimeQueryMarkers({ type: "doc_control.revision_issued", entityType: "DocumentWorkflow", metadata: { module: "doc_control" } });
+    expect(queryMatchesRealtimeMarkers([key, "amo", "audit-1"], markers)).toBe(true);
+    expect(queryMatchesRealtimeMarkers(["qms", "live-audit-checklist", "audit-1"], markers)).toBe(false);
+    expect(queryMatchesRealtimeMarkers(["fleet", "amo"], markers)).toBe(false);
+  });
+  it("recognizes actual model entity names without guessing substrings", () => {
+    expect(realtimeQueryMarkers({ type: "changed", entityType: "QMSAuditChecklistItem" })).toContain("qms");
+    expect(realtimeQueryMarkers({ type: "doc_control.changed", entityType: "workflow" })).toContain("documents");
+    expect(realtimeQueryMarkers({ type: "changed", entityType: "AircraftComponent" })).not.toContain("qms");
+  });
 });

@@ -1,8 +1,12 @@
 from importlib import import_module
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.dialects.postgresql import JSONB
 
 from amodb.apps.accounts import models as accounts
 from amodb.apps.tasks import models, schemas
@@ -10,6 +14,11 @@ from amodb.apps.resilience.models import ReplayCommand
 from amodb.apps.resilience.offline_commands import offline_create
 
 router = import_module("amodb.apps.tasks.router")
+
+
+@compiles(JSONB, "sqlite")
+def _sqlite_jsonb(type_, compiler, **kwargs):
+    return "JSON"
 
 
 @pytest.fixture
@@ -112,3 +121,59 @@ def test_fastapi_keeps_offline_metadata_in_headers_and_enforces_permissions():
     response = TestClient(app).post("/tasks/personal", json={"title": "Offline task"},
         headers={"Idempotency-Key": "same-command", "X-AMO-Offline-Command": "1"})
     assert response.status_code == 403
+
+
+@pytest.fixture
+def dms_document(db_session, actor):
+    from amodb.apps.manuals import models as manuals
+    from amodb.apps.doc_control import domain_models as dms
+    for model in (dms.DocumentChangeRequest, dms.DocumentReviewPlan, dms.DocumentControlProfile):
+        model.__table__.create(db_session.get_bind(), checkfirst=True)
+    tenant = manuals.Tenant(amo_id=actor.amo_id, slug="offline", name="Offline tenant")
+    db_session.add(tenant)
+    db_session.flush()
+    manual = manuals.Manual(tenant_id=tenant.id, code="OFFLINE", title="Offline manual", manual_type="MANUAL", owner_role="DOCUMENT_CONTROL")
+    db_session.add(manual)
+    db_session.flush()
+    revision = manuals.ManualRevision(manual_id=manual.id, rev_number="1")
+    db_session.add(revision)
+    db_session.flush()
+    manual.current_published_rev_id = revision.id
+    db_session.commit()
+    return manual
+
+
+def test_dms_reader_change_replay_is_atomic_and_rechecks_document_access(db_session, actor, dms_document):
+    from amodb.apps.doc_control import workspace_change_router as changes, workspace_schemas as schema, domain_models as dms
+    request = Request({"type": "http", "headers": []})
+    payload = schema.ChangeRequestCreate(manual_id=dms_document.id, title="Offline feedback", description="Amend this paragraph")
+    def send():
+        return changes.create_role_appropriate_change_request("offline", payload, request, db_session, actor,
+            _offline_command="1", _offline_key="dms-change-device-key")
+    first = send()
+    assert send() == first
+    assert first["source_module"] == "READER_FEEDBACK"
+    assert db_session.query(dms.DocumentChangeRequest).count() == 1
+    assert db_session.query(ReplayCommand).count() == 1
+    db_session.add(dms.DocumentControlProfile(tenant_id=actor.amo_id, manual_id=dms_document.id,
+        restricted_flag=True, access_scope_json={}))
+    db_session.commit()
+    with pytest.raises(HTTPException) as denied:
+        send()
+    assert denied.value.status_code == 403
+
+
+def test_dms_review_replay_precedes_duplicate_review_check_and_accepts_browser_utc_date(db_session, actor, dms_document):
+    from amodb.apps.doc_control import workspace_review_router as reviews, workspace_schemas as schema, domain_models as dms
+    actor.is_amo_admin = True
+    db_session.commit()
+    payload = schema.ReviewPlanCreate(manual_id=dms_document.id, due_at=datetime.now(timezone.utc) + timedelta(days=7))
+    request = Request({"type": "http", "headers": []})
+    def send():
+        return reviews.create_effective_revision_review("offline", payload, request, db_session, actor,
+            _offline_command="1", _offline_key="dms-review-device-key")
+    first = send()
+    assert send() == first
+    assert first["revision_id"] == dms_document.current_published_rev_id
+    assert db_session.query(dms.DocumentReviewPlan).count() == 1
+    assert db_session.query(ReplayCommand).count() == 1

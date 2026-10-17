@@ -41,3 +41,15 @@ Verification on 2026-10-16: 122 sync tests, 59 QMS offline tests, 48 Chrome stor
 - Test cross-user and cross-tenant switching, refresh after deployment, and constrained connections in a browser before rollout.
 
 Build asset counts vary by release and do not guarantee regional load latency or server capacity. See `authentication-burst-readiness.md` for shared rate-limit configuration and staging load validation. Chrome coverage includes offline reload and replay for all 37 operations, cached reads from nine module families, shared-tab lease ownership and conflicting edits across isolated device profiles. Production acceptance requires the deployed API and PostgreSQL.
+
+## QMS and DMS follow-up, 2026-10-17
+
+DMS JSON services (library, document detail, work queues, portfolios, reporting, retention and evidence metadata) now use the shared scoped offline transport. Controlled file bytes remain in their dedicated encrypted store. Publication bootstrap persistence completes before the reader load returns; section content is indexed individually so a saved section can reopen under a different request batch. Explicit server permission failures do not fall back to old section content.
+
+QMS evidence, external audit evidence and controlled PDF storage select their encryption key in a single IndexedDB write transaction. Concurrent first saves cannot overwrite one another's key. The browser tests capture evidence in two tabs, reopen the database and decrypt both files; controlled PDF tests reopen the exact bytes offline and verify different user/tenant identities cannot retrieve that copy.
+
+QMS pending checklist changes now project saved notes, sampled items and assessments back into the workspace. New edits follow their pending predecessors' expected versions and stay queued until those predecessors replay. Same-base draft compaction remains supported; it does not replace commands with different expected versions. A real server conflict still requires review. Absolute backend attempts also respect the browser's physical offline flag.
+
+DMS document change requests and periodic review plans have atomic replay receipts on the effective guarded routes. Their forms treat a durable queued save as a device save and clear successfully captured input. Receipt replay rechecks current document access or control permissions, then returns the original committed response before duplicate-review checks. UTC dates sent by the browser are normalized before review-date comparison.
+
+Follow-up verification: 54 Chrome storage/sync cases, 128 sync tests, 64 QMS offline tests, 86 targeted DMS/reader/workspace tests, and 21 backend replay/DMS route/workflow tests pass. The final production build and heavy-route chunk check pass. Browser HTTP outcomes are fixtures; these checks cover the actual browser clients, storage and cryptography, alongside database-backed DMS creation/replay tests. They do not certify a deployed PostgreSQL environment.

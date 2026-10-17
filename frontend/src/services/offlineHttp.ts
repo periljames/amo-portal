@@ -23,6 +23,8 @@ export type PortalOfflineOptions = {
   cacheTtlMs?: number;
   allowStaleFallback?: boolean;
   queueMutation?: boolean;
+  /** A guarded command depends on an earlier durable command in this queue. */
+  queueOnly?: boolean;
   entityType?: string;
   entityId?: string;
   idempotencyKey?: string;
@@ -271,6 +273,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   const requestScope = currentOfflineScope();
   const isAbsoluteTransportAttempt = /^https?:\/\//i.test(path);
   const connectivityState = getPortalConnectivity().state;
+  if (queueMutation && offline?.queueOnly) return queueRequest(cachePath, method, init, requestScope);
 
   if (connectivityState === "RECOVERING") {
     // Shared RECOVERING is advisory. Never serialize navigation or writes
@@ -284,7 +287,8 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
   // must still be allowed to run; otherwise the fallback is blocked by the
   // very failure it is meant to recover from. Browser-online reads also bypass
   // stale shared OFFLINE state so navigation can recover without a health gate.
-  if (!networkAvailable(method) && !isAbsoluteTransportAttempt) {
+  const browserOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (!networkAvailable(method) && (!isAbsoluteTransportAttempt || browserOffline)) {
     if (cacheEnabled) {
       const cached = await cachedFallback(cachePath, allowStaleFallback, requestScope);
       if (cached) return cached;

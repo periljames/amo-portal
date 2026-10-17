@@ -106,6 +106,142 @@ test("two tabs share one replay lease", async ({ page, context }) => {
   expect((await first).total).toBe(0);
 });
 
+test("QMS and DMS service clients reopen their records and differently grouped document sections offline", async ({ page, context }) => {
+  await harness(page);
+  await page.route("**/doc-control/workspace/t/amo/documents", (route) => route.fulfill({ json: { items: [{ id: "manual-one" }] } }));
+  await page.route("**/quality/qms/documents", (route) => route.fulfill({ json: [{ id: "qms-one" }] }));
+  await page.route("**/reader-content?**", (route) => route.fulfill({ json: {
+    sections: [{ id: "a", heading: "Section A" }, { id: "b", heading: "Section B" }],
+    blocks: [{ section_id: "a", html: "<p>A</p>" }, { section_id: "b", html: "<p>B</p>" }], start: 0, limit: 2, returned_sections: 2,
+  } }));
+  await page.evaluate(async () => {
+    const dms = await import("/src/services/documentControl.ts");
+    const qms = await import("/src/services/qmsCore.ts");
+    const publications = await import("/src/services/publications.ts");
+    await dms.listDocumentControlDocuments("amo");
+    await qms.qmsListDocuments();
+    await publications.getPublicationReaderContent("amo", "manual-one", "revision-one", ["a", "b"]);
+  });
+  await harness(page);
+  await page.evaluate(async () => { await Promise.all([
+    import("/src/services/documentControl.ts"), import("/src/services/qmsCore.ts"), import("/src/services/publications.ts"),
+  ]); });
+  await context.setOffline(true);
+  const saved = await page.evaluate(async () => ({
+    dms: await (await import("/src/services/documentControl.ts")).listDocumentControlDocuments("amo"),
+    qms: await (await import("/src/services/qmsCore.ts")).qmsListDocuments(),
+    section: await (await import("/src/services/publications.ts")).getPublicationReaderContent("amo", "manual-one", "revision-one", ["b"]),
+  }));
+  expect(saved.dms).toEqual({ items: [{ id: "manual-one" }] });
+  expect(saved.qms).toEqual([{ id: "qms-one" }]);
+  expect(saved.section.sections.map((section) => section.id)).toEqual(["b"]);
+  expect(saved.section.blocks).toEqual([{ section_id: "b", html: "<p>B</p>" }]);
+  await context.setOffline(false);
+  await page.route("**/reader-content?**", (route) => route.fulfill({ status: 403, json: { detail: "Offline reading access revoked" } }));
+  const denied = await page.evaluate(async () => {
+    try {
+      await (await import("/src/services/publications.ts")).getPublicationReaderContent("amo", "manual-one", "revision-one", ["b"]);
+      return 0;
+    } catch (error) { return error.status; }
+  });
+  expect(denied).toBe(403);
+});
+
+test("QMS evidence captured concurrently in two tabs stays decryptable after reopening", async ({ page, context }) => {
+  const other = await context.newPage();
+  for (const tab of [page, other]) {
+    await harness(tab);
+    await tab.evaluate(async () => { await import("/src/services/qmsOfflineAuditEvidence.ts"); });
+  }
+  await context.setOffline(true);
+  await Promise.all([page, other].map((tab, index) => tab.evaluate(async (index) => {
+    const evidence = await import("/src/services/qmsOfflineAuditEvidence.ts");
+    return evidence.enqueueOfflineAuditEvidence({ amoCode: "amo", auditId: "audit-one", checklistItemId: "item-one",
+      file: new File([`Evidence ${index}`], `evidence-${index}.txt`, { type: "text/plain" }),
+      description: `Description ${index}`, clientMutationId: `parallel-evidence-${index}`, baseVersion: 1 });
+  }, index)));
+  await page.reload();
+  const restored = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const open = indexedDB.open("amo-qms-offline-evidence", 1); open.onsuccess = () => resolve(open.result);
+    });
+    const read = (store: string, key?: string) => new Promise<any>((resolve) => {
+      const objectStore = db.transaction(store).objectStore(store);
+      const request = key ? objectStore.get(key) : objectStore.getAll(); request.onsuccess = () => resolve(request.result);
+    });
+    const { key } = await read("keys", "internal-audit-evidence-aes-gcm-v1");
+    const rows = await read("evidence");
+    const texts = await Promise.all(rows.map(async (row) => {
+      const iv = Uint8Array.from(atob(row.fileIv), (character) => character.charCodeAt(0));
+      const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, row.fileCiphertext);
+      return new TextDecoder().decode(bytes);
+    }));
+    db.close(); return texts.sort();
+  });
+  expect(restored).toEqual(["Evidence 0", "Evidence 1"]);
+});
+
+test("repeated QMS checklist saves retain notes and sync in order without conflicting with themselves", async ({ page, context }) => {
+  await harness(page);
+  await page.evaluate(async () => { await import("/src/services/qmsChecklistExecutionGovernance.ts"); });
+  const path = "/api/maintenance/amo/quality/audits/a/checklist-items/i/fieldwork-mutations";
+  const received: number[] = [];
+  await page.route(`**${path}`, (route) => {
+    const body = route.request().postDataJSON();
+    const expected = received.length + 1;
+    if (body.base_version !== expected) return route.fulfill({ status: 409, json: { detail: { error_code: "FIELDWORK_VERSION_CONFLICT", server_version: expected } } });
+    received.push(body.base_version);
+    return route.fulfill({ json: { committed_version: expected + 1 } });
+  });
+  const save = (note: string) => page.evaluate(async (note) => {
+    try {
+      await (await import("/src/services/qmsChecklistExecutionGovernance.ts")).mutateChecklistFieldwork("amo", "a", { checklist_item_id: "i", entity_version: 1 },
+        { canonical_response_status: "COMPLIANT", auditor_notes: note, reason: "Offline checklist review" });
+      throw new Error("Expected durable queued save");
+    } catch (error) { if (error.name !== "OfflineQueuedError") throw error; }
+  }, note);
+  await context.setOffline(true);
+  await save("First notes");
+  await save("Second notes");
+  await context.setOffline(false);
+  await save("Third notes while earlier saves await replay");
+  expect(received).toEqual([]);
+  const pending = await page.evaluate(async () => {
+    const storage = await import("/src/services/offlinePersistence.ts");
+    const entries = await storage.listOfflineMutations();
+    return entries.map((entry) => JSON.parse(entry.body!));
+  });
+  expect(pending.map((body) => body.base_version)).toEqual([1, 2, 3]);
+  expect(pending[2].auditor_notes).toContain("Third notes");
+  expect((await page.evaluate(async () => (await import("/src/services/offlinePersistence.ts")).replayOfflineMutations())).total).toBe(0);
+  expect(received).toEqual([1, 2, 3]);
+});
+
+test("DMS controlled PDF bytes reopen offline and stay isolated by user and tenant", async ({ page, context }) => {
+  await harness(page);
+  const pdf = "%PDF-1.4\nControlled offline fixture\n%%EOF";
+  await page.route("**/manuals/t/amo/manual-one/rev/revision-one/reader.pdf**", (route) => route.fulfill({ contentType: "application/pdf", body: pdf }));
+  await page.evaluate(async (pdf) => {
+    const cache = await import("/src/pages/manuals/pdfSourceCache.ts");
+    const bytes = new TextEncoder().encode(pdf);
+    const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((value) => value.toString(16).padStart(2, "0")).join("");
+    await cache.savePdfSourceOffline({ userId: "user-one", tenant: "amo", manualId: "manual-one", revisionId: "revision-one" }, hash,
+      "/manuals/t/amo/manual-one/rev/revision-one/reader.pdf", bytes.byteLength);
+  }, pdf);
+  await harness(page);
+  await page.evaluate(async () => { await import("/src/pages/manuals/pdfSourceCache.ts"); });
+  await context.setOffline(true);
+  const reopened = await page.evaluate(async () => {
+    const cache = await import("/src/pages/manuals/pdfSourceCache.ts");
+    const identity = { userId: "user-one", tenant: "amo", manualId: "manual-one", revisionId: "revision-one" };
+    const saved = await cache.readLatestCachedPdfSource(identity);
+    return { text: saved && new TextDecoder().decode(saved.bytes),
+      otherUser: await cache.readLatestCachedPdfSource({ ...identity, userId: "other-user" }),
+      otherTenant: await cache.readLatestCachedPdfSource({ ...identity, tenant: "other-tenant" }) };
+  });
+  expect(reopened).toEqual({ text: pdf, otherUser: null, otherTenant: null });
+});
+
 for (const path of ["/training/courses", "/tasks/my", "/aircraft", "/work-orders/", "/records/watchlists",
   "/inventory/stock", "/finance/invoices", "/api/maintenance/amo/procurement/suppliers", "/reliability/events"]) {
   test(`${path} cache survives reload and remains readable offline`, async ({ page, context }) => {

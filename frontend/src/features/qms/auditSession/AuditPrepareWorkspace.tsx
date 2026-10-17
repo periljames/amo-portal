@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import ChecklistSourceReview from "./ChecklistSourceReview";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -269,7 +270,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistSearch, setChecklistSearch] = useState("");
   const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
-  const [dmsResponseType, setDmsResponseType] = useState<"" | "COMPLIANCE" | "YES_NO_NA" | "CUSTOM">("");
+  const [dmsResponseType, setDmsResponseType] = useState<"SOURCE" | "COMPLIANCE" | "YES_NO_NA" | "CUSTOM">("SOURCE");
   const [dmsResponseOptions, setDmsResponseOptions] = useState<ChecklistResponseOption[]>([]);
   const [checklistUploadOpen, setChecklistUploadOpen] = useState(false);
   const [checklistReason, setChecklistReason] = useState("Selected for this audit during governed preparation.");
@@ -546,7 +547,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         setSelectedDmsChecklistId("");
         setChecklistReason("Selected for this audit during governed preparation.");
         setAllowExistingItems(false);
-        setDmsResponseType("");
+        setDmsResponseType("SOURCE");
         setDmsResponseOptions([]);
         setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
       } catch (error) {
@@ -921,7 +922,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     <section className="qms-occurrence-stage qms-audit-prepare-stage" aria-label="Pre-audit preparation workspace" id="audit-occurrence-prepare">
       <div className="qms-audit-prepare-stage__toolbar">
         <div className="qms-audit-prepare-stage__intro">
-          <h2 className="qms-audit-prepare-stage__title">Prepare</h2>
+          <span className="qms-audit-prepare-stage__eyebrow">{auditQuery.data?.audit_ref || auditKey} / PREPARATION</span>
+          <h2 className="qms-audit-prepare-stage__title">Audit preparation</h2>
           <p className="qms-audit-prepare-stage__helper">Request evidence, invite participants, and confirm readiness before fieldwork.</p>
           <div id={AUDIT_PREPARE_TOOLBAR_ID} className="qms-audit-prepare-toolbar" />
           <div className="qms-audit-prepare-stage__status" role="status" aria-label="Preparation readiness">
@@ -982,10 +984,10 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               {offlinePackStatus?.ready
                 ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · ${offlinePackStatus.offlineReferences} controlled reference(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
                 : prepRevision?.status === "ISSUED"
-                  ? "Encrypt the issued work package and current fieldwork baseline on this device before unreliable or no-connectivity work."
+                  ? "Save the issued checklist and reference documents on this device to keep working without a connection."
                   : "Issue preparation first. Draft preparation is not an offline fieldwork authority."}
             </small>
-            {offlinePackStatus?.workPackageSha256 ? <small className="qms-audit-prepare__offline-pack-hash">Work package SHA-256 · {offlinePackStatus.workPackageSha256}</small> : null}
+            {offlinePackStatus?.workPackageSha256 ? <details className="qms-audit-prepare__package-verification"><summary>Package verification</summary><code className="qms-audit-prepare__offline-pack-hash">{offlinePackStatus.workPackageSha256}</code></details> : null}
           </span>
         </div>
         <div className="qms-audit-prepare__offline-pack-actions">
@@ -1048,7 +1050,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__readiness" id="audit-preparation-readiness">
           <header>
-            <div><h3>Readiness</h3><p>Deterministic checks from persisted setup, checklist and document-request state.</p></div>
+            <div><h3>Readiness</h3><p>Confirm the checklist, audit team and required documents before opening fieldwork.</p></div>
             <span className="qms-audit-prepare-stage__meta-chip">{readiness?.complete_count || 0}/{readiness?.total_count || 0} complete</span>
           </header>
           <div className="qms-audit-prepare__readiness-list">
@@ -1120,7 +1122,6 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
             <span className="qms-audit-prepare-stage__meta-chip">{checklistBindings} bound</span>
           </header>
-
           {bindings.length ? (
             <div className="qms-audit-prepare__binding-list" aria-label="Bound checklist revisions">
               {bindings.map((binding) => (
@@ -1131,6 +1132,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ))}
             </div>
           ) : <p className="qms-audit-prepare__empty">No fieldwork checklist is bound. Fieldwork cannot open until one is selected or created.</p>}
+
+          {bindings.length ? <ChecklistSourceReview amoCode={amoCode} auditId={auditId} hasPendingChanges={false}
+            onRebuilt={async () => {
+              await removeAuditOfflinePack(auditId);
+              await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(auditId) });
+              setLocalSuccess("Checklist rebuilt from the uploaded table. Review and issue the new preparation revision.");
+            }} /> : null}
 
           {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
@@ -1151,12 +1159,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 {selectedDmsChecklist ? <div className="qms-audit-prepare__current-revision is-wide"><strong>Current effective revision</strong><span>Issue {selectedDmsChecklist.current_revision.issue_number || "—"} · Rev {selectedDmsChecklist.current_revision.revision_number}{selectedDmsChecklist.current_revision.effective_date ? ` · effective ${selectedDmsChecklist.current_revision.effective_date}` : ""}</span><small>{selectedDmsChecklist.hierarchy_path || "DMS controlled-document library"}</small></div> : null}
                 <fieldset className="qms-audit-prepare__response-options is-wide">
                   <legend>Source response scheme</legend>
-                  <p>Select the response vocabulary defined by the controlled source. This is a governed mapping, not a conversion of the source document.</p>
+                  <p>Keep the uploaded table’s response columns, or choose an explicit alternative mapping.</p>
                   <label><span>Response vocabulary</span><select required value={dmsResponseType} onChange={(event) => {
                     const responseType = event.target.value as typeof dmsResponseType;
                     setDmsResponseType(responseType);
                     setDmsResponseOptions(responseType === "CUSTOM" ? customResponseOptions() : []);
-                  }}><option value="">Select source scheme</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="CUSTOM">Custom source vocabulary (including U / S where defined)</option></select></label>
+                  }}><option value="SOURCE">Use response columns from uploaded source</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="CUSTOM">Custom source vocabulary (including U / S where defined)</option></select></label>
                   {dmsResponseType === "CUSTOM" ? <div className="qms-audit-prepare__response-options-list">{dmsResponseOptions.map((option, optionIndex) => <div key={`dms-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Source value</span><input value={option.value} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate))} /></label><label><span>Display label</span><input value={option.label} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistResponseOption["canonical_status"] } : candidate))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove source response ${option.label || option.value || optionIndex + 1}`} disabled={dmsResponseOptions.length <= 2} onClick={() => setDmsResponseOptions((current) => current.filter((_, index) => index !== optionIndex))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setDmsResponseOptions((current) => [...current, { value: "", label: "", canonical_status: "" }])}><Plus size={14} /> Add source response</button></div> : null}
                 </fieldset>
                 <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label>

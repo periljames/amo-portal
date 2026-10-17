@@ -85,6 +85,15 @@ def _load_environment(path: Path) -> dict[str, str]:
     if not env.get("DATABASE_URL") and env.get("DATABASE_WRITE_URL"):
         env["DATABASE_URL"] = env["DATABASE_WRITE_URL"]
 
+    # Keep the browser event stream aligned with the backend in this shared
+    # runtime. An absent Vite flag otherwise silently disables browser realtime
+    # even while readiness reports a connected broker. Honour explicit opt-outs.
+    env.setdefault(
+        "VITE_REALTIME_ENABLED",
+        "1" if env.get("REALTIME_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"} else "0",
+    )
+
     # Keep report generation hot. These are wait times only when queues are
     # empty; active backlogs drain without the idle delay.
     env.setdefault("TRAINING_REPORT_JOB_INTERVAL_SECONDS", "1")

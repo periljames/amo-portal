@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { trackProductWorkflow } from "./productAnalytics";
@@ -91,7 +92,7 @@ function workspacePath(tenant: string, suffix: string): string {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(authHeaders());
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers, credentials: "same-origin" });
+  const response = await portalFetch(`${getApiBaseUrl()}${path}`, { ...init, headers, credentials: "same-origin" });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {

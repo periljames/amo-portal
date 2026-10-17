@@ -22,6 +22,8 @@ import {
 } from "../../services/documentControlReports";
 import { upsertDocumentProfile } from "../../services/documentControl";
 import { DocumentControlSection, useDocumentControlRoute } from "./DocumentControlShell";
+import { isOfflineQueuedError } from "../../services/offlineHttp";
+import { useToast } from "../../components/feedback/ToastProvider";
 
 const WORKFLOW_ACTIONS: Record<string, Array<{ action: string; label: string; danger?: boolean }>> = {
   DRAFT: [{ action: "SUBMIT_TECHNICAL_REVIEW", label: "Submit technical review" }],
@@ -107,6 +109,7 @@ export default function DocumentControlRecordActions({
 }
 
 function useMutation(onChanged: () => void) {
+  const { pushToast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const run = async (action: () => Promise<unknown>) => {
@@ -115,8 +118,15 @@ function useMutation(onChanged: () => void) {
     try {
       await action();
       onChanged();
+      return true;
     } catch (caught) {
+      if (isOfflineQueuedError(caught)) {
+        pushToast({ title: "Saved offline", message: caught.message, variant: "info" });
+        onChanged();
+        return true;
+      }
       setError(caught instanceof Error ? caught.message : "The controlled action failed.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -214,7 +224,7 @@ function ChangeRequestForm({ detail, tenant, onChanged }: CommonProps) {
       impact: {},
       training_impact_required: trainingImpact,
       qms_blocking: qmsBlocking,
-    }));
+    })).then((saved) => { if (saved) { setTitle(""); setDescription(""); setDueAt(""); } });
   };
   return <form className="dc-form" onSubmit={submit}><label><span>Source module</span><select value={sourceModule} onChange={(event) => setSourceModule(event.target.value)}><option>DOCUMENT_CONTROL</option><option>QMS</option><option>TRAINING</option><option>PLANNING</option><option>PRODUCTION</option><option>MAINTENANCE</option><option>FLEET</option><option>STORES</option><option>TECHNICAL_RECORDS</option></select></label><label><span>Priority</span><select value={priority} onChange={(event) => setPriority(event.target.value)}><option>LOW</option><option>NORMAL</option><option>HIGH</option><option>CRITICAL</option></select></label><label className="wide"><span>Change title</span><input value={title} onChange={(event) => setTitle(event.target.value)} required /></label><label className="wide"><span>Description and required outcome</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} required /></label><label><span>Source entity type</span><input value={sourceEntityType} onChange={(event) => setSourceEntityType(event.target.value)} placeholder="Audit finding, CAR, work order…" /></label><label><span>Source entity ID</span><input value={sourceEntityId} onChange={(event) => setSourceEntityId(event.target.value)} /></label><label><span>Due date</span><input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label><label><span><input type="checkbox" checked={trainingImpact} onChange={(event) => setTrainingImpact(event.target.checked)} /> Training impact required</span></label><label><span><input type="checkbox" checked={qmsBlocking} onChange={(event) => setQmsBlocking(event.target.checked)} /> QMS item blocks publication</span></label><FormError message={mutation.error} /><div className="dc-form__actions"><button className="dc-button dc-button--primary" type="submit" disabled={mutation.busy}><Plus size={14} /> Create change request</button></div></form>;
 }

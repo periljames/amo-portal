@@ -1,6 +1,7 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { projectOfflineChecklistExecution, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
+import { pendingFieldworkPlan } from "./qmsOfflineFieldworkProjection";
 
 export type CanonicalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
 export type FieldworkFindingResponse = "NONCOMPLIANT" | "OBSERVATION";
@@ -283,15 +284,16 @@ export async function listChecklistExecutionGovernance(amoCode: string, auditId:
   }
 }
 
-export function mutateChecklistFieldwork(
+export async function mutateChecklistFieldwork(
   amoCode: string,
   auditId: string,
   item: Pick<ChecklistExecutionGovernanceRow, "checklist_item_id" | "entity_version">,
   payload: FieldworkMutationPayload,
   clientMutationId = newQmsFieldworkMutationId(),
 ) {
+  const plan = await pendingFieldworkPlan(amoCode, auditId, item.checklist_item_id, item.entity_version);
   const body = {
-    ...fieldworkEnvelope(clientMutationId, item.entity_version),
+    ...fieldworkEnvelope(clientMutationId, plan.baseVersion),
     operation: "CHECKLIST_UPDATE" as const,
     canonical_response_status: payload.canonical_response_status,
     response_value: payload.response_value ?? null,
@@ -315,6 +317,7 @@ export function mutateChecklistFieldwork(
       body: JSON.stringify(body),
       offline: {
         queueMutation: true,
+        queueOnly: plan.queueOnly,
         entityType: "qms-audit-checklist-item",
         entityId: item.checklist_item_id,
         idempotencyKey: clientMutationId,
@@ -324,15 +327,16 @@ export function mutateChecklistFieldwork(
   );
 }
 
-export function createAtomicChecklistFinding(
+export async function createAtomicChecklistFinding(
   amoCode: string,
   auditId: string,
   item: Pick<ChecklistExecutionGovernanceRow, "checklist_item_id" | "entity_version">,
   payload: AtomicFieldworkFindingPayload,
   clientMutationId = newQmsFieldworkMutationId(),
 ) {
+  const plan = await pendingFieldworkPlan(amoCode, auditId, item.checklist_item_id, item.entity_version);
   const body = {
-    ...fieldworkEnvelope(clientMutationId, item.entity_version),
+    ...fieldworkEnvelope(clientMutationId, plan.baseVersion),
     operation: "CREATE_FINDING" as const,
     ...payload,
     safety_sensitive: payload.safety_sensitive ?? false,
@@ -357,6 +361,7 @@ export function createAtomicChecklistFinding(
       body: JSON.stringify(body),
       offline: {
         queueMutation: true,
+        queueOnly: plan.queueOnly,
         entityType: "qms-audit-checklist-item",
         entityId: item.checklist_item_id,
         idempotencyKey: clientMutationId,

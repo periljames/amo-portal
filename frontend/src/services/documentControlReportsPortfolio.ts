@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -135,7 +136,7 @@ export async function getReportsPortfolio(
   if (options.perPage) query.set("per_page", String(options.perPage));
 
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-portfolio${suffix}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -162,7 +163,7 @@ export async function getReportsRegister(
   if (options.page) query.set("page", String(options.page));
   if (options.perPage) query.set("per_page", String(options.perPage));
 
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-register?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -189,7 +190,7 @@ export async function exportReportsCsv(
   if (options.dateFrom) query.set("date_from", options.dateFrom);
   if (options.dateTo) query.set("date_to", options.dateTo);
 
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-export.csv?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );

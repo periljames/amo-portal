@@ -2,7 +2,7 @@
 
 Generated from registered API write routes and the frontend replay registry. Run `npm run audit:offline` in `frontend` to regenerate.
 
-31 creation workflows automatically save offline through the shared JSON transport, in addition to the six existing guarded operations. New create handlers commit domain rows and replay receipts atomically. The audit verifies that every frontend creation contract has a matching registered server handler. The table identifies remaining operations without a replay contract; full offline functionality across all modules is not implemented.
+33 creation workflows automatically save offline through the shared JSON transport, in addition to the six existing guarded operations. New create handlers commit domain rows and replay receipts atomically. The audit verifies that every frontend creation contract has a matching registered server handler. The table identifies remaining operations without a replay contract; full offline functionality across all modules is not implemented.
 
 Cached reads require a prior successful download. Fresh-every-time reads retain an encrypted offline copy. Live authority checks are excluded from stale fallback. QMS encrypted evidence and document downloads use separate explicit workflows.
 
@@ -14,7 +14,7 @@ Cached reads require a prior successful download. Fresh-every-time reads retain 
 | audit | 0 | 0 | 1 |
 | bootstrap | 0 | 0 | 4 |
 | crs | 0 | 1 | 2 |
-| doc_control | 0 | 3 | 115 |
+| doc_control | 4 | 3 | 111 |
 | finance | 1 | 0 | 5 |
 | fleet | 1 | 6 | 20 |
 | foundations | 0 | 3 | 8 |

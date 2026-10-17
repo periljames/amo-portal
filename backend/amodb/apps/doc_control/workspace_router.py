@@ -15,7 +15,6 @@ from amodb.apps.events.broker import EventEnvelope, publish_event
 from amodb.apps.manuals import models as manual_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
-from amodb.apps.resilience.offline_commands import offline_create
 
 from . import domain_models as dm
 from . import workspace_schemas as schemas
@@ -749,7 +748,6 @@ def _authorize_offline_review(arguments):
 
 
 @router.post("/t/{tenant_slug}/change-requests")
-@offline_create("/doc-control/workspace/t/{tenant_slug}/change-requests", dict, status_code=200, authorize=_authorize_offline_change)
 def create_change_request(
     tenant_slug: str,
     payload: schemas.ChangeRequestCreate,
@@ -1313,7 +1311,6 @@ def list_reviews(
 
 
 @router.post("/t/{tenant_slug}/reviews")
-@offline_create("/doc-control/workspace/t/{tenant_slug}/reviews", dict, status_code=200, authorize=_authorize_offline_review)
 def create_review(
     tenant_slug: str,
     payload: schemas.ReviewPlanCreate,

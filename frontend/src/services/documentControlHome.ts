@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { listDocumentRetentionWork } from "./documentControlRetention";
@@ -39,7 +40,7 @@ export type DocumentControlMyWorkResponse = {
 };
 
 async function fetchWorkFeed(tenant: string, suffix: string): Promise<DocumentControlMyWorkResponse> {
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/${suffix}`,
     {
       headers: authHeaders(),

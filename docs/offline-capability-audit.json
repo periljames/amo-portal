@@ -39,9 +39,9 @@
     },
     {
       "module": "doc_control",
-      "replay": 0,
+      "replay": 4,
       "live": 3,
-      "unsupported": 115
+      "unsupported": 111
     },
     {
       "module": "finance",
@@ -6724,8 +6724,8 @@
       "module": "doc_control",
       "method": "POST",
       "path": "/doc-control/workspace/t/{tenant_slug}/change-requests",
-      "offline_create_path": null,
-      "capability": "unsupported"
+      "offline_create_path": "/doc-control/workspace/t/{tenant_slug}/change-requests",
+      "capability": "draft-safe"
     },
     {
       "module": "doc_control",
@@ -6829,8 +6829,8 @@
       "module": "doc_control",
       "method": "POST",
       "path": "/doc-control/workspace/t/{tenant_slug}/reviews",
-      "offline_create_path": null,
-      "capability": "unsupported"
+      "offline_create_path": "/doc-control/workspace/t/{tenant_slug}/reviews",
+      "capability": "draft-safe"
     },
     {
       "module": "doc_control",
@@ -6970,7 +6970,7 @@
       "method": "POST",
       "path": "/doc-control/workspace/t/{tenant_slug}/change-requests",
       "offline_create_path": null,
-      "capability": "unsupported"
+      "capability": "draft-safe"
     },
     {
       "module": "doc_control",
@@ -7047,7 +7047,7 @@
       "method": "POST",
       "path": "/doc-control/workspace/t/{tenant_slug}/reviews",
       "offline_create_path": null,
-      "capability": "unsupported"
+      "capability": "draft-safe"
     },
     {
       "module": "doc_control",

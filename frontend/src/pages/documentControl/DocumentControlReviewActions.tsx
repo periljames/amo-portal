@@ -1,4 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
+import { isOfflineQueuedError } from "../../services/offlineHttp";
+import { useToast } from "../../components/feedback/ToastProvider";
 import { CalendarClock, CheckCircle2, Plus } from "lucide-react";
 
 import {
@@ -29,6 +31,7 @@ export default function DocumentControlReviewActions({
   tenant: string;
   onChanged: () => void;
 }) {
+  const { pushToast } = useToast();
   const activeUsers = useMemo(
     () => ((detail as DetailWithPeople).active_users || []).filter((person) => person.active),
     [detail],
@@ -50,8 +53,15 @@ export default function DocumentControlReviewActions({
     try {
       await action();
       onChanged();
+      return true;
     } catch (caught) {
+      if (isOfflineQueuedError(caught)) {
+        pushToast({ title: "Saved offline", message: caught.message, variant: "info" });
+        onChanged();
+        return true;
+      }
       setError(caught instanceof Error ? caught.message : "The periodic review action failed.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -65,7 +75,7 @@ export default function DocumentControlReviewActions({
       revision_id: detail.document.current_published_revision_id,
       owner_user_id: ownerId,
       due_at: new Date(dueAt).toISOString(),
-    }));
+    })).then((saved) => { if (saved) setDueAt(""); });
   };
 
   const complete = () => {

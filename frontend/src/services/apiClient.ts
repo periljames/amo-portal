@@ -387,6 +387,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
               cacheTtlMs: offline?.cacheTtlMs ?? effectiveCacheTtlMs,
               allowStaleFallback: offline?.allowStaleFallback !== false,
               queueMutation: offline?.queueMutation,
+              queueOnly: offline?.queueOnly,
               entityType: offline?.entityType,
               entityId: offline?.entityId,
               idempotencyKey: offline?.idempotencyKey,

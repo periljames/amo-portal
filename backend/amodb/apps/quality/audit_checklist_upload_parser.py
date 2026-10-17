@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+CHECKLIST_PARSER_VERSION = "SOURCE_TABLE_V2"
 _NUMBERED = re.compile(r"^\s*(\d{1,4})[.)]\s+(.+)$")
 _HEADING = re.compile(r"^[A-Z][A-Z0-9 /()&,.:\\-]{3,120}$")
 _SOURCE_SCHEME = [
@@ -21,12 +22,21 @@ _SOURCE_SCHEME = [
 ]
 
 
+def is_checklist_form_metadata(text: str) -> bool:
+    """Identify form furniture, without excluding questions mentioning dates."""
+    value = re.sub(r"\s+", " ", text).strip().lower().replace("\ufffd", "'")
+    return bool(re.match(
+        r"^(?:date\s+of\s+audit|audit\s+date|name\s+of\s+operator|auditor(?:\(s\)|s)?|location|title|assessment\s+code|name\s*(?:&|and)\s*signature|remarks|auditor.?s\s+assessment(?:\s*&\s*recommendations)?|if\s+applicable)\s*(?::|$)",
+        value,
+    ))
+
+
 def _draft_item(number: int, section: str, prompt: str, *, paper_scheme: bool = False) -> dict[str, Any]:
     return {
         "section": section or "Uncategorised",
         "checklist_ref": str(number),
         "requirement_ref": "",
-        "prompt": re.sub(r"\s+", " ", prompt).strip()[:8000],
+        "prompt": "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in prompt.splitlines() if line.strip())[:8000],
         "expected_evidence": "",
         "guidance": "",
         "response_type": "CUSTOM" if paper_scheme else "COMPLIANCE",
@@ -64,17 +74,22 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                     if not paper_scheme:
                         warnings.append(f"Section {section}: assessment vocabulary needs explicit reviewer verification.")
                     continue
-                if body.lower().startswith(("remarks:", "auditor's assessment", "auditor’s assessment", "name & signature")):
+                if is_checklist_form_metadata(body):
                     continue
                 if not any(cells[2:]) and all(value == body for value in cells[:2]) and "signature" in body.lower():
                     continue
                 # Skip non-checklist audit identity metadata tables.
                 if len(cells) < 3:
                     continue
+                # python-docx repeats merged cells across their grid span. A
+                # full-width footer/signature box is not six answer columns.
+                if len({id(cell._tc) for cell in row.cells}) < 3:
+                    continue
                 # Headings without response columns and no question mark are
                 # ambiguous, so keep them for explicit reviewer correction.
                 explicit = _NUMBERED.match(body)
-                number = int(explicit.group(1)) if explicit else len(items) + 1
+                source_number = re.fullmatch(r"\s*(\d{1,4}(?:\.\d+)*)(?:[.)])?\s*", cells[0])
+                number = source_number.group(1) if source_number else int(explicit.group(1)) if explicit else len(items) + 1
                 prompt = explicit.group(2) if explicit else body
                 if len(prompt) > 4:
                     items.append(_draft_item(number, section, prompt, paper_scheme=paper_scheme))
@@ -150,6 +165,10 @@ def _pdf_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
             if not line:
                 i += 1
                 continue
+            if is_checklist_form_metadata(line):
+                flush()
+                i += 1
+                continue
             if line.lower().startswith("remarks:"):
                 flush()
                 i += 1
@@ -210,11 +229,17 @@ def draft_from_upload(data: bytes, filename: str) -> dict[str, Any]:
     if suffix == "docx":
         if not data.startswith(b"PK"):
             raise ValueError("This file is not a valid DOCX.")
-        items, warnings = _word_items(data)
+        try:
+            items, warnings = _word_items(data)
+        except Exception as error:
+            raise ValueError("The DOCX checklist could not be read. Upload an intact Word document.") from error
     elif suffix == "pdf":
         if not data.startswith(b"%PDF"):
             raise ValueError("This file is not a valid PDF.")
-        items, warnings = _pdf_items(data)
+        try:
+            items, warnings = _pdf_items(data)
+        except Exception as error:
+            raise ValueError("The PDF checklist could not be read. Upload an intact, selectable-text PDF.") from error
         warnings.append("Confirm PDF section boundaries, wrapped text and assessment-column mapping in the draft editor.")
     else:
         raise ValueError("Only .docx and .pdf checklists are supported.")

@@ -28,8 +28,8 @@ try {
     ...route, capability: exports.classifyOfflineMutation(route.path.replace(/\{[^}]+\}/g, "test-id"), route.method).capability,
   }));
   for (const create of manifest.OFFLINE_CREATE_ROUTES) {
-    if (!routes.some((route) => route.method === "POST" && route.path.replace(/\/+$/, "") === create.path
-      && route.offline_create_path === create.path)) {
+    const effective = routes.find((route) => route.method === "POST" && route.path.replace(/\/+$/, "") === create.path);
+    if (effective?.offline_create_path !== create.path) {
       throw new Error(`Offline create has no matching atomic server handler: ${create.path}`);
     }
   }
