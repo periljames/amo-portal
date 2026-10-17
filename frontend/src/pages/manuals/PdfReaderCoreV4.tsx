@@ -1676,7 +1676,7 @@ export default function PdfReaderCoreV4({
                     width={pageWidthFor(page)}
                     ratio={ratio}
                     safeForm={safeForm}
-                    deferRender={fastScrolling}
+                    deferRender={fastScrolling && page !== navigationTarget}
                     query={query}
                     searchOptions={searchOptions}
                     uncontrolled={uncontrolled}
