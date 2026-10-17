@@ -13,7 +13,8 @@ type Work=WorkList&{function:string;scope_text:string;contract_id:string;purchas
   part_number:string|null;serial_number:string|null;defect:string;data_reference:string;data_revision:string;
   inspections_json:string[];required_release:string;requirements_json:Record<string,string|boolean|null>;
   authorized_by:string|null;accepted_by:string|null};
-type Detail={work:Work;allowed_actions:string[];
+type Detail={work:Work;allowed_actions:string[];can_review_inspections:boolean;
+  inspection_checks:{criterion_index:number;criterion:string;result:string;submission_id:string|null;filename:string|null;review_reason:string|null}[];
   closure_blockers:string[];
   history:{id:string;action:string;from_state:string|null;to_state:string|null;reason:string;created_at:string}[];
   additional_work:{id:string;description:string;state:string;decision_reason:string|null;technical_data:string|null;commercial_reference:string|null}[];
@@ -68,6 +69,10 @@ export default function ContractedWorkModule(){
   const [storesRef,setStoresRef]=useState("");const [custodyItem,setCustodyItem]=useState("");
   const [custodyState,setCustodyState]=useState("");const [custodyReason,setCustodyReason]=useState("");
   const [evidenceId,setEvidenceId]=useState("");const [evidenceCategory,setEvidenceCategory]=useState("MAINTENANCE_RELEASE");
+  const [inspectionIndex,setInspectionIndex]=useState<number|null>(null);
+  const [inspectionResult,setInspectionResult]=useState("ACCEPTED");
+  const [inspectionOriginal,setInspectionOriginal]=useState("");
+  const [inspectionReason,setInspectionReason]=useState("");
   const [grantId,setGrantId]=useState("");
   const field=(name:string)=>(e:React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>)=>
     setForm(old=>({...old,[name]:e.target.value}));
@@ -228,7 +233,35 @@ export default function ContractedWorkModule(){
           <dt>Internal work package</dt><dd>{work.internal_work_reference}</dd>
           <dt>Written agreement</dt><dd>{work.contract_id}</dd><dt>Approved site</dt><dd>{work.site_code}</dd>
           <dt>Related commercial PO</dt><dd>{work.purchase_order_id||"Not linked"}</dd></dl>
-          <h4>Inspections / tests / hold points</h4><ul>{work.inspections_json.map((x,i)=><li key={i}>{x}</li>)}</ul>
+          <h4>Inspections / tests / hold points</h4>
+          <p>Each required criterion must have its own reviewed DMS-retained, independently Quality-verified report. Reviewing an original does not certify or release the aircraft or component.</p>
+          <ul>{detail?.inspection_checks.map(x=><li key={x.criterion_index}>
+            <strong>{x.criterion_index+1}. {x.criterion}</strong> — {x.result}
+            {x.filename&&<small> · Evidence: {x.filename}</small>}
+            {x.review_reason&&<small> · Basis: {x.review_reason}</small>}
+            {detail?.can_review_inspections&&work.status!=="CLOSED"&&work.status!=="CANCELLED"&&
+              <button type="button" disabled={busy} onClick={()=>{setInspectionIndex(x.criterion_index);setInspectionResult("ACCEPTED");setInspectionOriginal(x.submission_id||"");setInspectionReason("");}}>
+                Review criterion evidence
+              </button>}
+          </li>)}</ul>
+          {inspectionIndex!==null&&detail?.can_review_inspections&&<form className="partner-form"
+            onSubmit={e=>{e.preventDefault();void mutate("/"+encodeURIComponent(work.id)+"/inspections/"+inspectionIndex,
+             {result:inspectionResult,source_submission_id:inspectionResult==="ACCEPTED"?inspectionOriginal:null,
+               reason:inspectionReason,expected_version:work.version},
+             "Maintenance Manager document-based inspection review recorded; no certification or release was generated.");setInspectionIndex(null);}}>
+            <h4>Inspection criterion {inspectionIndex+1}: documentary review</h4>
+            <label>Result<select value={inspectionResult} onChange={e=>setInspectionResult(e.target.value)}>
+              <option value="ACCEPTED">Accept current verified report</option><option value="REJECTED">Reject / request correction</option>
+            </select></label>
+            {inspectionResult==="ACCEPTED"&&<label>Exact accepted inspection/test original<select required value={inspectionOriginal} onChange={e=>setInspectionOriginal(e.target.value)}>
+              <option value="">Select a verified, retained original</option>
+              {candidates.filter(x=>x.status==="ACCEPTED"&&["INSPECTION_REPORT","TEST_RESULT"].includes(x.evidence_type)).map(x=>
+                <option key={x.id} value={x.id}>{x.evidence_type} — {x.filename}</option>)}
+            </select></label>}
+            <label>Attributable review basis<textarea required minLength={8} value={inspectionReason} onChange={e=>setInspectionReason(e.target.value)}/></label>
+            <button disabled={busy||inspectionReason.trim().length<8||(inspectionResult==="ACCEPTED"&&!inspectionOriginal)}>Record inspection review</button>
+            <button type="button" onClick={()=>setInspectionIndex(null)}>Cancel</button>
+          </form>}
           <h4>Operator and foreign authority conditions</h4><pre style={{whiteSpace:"pre-wrap"}}>{JSON.stringify(work.requirements_json,null,2)}</pre>
           <form className="partner-form" onSubmit={e=>{e.preventDefault();if(!decision)return;
             void mutate("/"+encodeURIComponent(work.id)+"/transitions",
