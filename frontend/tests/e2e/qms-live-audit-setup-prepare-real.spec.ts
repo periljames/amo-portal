@@ -109,7 +109,7 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText(/closing meeting saved/i, { timeout: 30_000 });
 
     const noticeCard = setup.locator("details.qms-audit-setup-tile").filter({ hasText: "Audit notice" });
-    await noticeCard.locator("summary").click();
+    await noticeCard.locator(":scope > summary").click();
     await expect(noticeCard).toHaveAttribute("open", "");
     await noticeCard.getByRole("button", { name: "Create notice draft" }).click();
     await expect(setup.locator(".qms-occurrence-stage__message").last()).toContainText("Notice draft prepared from the saved audit data", { timeout: 30_000 });
