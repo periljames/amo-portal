@@ -263,6 +263,26 @@ def _closure_blockers(db,work):
            (x["qms_valid_until"] is None or x["qms_valid_until"]>=date.today())}
     blocked=[f"Additional work {x['id']} awaits controlled decision" for x in additional if x["state"]=="REQUESTED"]
     blocked.extend(f"Property item {x['id']} not reconciled" for x in custody if x["state"]!="RECONCILED")
+    inspections=_all(db,"""SELECT i.criterion_index,i.criterion,i.result,
+          s.status AS submission_status,s.dms_retention_id,d.status AS retention_status,
+          q.status AS qms_status,q.valid_until AS qms_valid_until
+        FROM external_contracted_inspection_checks i
+        LEFT JOIN external_partner_evidence_submissions s ON s.amo_id=i.amo_id AND s.id=i.submission_id
+          AND s.tenant_provider_id=:provider AND s.related_kind='CONTRACTED_WORK'
+          AND s.related_id=i.work_id
+        LEFT JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id AND d.id=s.dms_retention_id
+        LEFT JOIN quality_external_provider_evidence q ON q.amo_id=s.amo_id
+          AND q.supplier_id=:supplier AND q.id=s.qms_evidence_id
+        WHERE i.amo_id=:amo AND i.work_id=:id ORDER BY i.criterion_index""",
+        amo=amo,id=work_id,provider=work["provider_id"],supplier=work["supplier_id"])
+    if len(inspections)!=len(work.get("inspections_json") or []):
+        blocked.append("Required inspection/test criteria are not fully registered")
+    for check in inspections:
+        if (check["result"]!="ACCEPTED" or check["submission_status"]!="ACCEPTED"
+            or not check["dms_retention_id"] or check["retention_status"] in (None,"DISPOSED")
+            or check["qms_status"]!="VERIFIED"
+            or (check["qms_valid_until"] is not None and check["qms_valid_until"]<date.today())):
+            blocked.append(f"Inspection/test criterion {check['criterion_index']+1} not independently evidenced and reviewed")
     for kind in ("MAINTENANCE_RELEASE","WORK_RECORD","TEST_RESULT"):
         if kind not in valid:blocked.append(f"Accepted governed {kind.lower()} evidence missing")
     req=work.get("requirements_json") or {}
@@ -285,6 +305,11 @@ def _details(db,work,include_history=True):
           WHERE amo_id=:amo AND work_id=:id ORDER BY created_at""",amo=amo,id=work_id),
         "custody":_all(db,"""SELECT * FROM external_contracted_custody
           WHERE amo_id=:amo AND work_id=:id ORDER BY updated_at""",amo=amo,id=work_id),
+        "inspection_checks":_all(db,"""SELECT i.criterion_index,i.criterion,i.result,i.submission_id,
+            i.review_reason,i.reviewed_by_user_id,i.reviewed_at,s.filename
+            FROM external_contracted_inspection_checks i
+            LEFT JOIN external_partner_evidence_submissions s ON s.amo_id=i.amo_id AND s.id=i.submission_id
+            WHERE i.amo_id=:amo AND i.work_id=:id ORDER BY i.criterion_index""",amo=amo,id=work_id),
         "evidence":_all(db,"""SELECT l.id,l.category,s.id AS submission_id,s.filename,s.status,
          s.sha256,s.dms_retention_id,d.status AS retention_status
          FROM external_contracted_evidence_links l
@@ -384,6 +409,13 @@ class CustodyUpdate(BaseModel):
 class LinkEvidence(BaseModel):
     source_submission_id: str = Field(min_length=36,max_length=36)
     category: str
+
+
+class InspectionDecision(BaseModel):
+    result: str = Field(pattern="^(ACCEPTED|REJECTED)$")
+    source_submission_id: str | None = Field(default=None,min_length=36,max_length=36)
+    reason: str = Field(min_length=8,max_length=2000)
+    expected_version: int = Field(ge=1)
 
 
 @staff_router.get("")
@@ -499,6 +531,11 @@ def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
         "inspections":json.dumps(payload.inspections),"release":payload.required_release,
         "requirements":json.dumps({**payload.requirements,"data_manual_id":payload.data_manual_id,
           "data_revision_id":payload.data_revision_id}),"actor":str(user.id)})
+    for index,criterion in enumerate(payload.inspections):
+        db.execute(text("""INSERT INTO external_contracted_inspection_checks
+          (id,amo_id,work_id,criterion_index,criterion)
+          VALUES(:id,:amo,:work,:index,:criterion)"""),
+          {"id":str(uuid4()),"amo":amo,"work":work_id,"index":index,"criterion":criterion})
     work=_work(db,amo,work_id)
     _event(db,work,"CREATE","Maintenance Manager initiated defined contracted function",
            staff=str(user.id),target="DRAFT")
@@ -611,6 +648,13 @@ def _transition(db,work,payload,*,user=None,identity=None):
         updates+=["authorized_by=:actor","authorized_at=NOW()"];bind["actor"]=str(user.id)
     if action=="TECHNICAL_ACCEPT":
         updates+=["accepted_by=:actor","accepted_at=NOW()"];bind["actor"]=str(user.id)
+    if action in {"REWORK","REJECT","REOPEN"}:
+        # A return/reopen invalidates previously accepted inspection/test reviews.
+        db.execute(text("""UPDATE external_contracted_inspection_checks
+          SET result='PENDING',submission_id=NULL,review_reason=NULL,
+              reviewed_by_user_id=NULL,reviewed_at=NULL
+          WHERE amo_id=:amo AND work_id=:id"""),
+          {"amo":work["amo_id"],"id":work["id"]})
     if action in {"CLOSE","CANCEL"}:
         updates+=["closure_reason=:reason"];bind["reason"]=payload.reason
         if action=="CLOSE":updates+=["closed_at=NOW()"]
@@ -733,6 +777,8 @@ def partner_detail(tenant_slug:str,work_id:str,request:Request,db:Session=Depend
     for item in result["additional_work"]:
         for field in ("requested_by_identity_id","reviewed_by_user_id"):
             item.pop(field,None)
+    for item in result["inspection_checks"]:
+        item.pop("reviewed_by_user_id",None)
     result["history"]=[{k:v for k,v in item.items() if k not in
         {"actor_user_id","actor_identity_id"}} for item in result["history"]]
     return result
@@ -893,6 +939,54 @@ def update_custody(amo_code:str,work_id:str,item_id:str,payload:CustodyUpdate,
                "stores_reference":item.get("stores_reference")})
     db.commit()
     return {"id":item_id,"state":payload.state,"canonical_stores_updated":False}
+
+
+@staff_router.post("/{work_id}/inspections/{criterion_index}")
+def review_inspection_criterion(amo_code:str,work_id:str,criterion_index:int,
+                                payload:InspectionDecision,db:Session=Depends(get_db),
+                                user=Depends(get_current_active_user)):
+    amo=_staff(db,amo_code,user)
+    work=_work(db,amo,work_id,lock=True)
+    if _role(user)!=MANAGERS[work["work_type"]]:
+        raise HTTPException(403,"The responsible Maintenance Manager must review technical inspection evidence")
+    if work["version"]!=payload.expected_version:
+        raise HTTPException(409,"Work changed; reload the current inspection evidence")
+    if not work["authorized_at"] or work["status"] in {"CLOSED","CANCELLED","DRAFT","ON_HOLD"}:
+        raise HTTPException(409,"Inspection evidence review is not permitted at this stage")
+    criterion=_one(db,"""SELECT criterion FROM external_contracted_inspection_checks
+      WHERE amo_id=:amo AND work_id=:work AND criterion_index=:index FOR UPDATE""",
+      amo=amo,work=work_id,index=criterion_index)
+    if not criterion:raise HTTPException(404,"Inspection/test criterion not registered")
+    submission_id=payload.source_submission_id if payload.result=="ACCEPTED" else None
+    if payload.result=="ACCEPTED":
+        if not submission_id:raise HTTPException(422,"Choose a specific DMS-retained and Quality-verified test/inspection original")
+        source=_one(db,"""SELECT s.id FROM external_partner_evidence_submissions s
+          JOIN document_retention_dispositions d ON d.tenant_id=s.amo_id
+            AND d.id=s.dms_retention_id AND d.status!='DISPOSED'
+          JOIN quality_external_provider_evidence q ON q.id=s.qms_evidence_id
+            AND q.amo_id=s.amo_id AND q.supplier_id=:supplier
+            AND q.status='VERIFIED' AND (q.valid_until IS NULL OR q.valid_until>=CURRENT_DATE)
+          WHERE s.amo_id=:amo AND s.tenant_provider_id=:provider AND s.id=:submission
+            AND s.related_kind='CONTRACTED_WORK' AND s.related_id=:work
+            AND s.status='ACCEPTED' AND s.dms_evidence_asset_id IS NOT NULL
+            AND s.evidence_type IN ('INSPECTION_REPORT','TEST_RESULT')""",
+            amo=amo,provider=work["provider_id"],supplier=work["supplier_id"],
+            submission=submission_id,work=work_id)
+        if not source:raise HTTPException(409,"The chosen original is not a current, independently verified inspection/test report")
+    db.execute(text("""UPDATE external_contracted_inspection_checks
+      SET result=:result,submission_id=:submission,review_reason=:reason,
+          reviewed_by_user_id=:actor,reviewed_at=NOW()
+      WHERE amo_id=:amo AND work_id=:work AND criterion_index=:index"""),
+      {"result":payload.result,"submission":submission_id,"reason":payload.reason,
+       "actor":str(user.id),"amo":amo,"work":work_id,"index":criterion_index})
+    db.execute(text("""UPDATE external_contracted_work SET version=version+1,updated_at=NOW()
+      WHERE amo_id=:amo AND id=:work"""),{"amo":amo,"work":work_id})
+    _event(db,work,"INSPECTION_"+payload.result,payload.reason,staff=str(user.id),
+      details={"criterion_index":criterion_index,"criterion":criterion["criterion"],
+               "source_submission_id":submission_id})
+    db.commit()
+    return {"criterion_index":criterion_index,"result":payload.result,"version":work["version"]+1,
+            "maintenance_release_issued":False}
 
 
 @staff_router.post("/{work_id}/evidence",status_code=201)
