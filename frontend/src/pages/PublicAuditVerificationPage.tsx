@@ -80,7 +80,7 @@ const PublicAuditVerificationPage: React.FC = () => {
             </div>
           </header>
           <dl>
-            <div><dt>Status</dt><dd>{verified ? "Valid governed record" : "Not verified"}</dd></div>
+            <div><dt>Status</dt><dd>{verified ? "Verified" : "Not verified"}</dd></div>
             <div><dt>Report revision</dt><dd>R{data.report.revision_no} · {data.report.status}</dd></div>
             <div><dt>Governed SHA-256</dt><dd><code>{data.report.sha256}</code></dd></div>
             <div><dt>Issued</dt><dd>{when(data.report.issued_at)}</dd></div>
