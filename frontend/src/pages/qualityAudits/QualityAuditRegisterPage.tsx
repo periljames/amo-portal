@@ -333,7 +333,7 @@ const QualityAuditRegisterPage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Findings"
+      title="Findings Register"
       subtitle="Register of findings and linked corrective actions."
     >
       <section className="qa-register-grid-page" aria-label="Findings register">
