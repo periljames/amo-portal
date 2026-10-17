@@ -211,6 +211,15 @@
   border-bottom: 0;
 }
 
+.publications-upload-dialog[aria-label="Assigned document review"] {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.publications-upload-dialog[aria-label="Assigned document review"] > header {
+  flex: 0 0 auto;
+}
 .publications-upload-dialog h2 { margin: 0; font-size: 1.05rem; }
 .publications-upload-dialog header p { margin: 0.2rem 0 0; color: color-mix(in srgb, var(--ink) 62%, transparent); font-size: 0.7rem; }
 .publications-upload-dialog header > button,
