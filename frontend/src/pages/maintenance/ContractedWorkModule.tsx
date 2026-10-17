@@ -140,7 +140,6 @@ export default function ContractedWorkModule(){
         prior_written_acceptance_reference:form.prior_written_acceptance_reference,
         safety_assessment_required:safetyRequired,safety_assessment_reference:form.safety_assessment_reference,
         restriction_review_reference:form.restriction_review_reference,
-        operator_approval_reference:form.operator_approval_reference,
       }
     },"Technical work order drafted. It cannot be dispatched until Maintenance and Quality approvals are recorded.");
   }
