@@ -19,12 +19,19 @@ import {
   downloadPhysicalCopyLabel,
   listIntegratedLibrary,
   listPhysicalCopies,
+  listControlledCopyCustodians,
+  recordPhysicalCopyEvent,
+  recordPhysicalCopyIncident,
   registerPhysicalCopy,
   scanPhysicalCopy,
   type ControlledCopyScan,
+  type ControlledCopyCustodian,
+  type ControlledCopyEventType,
   type IntegratedLibraryItem,
   type PhysicalCopyRegisterResponse,
 } from "../../services/documentLibrary";
+import DocumentEvidencePicker from "./DocumentEvidencePicker";
+import type { DocumentEvidenceReference } from "../../services/documentControlEvidence";
 import {
   DocumentControlEmpty,
   DocumentControlError,
@@ -288,9 +295,37 @@ function PhysicalCopyScanPanel({
   const [location, setLocation] = useState(value.copy.location_text || value.copy.home_location_text);
   const [acknowledged, setAcknowledged] = useState(false);
   const [comments, setComments] = useState("");
+  const [custodians, setCustodians] = useState<ControlledCopyCustodian[]>([]);
+  const [recipient, setRecipient] = useState("");
+  const [reason, setReason] = useState("");
+  const [evidence, setEvidence] = useState<DocumentEvidenceReference[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const isController = value.capabilities.control;
   const checkedOut = ["ISSUED", "RECALLED"].includes(value.copy.status) && Boolean(value.copy.holder_user_id);
+  const canChange = isController && ["ISSUED", "RECALLED", "RETURNED"].includes(value.copy.status);
+  const canWithdraw = isController && ["ISSUED", "RECALLED", "RETURNED"].includes(value.copy.status);
+  const canDestroy = isController && value.copy.status !== "DESTROYED";
+  const canReportIncident = isController && value.copy.status !== "DESTROYED";
+  const hasDispositionEvidence = reason.trim().length >= 4 && evidence.length > 0;
+
+  useEffect(() => {
+    if (!isController) return;
+    let active = true;
+    listControlledCopyCustodians(tenant)
+      .then((items) => { if (active) setCustodians(items); })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : "Custodian directory could not be loaded.");
+      });
+    return () => { active = false; };
+  }, [tenant, isController]);
+
+  const useScan = (next: ControlledCopyScan) => {
+    onChange(next);
+    setLocation(next.copy.location_text || next.copy.home_location_text);
+    setAcknowledged(false);
+    setComments("");
+  };
 
   const act = async (action: "CHECK_OUT" | "CHECK_IN" | "VERIFY_LOCATION") => {
     setBusy(true);
@@ -303,12 +338,39 @@ function PhysicalCopyScanPanel({
         acknowledgement: action === "CHECK_OUT" ? acknowledged : undefined,
         comments: comments.trim() || undefined,
       });
-      onChange(next);
-      setAcknowledged(false);
-      setComments("");
-      setLocation(next.copy.location_text || next.copy.home_location_text);
+      useScan(next);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The custody action could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const controlledAction = async (action: ControlledCopyEventType | "DAMAGE" | "LOSS") => {
+    if (!isController) return;
+    setBusy(true);
+    setError("");
+    try {
+      const next = action === "DAMAGE" || action === "LOSS"
+        ? await recordPhysicalCopyIncident(tenant, value.copy.id, {
+            incident_type: action,
+            reason: reason.trim(),
+            evidence,
+          })
+        : await recordPhysicalCopyEvent(tenant, value.copy.id, {
+            event_type: action,
+            to_holder_user_id: action === "TRANSFER" ? recipient || undefined : undefined,
+            to_location: ["TRANSFER", "LOCATION_CHANGE"].includes(action)
+              ? location.trim() : action === "RETURN" ? value.copy.home_location_text : undefined,
+            reason: reason.trim() || undefined,
+            evidence: ["WITHDRAW", "DESTROY"].includes(action) ? evidence : [],
+          });
+      useScan(next);
+      setReason("");
+      setEvidence([]);
+      if (action === "TRANSFER") setRecipient("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Controlled-copy action failed.");
     } finally {
       setBusy(false);
     }
@@ -340,18 +402,48 @@ function PhysicalCopyScanPanel({
         <label className="wide"><span><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> I accept custody of this numbered controlled copy and will return it by the due time.</span></label>
         <div className="physical-copy-dialog__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || !due || !acknowledged} onClick={() => void act("CHECK_OUT")}><UserRoundCheck size={14} /> Check out to me</button></div>
       </> : null}
+
       {checkedOut && value.capabilities.check_in ? <>
         <label className="wide"><span>Return to shelf / location</span><input value={location} onChange={(event) => setLocation(event.target.value)} /></label>
         <label className="wide"><span>Return note</span><textarea value={comments} onChange={(event) => setComments(event.target.value)} /></label>
-        <div className="physical-copy-dialog__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || location.trim().length < 2} onClick={() => void act("CHECK_IN")}><CheckCircle2 size={14} /> Sign in / return</button></div>
+        <div className="physical-copy-dialog__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || location.trim().length < 2} onClick={() => { void (isController ? controlledAction("RETURN") : act("CHECK_IN")); }}><CheckCircle2 size={14} /> Sign in / return</button></div>
       </> : null}
-      {value.capabilities.verify_location ? <>
+
+      {value.capabilities.verify_location && !isController ? <>
         <label className="wide"><span>Verify current physical location</span><input value={location} onChange={(event) => setLocation(event.target.value)} /></label>
         <div className="physical-copy-dialog__actions"><button type="button" className="dc-button" disabled={busy || location.trim().length < 2} onClick={() => void act("VERIFY_LOCATION")}><MapPin size={14} /> Verify location</button></div>
       </> : null}
-      {error ? <div className="dc-form__error wide">{error}</div> : null}
+
+      {canChange ? <>
+        <label className="wide"><span>Transfer controlled copy to custodian</span><select value={recipient} onChange={(event) => setRecipient(event.target.value)}>
+          <option value="">Select active tenant custodian</option>
+          {custodians.map((item) => <option key={item.id} value={item.id}>{item.name}{item.staff_code ? ` · ${item.staff_code}` : ""}</option>)}
+        </select></label>
+        <label className="wide"><span>Controlled location</span><input value={location} onChange={(event) => setLocation(event.target.value)} /></label>
+        <div className="physical-copy-dialog__actions">
+          <button type="button" className="dc-button" disabled={busy || !recipient || location.trim().length < 2} onClick={() => void controlledAction("TRANSFER")}>Transfer</button>
+          <button type="button" className="dc-button" disabled={busy || !location.trim() || location.trim() === value.copy.location_text} onClick={() => void controlledAction("LOCATION_CHANGE")}>Change location</button>
+        </div>
+      </> : null}
+
+      {isController && (canWithdraw || canDestroy || canReportIncident || value.copy.status === "ISSUED") ? <>
+        <label className="wide"><span>Reason / incident narrative</span><textarea value={reason} rows={2} onChange={(event) => setReason(event.target.value)} placeholder="Record the controlled action, discrepancy or disposition rationale" /></label>
+        <div className="wide">
+          <DocumentEvidencePicker tenant={tenant} manualId={value.copy.manual_id} revisionId={value.copy.revision_id} category="CONTROLLED_COPY" purpose="Controlled-copy custody, disposition or incident evidence" value={evidence} onChange={setEvidence} />
+        </div>
+        <div className="physical-copy-dialog__actions">
+          {value.copy.status === "ISSUED" ? <button type="button" className="dc-button" disabled={busy || reason.trim().length < 4} onClick={() => void controlledAction("RECALL")}>Recall</button> : null}
+          {canWithdraw ? <button type="button" className="dc-button" disabled={busy || !hasDispositionEvidence} onClick={() => void controlledAction("WITHDRAW")}>Withdraw</button> : null}
+          {canDestroy ? <button type="button" className="dc-button" disabled={busy || !hasDispositionEvidence} onClick={() => void controlledAction("DESTROY")}>Record destruction</button> : null}
+          {canReportIncident ? <>
+            <button type="button" className="dc-button" disabled={busy || !hasDispositionEvidence} onClick={() => void controlledAction("DAMAGE")}>Record damage</button>
+            <button type="button" className="dc-button" disabled={busy || !hasDispositionEvidence} onClick={() => void controlledAction("LOSS")}>Record loss</button>
+          </> : null}
+        </div>
+      </> : null}
+      {error ? <div className="dc-form__error wide" role="alert">{error}</div> : null}
     </div>
 
-    {value.events.length ? <div className="physical-copy-dialog__history"><h3>Custody history</h3><ol>{value.events.map((event) => <li key={event.id}><strong>{event.event_type.replaceAll("_", " ")}</strong> · {formatDate(event.created_at)}{event.to_location ? ` · ${event.to_location}` : ""}{event.reason ? <small>{event.reason}</small> : null}</li>)}</ol></div> : null}
+    {value.events.length ? <div className="physical-copy-dialog__history"><h3>Custody history</h3><ol>{value.events.map((event) => <li key={event.id}><strong>{event.event_type.replaceAll("_", " ")}</strong> · {formatDate(event.created_at)}{event.to_location ? ` · ${event.to_location}` : ""}{event.reason ? <small>{event.reason}</small> : null}{event.evidence?.map((reference, index) => <small key={String(reference.asset_id || index)}>{String(reference.filename || "Retained controlled evidence")}</small>)}</li>)}</ol></div> : null}
   </section>;
 }
