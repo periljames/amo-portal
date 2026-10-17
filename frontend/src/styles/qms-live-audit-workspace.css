@@ -2,41 +2,28 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
   background: var(--qms-page);
   color: var(--qms-text);
 }
 
 .qms-live-audit-focus--loading {
-  place-items: center;
+  align-items: center;
+  justify-content: center;
   padding: 2rem;
   font-weight: 700;
 }
 
 .qms-live-audit-focus--error {
-  place-items: center;
-  align-content: center;
-  justify-items: center;
+  align-items: center;
+  justify-content: center;
   gap: 0.85rem;
   padding: 2rem 1.5rem;
   text-align: center;
-  grid-template-rows: auto;
 }
 
-.qms-live-audit-focus__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--qms-line);
-  background: color-mix(in srgb, var(--qms-panel) 96%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.qms-live-audit-focus__header span,
 .qms-live-audit-focus__question-head span,
 .qms-live-audit-focus__summary > section > span {
   color: var(--qms-muted);
@@ -50,56 +37,6 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-.qms-live-audit-focus__header h1 {
-  margin: 0;
-  font-size: clamp(1.05rem, 1.3vw, 1.28rem);
-  font-weight: 740;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  color: var(--qms-text);
-}
-
-.qms-live-audit-focus__helper {
-  margin: 0.25rem 0 0;
-  color: var(--qms-muted);
-  font-size: 0.78rem;
-  font-weight: 550;
-  letter-spacing: normal;
-  text-transform: none;
-  line-height: 1.35;
-}
-
-.qms-live-audit-focus__header-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.78rem;
-}
-
-.qms-live-audit-focus__header-meta a,
-.qms-live-audit-focus__closing-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--qms-line);
-  border-radius: var(--qms-radius);
-  color: inherit;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.qms-live-audit-focus__closing-link.is-primary {
-  background: var(--accent-primary, #2563eb);
-  border-color: var(--accent-primary, #2563eb);
-  color: #fff;
-}
-
-.qms-live-audit-focus__closing-link:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .qms-live-audit-focus__sections-title {
@@ -401,10 +338,6 @@
   border-style: dashed !important;
 }
 
-.qms-live-audit-focus__closing-link {
-  justify-content: center;
-}
-
 .qms-live-audit-finding-backdrop {
   position: fixed;
   inset: 0;
@@ -444,8 +377,6 @@
 }
 
 @media (max-width: 720px) {
-  .qms-live-audit-focus__header { align-items: flex-start; flex-direction: column; }
-  .qms-live-audit-focus__header-meta { width: 100%; flex-wrap: wrap; }
   .qms-live-audit-focus__body { grid-template-columns: 1fr; }
   .qms-live-audit-focus__sections { display: none; }
   .qms-live-audit-focus__references { grid-template-columns: 1fr; }
@@ -900,72 +831,6 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-.qms-live-audit-focus__header {
-  flex: 0 0 auto;
-  min-height: 4.2rem;
-  padding: 0.65rem 1rem;
-}
-
-.qms-live-audit-focus__identity {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.qms-live-audit-focus__identity h2 {
-  margin: 0;
-  font-size: 1.13rem;
-  line-height: 1.3;
-  font-weight: 800;
-  letter-spacing: -0.015em;
-}
-
-.qms-live-audit-focus__identity-ref {
-  display: inline-block;
-  max-width: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-  margin-inline-start: 0.45rem;
-  font-weight: 550 !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
-}
-
-.qms-live-audit-focus__mobile-menu {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid var(--qms-line);
-  border-radius: 9px;
-  background: var(--qms-panel);
-  color: var(--qms-text);
-}
-
-.qms-live-audit-focus__header-meta {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.35rem 0.55rem;
-  font-size: 0.72rem;
-}
-
-.qms-live-audit-focus__header-meta > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  white-space: nowrap;
-}
-
-.qms-live-audit-focus__header-meta a,
-.qms-live-audit-focus__closing-link {
-  min-height: 2.25rem;
-  padding: 0.4rem 0.65rem;
 }
 
 .qms-live-audit-focus__error,
@@ -1491,13 +1356,6 @@
 }
 
 @media (max-width: 720px) {
-  .qms-live-audit-focus__header {
-    padding: 0.55rem 0.75rem;
-    gap: 0.45rem;
-  }
-  .qms-live-audit-focus__identity-ref { max-width: 11rem; }
-  .qms-live-audit-focus__mobile-menu { display: inline-flex; }
-  .qms-live-audit-focus__header-meta { justify-content: flex-start; }
   .qms-live-audit-focus__body { display: block; overflow-y: auto; }
   .qms-live-audit-focus__sections { display: none; border-right: 0; max-height: 45vh; overflow: auto; }
   .qms-live-audit-focus__body.is-navigation-open .qms-live-audit-focus__sections {
@@ -1566,7 +1424,6 @@
   min-width: 9rem;
   color: var(--qms-text);
 }
-.qms-live-audit-focus__matrix-scroll { overflow-x: auto; max-height: min(68vh, 900px); overflow-y: auto; }
 .qms-live-audit-focus__matrix-table {
   border-collapse: collapse;
   width: 100%;
@@ -1588,61 +1445,37 @@
   border-bottom: 1px solid var(--qms-line);
   vertical-align: middle;
 }
-.qms-live-audit-focus__matrix-table td:first-child { width: 4rem; text-align: center; font-variant-numeric: tabular-nums; }
-.qms-live-audit-focus__matrix-table td:nth-child(2) { width: 52%; }
-.qms-live-audit-focus__matrix-table td:nth-child(2) > span { display: block; }
-.qms-live-audit-focus__matrix-table td:nth-child(2) > small { display: block; margin-top: 0.15rem; color: var(--qms-muted); font-size: 0.7rem; }
 .qms-live-audit-focus__matrix-table tr.is-selected td { background: var(--qms-line-soft); }
-.qms-live-audit-focus__matrix-table .qms-live-audit-focus__matrix-section th {
-  background: var(--qms-line-soft);
-  padding: 0.5rem 0.8rem;
-  color: var(--qms-text);
-  text-transform: none;
-  letter-spacing: 0.01em;
-  text-align: left;
-  font-size: 0.77rem;
-  border-block: 1px solid var(--qms-line);
-}
-.qms-live-audit-focus__matrix-choices { display: flex; flex-wrap: wrap; gap: 0.2rem; }
-.qms-live-audit-focus__matrix-choices button {
-  min-height: 2rem;
-  padding: 0.3rem 0.52rem;
-  border-radius: 6px;
-  border: 1px solid var(--qms-line);
-  background: transparent;
-  color: var(--qms-text);
-  font-weight: 650;
-  font-size: 0.7rem;
-}
-.qms-live-audit-focus__matrix-choices button.is-selected {
-  border-color: var(--accent-primary, #2563eb);
-  box-shadow: inset 0 0 0 1px var(--accent-primary, #2563eb);
-  background: var(--qms-line-soft);
-}
-.qms-live-audit-focus__matrix-choices button:disabled { opacity: 0.65; cursor: not-allowed; }
-.qms-live-audit-focus__matrix-device { display: block; white-space: nowrap; font-size: 0.65rem; color: var(--qms-muted); }
 .qms-live-audit-focus__question { padding: 0; margin-top: 0.65rem; max-height: none; overflow: visible; }
-/* Table-first fieldwork must not remove findings, team presence, sync state or
-   release-boundary controls. Keep this secondary area below the checklist as
-   compact disclosures instead of a third scroll-heavy sidebar. */
 .qms-live-audit-focus__summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-  align-content: start;
-  width: 100%;
-  max-height: none;
-  overflow: visible;
-  border-left: 0;
-  border-top: 1px solid var(--qms-line);
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   margin-top: 0.75rem;
-  padding: 0.65rem 0;
+  border: 1px solid var(--qms-line);
+  border-radius: 10px;
+  background: var(--qms-panel);
 }
 @media(max-width: 720px) {
-  .qms-live-audit-focus__summary { grid-template-columns: 1fr; }
   .qms-live-audit-focus__body { display: block; padding: 0.5rem; }
   .qms-live-audit-focus__matrix-toolbar label { width: 100%; }
   .qms-live-audit-focus__matrix-toolbar input { width: 100%; }
-  .qms-live-audit-focus__matrix-scroll { max-height: 66vh; }
   .qms-live-audit-focus__matrix-table { min-width: 650px; }
   .qms-live-audit-focus__question { padding: 0; }
+}
+
+
+.qms-live-audit-focus__question-head { gap: 0.45rem; }
+.qms-live-audit-focus__close-details {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--qms-line);
+  border-radius: 6px;
+  background: var(--qms-panel);
+  color: var(--qms-text);
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.76rem;
 }
