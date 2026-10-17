@@ -942,7 +942,7 @@ def update_custody(amo_code:str,work_id:str,item_id:str,payload:CustodyUpdate,
     if payload.state=="RECONCILED" and item["state"]=="DISCREPANCY" and not payload.discrepancy:
         raise HTTPException(422,"Record disposition of lost or discrepant property before reconciling")
     db.execute(text("""UPDATE external_contracted_custody SET state=:state,
-       discrepancy=:note,updated_at=NOW() WHERE amo_id=:amo AND work_id=:work AND id=:id""",
+       discrepancy=:note,updated_at=NOW() WHERE amo_id=:amo AND work_id=:work AND id=:id"""),
        dict(state=payload.state,note=payload.discrepancy,amo=amo,work=work_id,id=item_id))
     _event(db,work,"PROPERTY_"+payload.state,payload.reason,staff=str(user.id),
       details={"item_id":item_id,"from":item["state"],"to":payload.state,
@@ -1029,7 +1029,7 @@ def attach_verified_evidence(amo_code:str,work_id:str,payload:LinkEvidence,db:Se
     link=str(uuid4())
     db.execute(text("""INSERT INTO external_contracted_evidence_links
       (id,amo_id,work_id,source_submission_id,category,linked_by_user_id)
-      VALUES(:id,:amo,:work,:submission,:category,:actor)""",
+      VALUES(:id,:amo,:work,:submission,:category,:actor)"""),
       dict(id=link,amo=amo,work=work_id,submission=submission["id"],
            category=payload.category,actor=str(user.id)))
     _event(db,work,"EVIDENCE_LINKED","Accepted controlled original linked to work order",
