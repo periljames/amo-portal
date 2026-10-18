@@ -465,8 +465,12 @@ def _still_current(db, amo, row, zone):
     if source=="maintenance_due":
         result=db.execute(text("""SELECT status,requirements_json FROM external_contracted_work
             WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
-        return bool(result and result["status"] not in ("CLOSED","CANCELLED")
-                    and any(str(v) in row["source_stamp"] for v in (result["requirements_json"] or {}).values() if isinstance(v,str)))
+        if not result or result["status"] in ("CLOSED","CANCELLED"):
+            return False
+        requirements=result["requirements_json"] or {}
+        return any(str(row["source_stamp"]).startswith(f"{key}:{requirements.get(key)}:")
+                   for key in ("provider_ack_due_at","expected_completion_at")
+                   if requirements.get(key))
     return True
 
 
@@ -483,10 +487,13 @@ def _restricted_now(local, quiet):
 
 def _dispatch(db, amo, code, zone, policy, now):
     delivered = 0
-    jobs = _rows(db, """SELECT * FROM external_provider_alert_jobs WHERE amo_id=:amo
+    query = """SELECT * FROM external_provider_alert_jobs WHERE amo_id=:amo
        AND status IN ('PENDING','RETRY') AND due_at<=:now
        AND (next_attempt_at IS NULL OR next_attempt_at<=:now)
-       ORDER BY due_at,id LIMIT 100 FOR UPDATE SKIP LOCKED""", amo=amo,now=now)
+       ORDER BY due_at,id LIMIT 100"""
+    if db.get_bind().dialect.name=="postgresql":
+        query += " FOR UPDATE SKIP LOCKED"
+    jobs=_rows(db,query,amo=amo,now=now)
     for job in jobs:
         savepoint = db.begin_nested()
         try:
@@ -502,7 +509,7 @@ def _dispatch(db, amo, code, zone, policy, now):
                     accounts.User.amo_id==amo,
                     accounts.User.id==job["recipient_user_id"],
                     accounts.User.is_active.is_(True)).first()
-                if recipient is None:
+                if recipient is None or str(getattr(recipient.role,"value",recipient.role)) not in policy["routes_json"].get(CATALOG[job["event_key"]],[]):
                     db.execute(text("""UPDATE external_provider_alert_jobs
                          SET status='CANCELLED',cancelled_at=NOW() WHERE id=:id"""), {"id":job["id"]})
                     savepoint.commit()
@@ -569,14 +576,10 @@ def _dispatch(db, amo, code, zone, policy, now):
             # or a read receipt. That evidence belongs to the signed webhook log.
             email_on = channels.get("email",False) and recipient is not None
             if job["recipient_identity_id"]:
-                pref=db.execute(text("""SELECT in_app_enabled FROM external_provider_alert_preferences
-                  WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
-                  {"amo":amo,"provider":job["recipient_provider_id"],
-                   "identity":job["recipient_identity_id"]}).scalar()
-                # No provider email is sent without explicit product support for
-                # verified external addresses and separate provider opt-in.
+                # Vendor member email requires verified-address support; the
+                # existing vendor in-app notification register remains primary.
                 email_on=False
-            if email_on and not job["email_log_id"]:
+            if email_on:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
                 blocked = (_restricted_now(local,policy["quiet_hours_json"])
