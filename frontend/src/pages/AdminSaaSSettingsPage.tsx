@@ -214,6 +214,12 @@ export default function AdminSaaSSettingsPage() {
     const secret = Object.fromEntries(
       Object.entries(secretDraft).filter(([, value]) => value.trim() !== ""),
     );
+    const tenantResend = setup?.scope === "TENANT" && provider.provider === "resend";
+    const clearConfigFields = tenantResend && provider.scope === "TENANT"
+      ? ["from_name", "from_email", "reply_to"].filter(
+          (field) => !String(configDraft[field] ?? "").trim() && Boolean(provider.config?.[field]),
+        )
+      : [];
     if (
       setup?.scope === "TENANT"
       && provider.provider !== "resend"
@@ -237,6 +243,7 @@ export default function AdminSaaSSettingsPage() {
           reason: changeReason.trim(),
           ...(Object.keys(secret).length ? { secret } : {}),
           ...(clearSecret ? { secret: {}, clear_secret: true } : {}),
+          ...(clearConfigFields.length ? { clear_config_fields: clearConfigFields } : {}),
         },
         effectiveTenantId,
       ),
