@@ -43,17 +43,30 @@ def test_initial_resend_setup_rejects_missing_api_key(monkeypatch: pytest.Monkey
         )
 
 
-def test_tenant_resend_identity_rejects_secrets_and_unverified_domains():
+def test_tenant_resend_identity_rejects_secrets_and_unassigned_domains():
+    config = {
+        "from_email": "notifications@notify.venspera.com",
+        "tenant_default_sender_domain": "notify.venspera.com",
+        "verified_sender_domains": "flysafarilink.com",
+        "tenant_sender_domain_assignments_json": '{"tenant-A": ["flysafarilink.com"]}',
+    }
+    shared = {"platform_config": config, "tenant_id": "tenant-A", "tenant_slug": "safarilink"}
     with pytest.raises(ValueError, match="cannot contain API keys"):
         resend_email_policy._normalise_tenant_resend_payload(
-            {"secret": {"api_key": "re_test_key"}, "config": {}},
-            platform_config={"from_email": "notifications@notify.venspera.com"},
+            {"secret": {"api_key": "re_test_key"}, "config": {}}, **shared,
         )
-
-    with pytest.raises(ValueError, match="not approved"):
+    with pytest.raises(ValueError, match="not been assigned"):
         resend_email_policy._normalise_tenant_resend_payload(
-            {"config": {"from_email": "quality@unverified.example"}},
-            platform_config={"from_email": "notifications@notify.venspera.com"},
+            {"config": {"from_email": "quality@unverified.example"}}, **shared,
+        )
+    with pytest.raises(ValueError, match="reserved for this tenant"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"config": {"from_email": "quality.other-tenant@notify.venspera.com"}}, **shared,
+        )
+    with pytest.raises(ValueError, match="not been assigned"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"config": {"from_email": "quality@flysafarilink.com"}},
+            platform_config=config, tenant_id="tenant-B", tenant_slug="another",
         )
 
 
@@ -69,12 +82,23 @@ def test_tenant_resend_identity_accepts_verified_custom_domain_and_reply_to_list
         },
         platform_config={
             "from_email": "notifications@notify.venspera.com",
+            "tenant_default_sender_domain": "notify.venspera.com",
             "verified_sender_domains": "flysafarilink.com",
+            "tenant_sender_domain_assignments_json": '{"tenant-A": ["flysafarilink.com"]}',
         },
+        tenant_id="tenant-A",
+        tenant_slug="safarilink",
     )
-
     assert prepared["config"]["from_email"] == "quality@flysafarilink.com"
     assert prepared["config"]["reply_to"] == "qm@flysafarilink.com, qo@flysafarilink.com"
+
+
+def test_platform_rejects_duplicate_domain_assignments():
+    with pytest.raises(ValueError, match="cannot be assigned to multiple tenants"):
+        resend_email_policy._tenant_domain_assignments(
+            '{"tenant-A": ["flysafarilink.com"], "tenant-B": ["flysafarilink.com"]}'
+        )
+
 
 
 def test_production_mode_requires_production_environment(monkeypatch: pytest.MonkeyPatch):
