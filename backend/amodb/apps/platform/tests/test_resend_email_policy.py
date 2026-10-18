@@ -101,6 +101,16 @@ def test_platform_rejects_duplicate_domain_assignments():
 
 
 
+def test_quality_sender_scope_does_not_override_security_notifications():
+    assert notification_providers._uses_qms_sender("qms_audit_notice_memo")
+    assert notification_providers._uses_qms_sender("finding-issued")
+    assert notification_providers._uses_qms_sender("qms_mail_identity_test")
+    assert not notification_providers._uses_qms_sender("password-reset")
+    assert not notification_providers._uses_qms_sender("email-verification")
+    assert not notification_providers._uses_qms_sender("account-welcome")
+    assert not notification_providers._uses_qms_sender("training-expiry-warning")
+
+
 def test_production_mode_requires_production_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("APP_ENV", "staging")
     with pytest.raises(ValueError, match="outside a production deployment"):
