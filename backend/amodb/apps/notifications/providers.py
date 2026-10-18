@@ -352,6 +352,13 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
                 default_domain = platform_sender.rsplit("@", 1)[-1].lower() if "@" in platform_sender else ""
             slug = re.sub(r"[^a-z0-9]+", ".", str(tenant.login_slug or tenant.amo_code or "tenant").lower()).strip(".")
             if default_domain and slug:
+                from amodb.apps.platform.resend_email_policy import _normalise_domains
+                platform_domain = str((platform_row.config_json or {}).get("from_email") or "").strip().rsplit("@", 1)[-1].lower()
+                approved = set(_normalise_domains((platform_row.config_json or {}).get("verified_sender_domains")))
+                if default_domain != platform_domain and default_domain not in approved:
+                    # The shared sending domain has not been approved; never
+                    # generate an unusable tenant sender or claim delivery-ready.
+                    return NoopProvider(), False
                 config["from_email"] = f"quality.{slug}@{default_domain}"
         if not str(tenant_config.get("reply_to") or "").strip():
             quality_users = (
