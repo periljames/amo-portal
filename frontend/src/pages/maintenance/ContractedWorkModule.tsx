@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useState} from "react";
-import {Link,useParams} from "react-router-dom";
+import {Link,useLocation,useParams} from "react-router-dom";
 import {apiRequest} from "../../services/apiClient";
 
 type Provider={id:string;supplier_id:number;legal_name:string};
@@ -28,10 +28,15 @@ const CUSTODY=["COMPONENT","EXCHANGE","LOAN","TOOL","EQUIPMENT","CUSTOMER_PROPER
 
 export default function ContractedWorkModule(){
   const {amoCode=""}=useParams();
+  const location=useLocation();
+  const deepLinkedWork=new URLSearchParams(location.search).get("work")||"";
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/contracted-work";
   const [items,setItems]=useState<WorkList[]>([]);
   const [options,setOptions]=useState<Options|null>(null);
   const [selected,setSelected]=useState("");
+  const [expectedAt,setExpectedAt]=useState("");
+  const [ackDueAt,setAckDueAt]=useState("");
+  const [scheduleReason,setScheduleReason]=useState("");
   const [detail,setDetail]=useState<Detail|null>(null);
   const [candidates,setCandidates]=useState<Candidate[]>([]);
   const [grants,setGrants]=useState<Grant[]>([]);
@@ -47,6 +52,7 @@ export default function ContractedWorkModule(){
     asset_kind:"COMPONENT",registration:"",part_number:"",serial_number:"",asset_description:"",
     defect:"",data_reference:"",data_revision:"",inspections:"",required_release:"",
     purchase_order_id:"",data_manual_id:"",data_revision_id:"",governed_repair_order_reference:"",product_family:"",contract_function_approval_reference:"",state_of_registry:"",foreign_approval_reference:"",
+    expected_completion_at:"",provider_ack_due_at:"",
     operator_requirements:"",release_wording:"",authority_acceptance_reference:"",
     safety_assessment_reference:"",operator_approval_reference:"",restriction_review_reference:"",
     prior_written_acceptance_reference:"",
@@ -83,10 +89,11 @@ export default function ContractedWorkModule(){
       apiRequest<Options>(root+"/options",{cacheTtlMs:0})]);
       setItems(queue.items);setOptions(opts);setCanCreate(queue.can_create===true);
       if(!queue.can_create)setNewOpen(false);
-      setSelected(current=>queue.items.some(i=>i.id===current)?current:(queue.items[0]?.id||""));
+      setSelected(current=>deepLinkedWork&&/^[0-9a-f-]{36}$/i.test(deepLinkedWork)?
+        deepLinkedWork:queue.items.some(i=>i.id===current)?current:(queue.items[0]?.id||""));
     }catch(e){setError(e instanceof Error?e.message:"Maintenance register could not load");}
     finally{setLoading(false);}
-  },[root]);
+  },[root,deepLinkedWork]);
   const reloadDetail=useCallback(async()=>{
     if(!selected){setDetail(null);return;}
     try{const [value,evidence,assigned]=await Promise.all([
@@ -103,6 +110,28 @@ export default function ContractedWorkModule(){
   const scopes=useMemo(()=>options?.scopes.filter(x=>String(x.supplier_id)===supplier)||[],[options,supplier]);
   const contracts=useMemo(()=>options?.contracts.filter(x=>String(x.supplier_id)===supplier)||[],[options,supplier]);
   const work=detail?.work;
+  useEffect(()=>{
+    setExpectedAt(String(work?.requirements_json?.expected_completion_at||""));
+    setAckDueAt(String(work?.requirements_json?.provider_ack_due_at||""));
+  },[work?.id,work?.version]);
+  async function saveSchedule(event:React.FormEvent){
+    event.preventDefault();
+    if(!work)return;
+    setBusy(true);setError("");setNotice("");
+    try{
+      await apiRequest(root+"/"+encodeURIComponent(work.id)+"/schedule",{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          expected_version:work.version,
+          expected_completion_at:expectedAt||null,provider_ack_due_at:ackDueAt||null,
+          reason:scheduleReason,idempotency_key:key(),
+        }),cacheTtlMs:0,
+      });
+      setNotice("Controlled due dates updated by responsible Maintenance Manager.");
+      setScheduleReason("");await load();await reloadDetail();
+    }catch(cause){setError(cause instanceof Error?cause.message:"Schedule change rejected");}
+    finally{setBusy(false);}
+  }
   async function mutate(endpoint:string,body:unknown,message:string){
     setBusy(true);setError("");setNotice("");
     try{
@@ -140,6 +169,8 @@ export default function ContractedWorkModule(){
         prior_written_acceptance_reference:form.prior_written_acceptance_reference,
         safety_assessment_required:safetyRequired,safety_assessment_reference:form.safety_assessment_reference,
         restriction_review_reference:form.restriction_review_reference,
+        expected_completion_at:form.expected_completion_at||null,
+        provider_ack_due_at:form.provider_ack_due_at||null,
       }
     },"Technical work order drafted. It cannot be dispatched until Maintenance and Quality approvals are recorded.");
   }
@@ -190,6 +221,10 @@ export default function ContractedWorkModule(){
       <label>Governed MOPM 2.20 repair-order reference (where no internal work_orders record exists)<input value={form.governed_repair_order_reference} onChange={field("governed_repair_order_reference")}/></label>
       <label>Required inspections/tests/hold points, one per line<textarea required value={form.inspections} onChange={field("inspections")}/></label>
       <label>Required release/certification and approval reference<input required value={form.required_release} onChange={field("required_release")}/></label>
+      <label>Expected technical completion (tenant local time)<input type="datetime-local"
+        value={form.expected_completion_at} onChange={field("expected_completion_at")}/></label>
+      <label>Provider acknowledgement due (tenant local time)<input type="datetime-local"
+        value={form.provider_ack_due_at} onChange={field("provider_ack_due_at")}/></label>
       <label>Related approved commercial PO ID (optional; not technical authorization)<input type="number" min={1} value={form.purchase_order_id} onChange={field("purchase_order_id")}/></label>
       <label><input type="checkbox" checked={foreign} onChange={e=>setForeign(e.target.checked)}/> Foreign/State-of-Registry requirements apply</label>
       {foreign&&<>
@@ -232,6 +267,20 @@ export default function ContractedWorkModule(){
           <dt>Internal work package</dt><dd>{work.internal_work_reference}</dd>
           <dt>Written agreement</dt><dd>{work.contract_id}</dd><dt>Approved site</dt><dd>{work.site_code}</dd>
           <dt>Related commercial PO</dt><dd>{work.purchase_order_id||"Not linked"}</dd></dl>
+          {canCreate&&work.status!=="CLOSED"&&work.status!=="CANCELLED"&&
+            <form className="partner-form" onSubmit={saveSchedule}>
+              <h4>Manager-controlled reminder dates</h4>
+              <p>Only the responsible Maintenance Manager may amend due dates.
+              Contractor ETA proposals are not automatically accepted.</p>
+              <label>Expected completion (tenant local time)<input type="datetime-local"
+                value={expectedAt} onChange={e=>setExpectedAt(e.target.value)}/></label>
+              <label>Provider acknowledgement due (tenant local time)<input type="datetime-local"
+                value={ackDueAt} onChange={e=>setAckDueAt(e.target.value)}/></label>
+              <label>Reason for changing technical milestone<textarea required minLength={8}
+                value={scheduleReason} onChange={e=>setScheduleReason(e.target.value)}/></label>
+              <button type="submit" disabled={busy||scheduleReason.trim().length<8}>
+                Save controlled milestone dates</button>
+            </form>}
           <h4>Inspections / tests / hold points</h4>
           <p>Each required criterion must have its own reviewed DMS-retained, independently Quality-verified report. Reviewing an original does not certify or release the aircraft or component.</p>
           <ul>{detail?.inspection_checks.map(x=><li key={x.criterion_index}>
