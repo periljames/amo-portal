@@ -199,11 +199,45 @@ class ResendProvider(EmailProvider):
         if mode == "PRODUCTION" and _environment() not in {"production", "prod"}:
             raise EmailDeliveryBlocked("Production email is blocked outside a production deployment")
 
+        from amodb.apps.platform.resend_adapter import email_recipients
+
         effective_recipient = recipient.strip()
+        intended_cc = context.get("_cc")
+        intended_reply_to = context.get("_reply_to")
+
+        def recipient_rows(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, (list, tuple, set)):
+                combined: list[str] = []
+                seen: set[str] = set()
+                for item in value:
+                    for mailbox in email_recipients(str(item)):
+                        key = mailbox.casefold()
+                        if key not in seen:
+                            seen.add(key)
+                            combined.append(mailbox)
+                return combined
+            return email_recipients(str(value)) if str(value).strip() else []
+
+        configured_reply_to = recipient_rows(self.config.get("reply_to"))
+        requested_cc = recipient_rows(intended_cc)
+        requested_reply_to = recipient_rows(intended_reply_to)
         if mode == "SANDBOX":
             effective_recipient = str(self.config.get("sandbox_recipient") or "").strip()
             if not effective_recipient:
                 raise EmailDeliveryBlocked("Sandbox mode requires sandbox_recipient")
+            effective_cc: list[str] = []
+            effective_reply_to = recipient_rows(effective_recipient)
+        else:
+            effective_cc = requested_cc
+            effective_reply_to = []
+            seen_reply: set[str] = set()
+            for mailbox in [*configured_reply_to, *requested_reply_to, *effective_cc]:
+                key = mailbox.casefold()
+                if key not in seen_reply:
+                    seen_reply.add(key)
+                    effective_reply_to.append(mailbox)
 
         api_key = str(self.secret.get("api_key") or "").strip()
         if not api_key:
@@ -227,7 +261,8 @@ class ResendProvider(EmailProvider):
             subject=subject,
             html=html_body,
             text=text_body,
-            reply_to=str(self.config.get("reply_to") or "").strip() or None,
+            cc=effective_cc or None,
+            reply_to=effective_reply_to or None,
             template_id=template_id,
             template_variables=variables if template_id else None,
             idempotency_key=correlation_id or f"{template_key}:{effective_recipient}",
@@ -239,11 +274,15 @@ class ResendProvider(EmailProvider):
             ],
             attachments=attachments,
         )
+        effective_to = recipient_rows(effective_recipient)
         return {
             **result,
             "mode": mode,
             "recipient": effective_recipient,
             "original_recipient": recipient,
+            "cc": effective_cc,
+            "reply_to": effective_reply_to,
+            "effective_recipients": [*effective_to, *effective_cc],
             "template_id": template_id,
         }
 
