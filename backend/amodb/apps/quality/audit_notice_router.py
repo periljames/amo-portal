@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import re
 import tempfile
@@ -9,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -1086,6 +1087,32 @@ def _notice_record_url(
     )
 
 
+def _email_notice_record_url(
+    request: Request,
+    *,
+    ctx: TenantContext,
+    audit: models.QMSAudit,
+    notice: QualityAuditNotice,
+) -> str:
+    """Expose only a publicly routable portal URL in outbound email."""
+
+    value = _notice_record_url(request, ctx=ctx, audit=audit, notice=notice)
+    parsed = urlsplit(value)
+    host = str(parsed.hostname or "").strip().lower()
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        return ""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and (address.is_loopback or address.is_private or address.is_link_local):
+        return ""
+    app_env = str(os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
+    if app_env in {"production", "prod"} and parsed.scheme.lower() != "https":
+        return ""
+    return value
+
+
 def _render_notice(
     db: Session,
     *,
@@ -1969,74 +1996,92 @@ def submit_and_deliver_audit_notice(
         "content_type": "application/pdf",
     }]
     notice_reference = _notice_reference_for_row(row, fallback_audit_ref=audit.audit_ref)
-    dispatch_items: list[dict[str, Any]] = []
-    for recipient in recipients:
-        recipient_email = str(recipient.get("email") or "").strip()
-        recipient_user_id = str(recipient.get("user_id") or "").strip() or None
-        log = notification_service.send_email(
-            template_key="qms_audit_notice_memo",
-            recipient=recipient_email,
-            subject=f"{notice_reference} · {row.subject}"[:255],
-            context={
-                "recipient_name": recipient.get("name") or recipient_email,
-                "recipient_role": recipient.get("role") or "AUDIT_RECIPIENT",
-                "audit_ref": audit.audit_ref,
-                "audit_title": audit.title,
-                "audit_area": _audit_area_label(db, audit=audit),
-                "auditee_representative": audit.auditee,
-                "planned_start": audit.planned_start.isoformat() if audit.planned_start else "",
-                "planned_end": audit.planned_end.isoformat() if audit.planned_end else "",
-                "notice_revision": row.revision_no,
-                "notice_reference": notice_reference,
-                "notice_document": row.artifact.filename,
-                "document_sha256": row.artifact.sha256,
-                "action_url": _notice_record_url(request, ctx=ctx, audit=audit, notice=row),
-            },
-            correlation_id=_notice_email_correlation(str(row.id), recipient_email),
-            email_class="CRITICAL",
-            recipient_user_id=recipient_user_id,
-            amo_id=ctx.amo_id,
-            db=db,
-            audit_context={
-                "purpose": "audit-notice",
-                "audit_id": str(audit.id),
-                "notice_id": str(row.id),
-                "recipient_role": recipient.get("role"),
-            },
-            attachments=email_attachment,
-        )
-        delivery_status = str(getattr(log.status, "value", log.status))
-        dispatch_items.append({
-            "email": recipient_email,
-            "role": recipient.get("role"),
-            "status": delivery_status,
-            "message_id": log.provider_message_id,
-            "error": log.error,
-        })
 
-    sent = sum(1 for item in dispatch_items if item["status"] == notification_models.EmailStatus.SENT.value)
-    delivery_complete = bool(dispatch_items) and sent == len(dispatch_items)
-    before_delivery = _snapshot(row)
+    def unique_emails(items: list[dict[str, Any]]) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            email = str(item.get("email") or "").strip()
+            key = email.casefold()
+            if email and key not in seen:
+                seen.add(key)
+                values.append(email)
+        return values
+
+    auditee_emails = unique_emails(auditee_recipients)
+    cc_recipients = [
+        item
+        for item in recipients
+        if str(item.get("role") or "").upper() not in {"AUDITEE", "EXTERNAL_AUDITEE"}
+    ]
+    cc_emails = unique_emails(cc_recipients)
+    to_value = "; ".join(auditee_emails)
+    log = notification_service.send_email(
+        template_key="qms_audit_notice_memo",
+        recipient=to_value,
+        subject=f"{notice_reference} · {row.subject}"[:255],
+        context={
+            "recipient_name": audit.auditee or "Audit recipient",
+            "recipient_role": "AUDITEE",
+            "audit_ref": audit.audit_ref,
+            "audit_title": audit.title,
+            "audit_area": _audit_area_label(db, audit=audit),
+            "auditee_representative": audit.auditee,
+            "planned_start": audit.planned_start.isoformat() if audit.planned_start else "",
+            "planned_end": audit.planned_end.isoformat() if audit.planned_end else "",
+            "notice_revision": row.revision_no,
+            "notice_reference": notice_reference,
+            "notice_document": row.artifact.filename,
+            "document_sha256": row.artifact.sha256,
+            "action_url": _email_notice_record_url(request, ctx=ctx, audit=audit, notice=row),
+            "_cc": cc_emails,
+            "_reply_to": cc_emails,
+        },
+        correlation_id=_notice_email_correlation(str(row.id), "dispatch"),
+        email_class="CRITICAL",
+        recipient_user_id=None,
+        amo_id=ctx.amo_id,
+        db=db,
+        audit_context={
+            "purpose": "audit-notice",
+            "audit_id": str(audit.id),
+            "notice_id": str(row.id),
+            "issuer_user_id": str(ctx.user_id),
+            "to": auditee_emails,
+            "cc": cc_emails,
+        },
+        attachments=email_attachment,
+        cooldown_seconds=60,
+    )
+    send_status = str(getattr(log.status, "value", log.status))
+    transport_status = str(getattr(log, "delivery_status", "") or "")
+    accepted = send_status == notification_models.EmailStatus.SENT.value
+    delivery_complete = transport_status == "DELIVERED"
+
     row.delivery_channel = "EMAIL"
-    row.delivery_reference = f"Email attachment delivery {sent}/{len(dispatch_items)}"
     if delivery_complete:
-        row.status = "DELIVERED"
-        row.delivered_by_user_id = ctx.user_id
-        row.delivered_at = issued_at
-        audit.upcoming_notice_sent_at = issued_at
-        _add_event(db, ctx=ctx, notice=row, event_type="DELIVERED", reason=reason, before=before_delivery)
-        for recipient in resolved_snapshot:
-            _notice_notification(db, ctx=ctx, audit=audit, notice=row, recipient=recipient)
+        row.delivery_reference = f"Resend confirmed delivery · {log.provider_message_id or 'provider id unavailable'}"
+    elif accepted:
+        row.delivery_reference = f"Resend accepted · awaiting delivery confirmation · {log.provider_message_id or 'provider id unavailable'}"
+    else:
+        row.delivery_reference = f"Email dispatch not accepted · {log.error or send_status}"
     db.commit()
     refreshed = _notice_query(db).filter(QualityAuditNotice.id == row.id).one()
     return {
         "notice": _notice_dict(refreshed),
         "delivery_complete": delivery_complete,
         "dispatch": {
-            "attempted": len(dispatch_items),
-            "sent": sent,
-            "failed": len(dispatch_items) - sent,
-            "items": dispatch_items,
+            "attempted": 1,
+            "sent": 1 if accepted else 0,
+            "failed": 0 if accepted else 1,
+            "items": [{
+                "to": auditee_emails,
+                "cc": cc_emails,
+                "status": send_status,
+                "delivery_status": transport_status or None,
+                "message_id": log.provider_message_id,
+                "error": log.error,
+            }],
         },
     }
 
