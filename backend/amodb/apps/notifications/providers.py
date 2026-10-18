@@ -287,8 +287,22 @@ class ResendProvider(EmailProvider):
         }
 
 
-def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvider, bool]:
-    """Use one platform Resend credential with tenant-scoped sender identity."""
+def _uses_qms_sender(template_key: str | None) -> bool:
+    """Keep tenant Quality suspension out of account-security mail."""
+    if template_key is None:  # Compatibility for existing explicit provider lookups.
+        return True
+    key = str(template_key).strip().lower()
+    return (
+        key.startswith(("qms_", "quality_", "quality-", "audit-", "finding-",
+                        "corrective-action-"))
+        or key == "qms_mail_identity_test"
+    )
+
+
+def get_email_provider(
+    *, db: Session, amo_id: str | None, template_key: str | None = None,
+) -> tuple[EmailProvider, bool]:
+    """Use platform Resend transport; Quality identity only for Quality mail."""
 
     from amodb.apps.accounts import models as account_models
     from amodb.apps.platform import saas_services
@@ -310,6 +324,19 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
     config = dict(platform_row.config_json or {})
     tenant_config: dict[str, Any] = {}
     tenant = None
+    if amo_id and not _uses_qms_sender(template_key):
+        # Password resets, account alerts and other departments retain the
+        # independent platform sender. Quality managers may suspend QMS email
+        # without accidentally disabling essential account recovery.
+        return (
+            ResendProvider(
+                secret=saas_services.provider_secrets(platform_row),
+                config=config,
+                credential_status=str(platform_row.status or ""),
+                tenant_id=amo_id,
+            ),
+            True,
+        )
     if amo_id:
         tenant_row = saas_services.get_provider_credential(
             db,
