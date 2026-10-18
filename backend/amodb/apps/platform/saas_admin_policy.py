@@ -47,6 +47,13 @@ def prepare_provider_payload(
     prepared = dict(payload)
     enabled = bool(prepared.get("enabled", True))
     submitted = _submitted_secret(prepared)
+
+    # Resend transport credentials stay platform-owned. Tenant Resend rows are
+    # credential-free sender identity overlays validated by resend_email_policy.
+    if normalized == "resend" and tenant_id:
+        if submitted or prepared.get("clear_secret"):
+            raise ValueError("Tenant Resend settings cannot contain API keys or webhook secrets.")
+        return prepared
     exact_row = saas_services.get_provider_credential(
         db,
         provider=normalized,
