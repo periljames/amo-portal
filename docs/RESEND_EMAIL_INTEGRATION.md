@@ -143,8 +143,10 @@ configuration, or arbitrary tenant selectors.
 3. AMO Portal derives `quality.<tenant-login-slug>@notify.venspera.com`.
    Tenants cannot choose another tenant's shared address. Display names and
    reply destinations are tenant-scoped settings.
-4. A tenant's sender may be suspended independently; explicit tenant disable
-   blocks outgoing mail rather than falling back to the platform identity.
+4. A tenant's QMS sender may be suspended independently; explicit Quality
+   disable blocks QMS notices instead of falling back to the platform sender.
+   Account-security messages (including password recovery and verification)
+   retain Venspera's separate platform sender and remain unaffected.
 5. Set a public HTTPS `PORTAL_FRONTEND_BASE_URL` to avoid private
    localhost/loopback CTA and signed audit notice QR links.
 6. Configure signed Resend webhooks. Events and provider retrieval are retained
