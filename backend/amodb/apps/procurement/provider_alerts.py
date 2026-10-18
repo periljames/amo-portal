@@ -327,6 +327,29 @@ def _scan_transitions(db, amo):
         if event:
             count+=_queue(db,amo=amo,event=event,source="maintenance_event",
                           source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
+    # Phase 7 already delegates work identity by individual object grants.
+    # Only a member assigned THIS exact work receives the vendor projection.
+    for row in _rows(db, """SELECT e.id,e.work_id AS entity_id,w.supplier_id,w.provider_id
+        FROM external_contracted_work_events e
+        JOIN external_contracted_work w ON w.amo_id=e.amo_id AND w.id=e.work_id
+        WHERE e.amo_id=:amo AND e.action IN ('DISPATCH','REWORK','HOLD','RESUME')
+        ORDER BY e.created_at DESC LIMIT 200""",amo=amo):
+        for grant in _rows(db, """SELECT DISTINCT g.object_scope_json,
+            m.identity_id,i.status AS identity_status
+            FROM external_tenant_grants g
+            JOIN external_organization_memberships m ON m.id=g.membership_id
+            JOIN external_identities i ON i.id=m.identity_id
+            WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider
+              AND g.status='ACTIVE' AND m.status='ACTIVE' AND i.status='ACTIVE'""",
+              amo=amo,provider=row["provider_id"]):
+            if str(row["entity_id"]) not in {str(item) for item in
+                    (grant["object_scope_json"] or {}).get("contracted_work",[])}:
+                continue
+            count+=_queue(db,amo=amo,
+                          event="maintenance.assigned",source="maintenance_event",
+                          source_id=row["entity_id"],stamp=row["id"],
+                          supplier=row["supplier_id"],recipient_kind="provider",
+                          provider=row["provider_id"],recipient_id=grant["identity_id"])
     for row in _rows(db, """SELECT id,entity_type,entity_id,action,supplier_id
                    FROM external_procurement_events WHERE amo_id=:amo
                    ORDER BY created_at DESC LIMIT 500""",amo=amo):
