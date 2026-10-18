@@ -241,8 +241,9 @@ const EmailLogsPage: React.FC = () => {
                           <td>{formatDate(log.created_at)}</td>
                           <td>{formatDate(log.sent_at)}</td>
                           <td>
-                            <strong>{log.delivery_status || "—"}</strong>
+                            <strong>{log.delivery_status === "DELIVERED" ? "DELIVERED · recipient server accepted" : log.delivery_status || "—"}</strong>
                             <small>{log.last_delivery_event_at ? formatDate(log.last_delivery_event_at) : "Awaiting signed provider event"}</small>
+                            {log.delivery_status === "DELIVERED" ? <small>Inbox vs Junk placement is not observable from SMTP delivery confirmation.</small> : null}
                             {(() => {
                               const delivery = log.context_json?._delivery;
                               if (!delivery || typeof delivery !== "object") return null;
