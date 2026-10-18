@@ -51,10 +51,15 @@ def scan_due_provider_reviews() -> dict[str, int]:
                     )
                     ORDER BY q.next_review_due_on,q.id LIMIT 200
                 """),{"amo":str(amo_id)}).mappings().all()
+                alerts_active=inspect(db.get_bind()).has_table("external_provider_alert_jobs")
                 managers=db.query(accounts.User).filter(
                     accounts.User.amo_id==str(amo_id),
                     accounts.User.role==accounts.AccountRole.QUALITY_MANAGER,
                     accounts.User.is_active.is_(True)).limit(25).all()
+                if alerts_active:
+                    # Phase 8 owns these expiries; preserve upload fragment cleanup
+                    # and avoid posting duplicate legacy QMS notifications.
+                    managers=[]
                 cutoff=datetime.now(timezone.utc)-timedelta(days=7)
                 for row in cases:
                     result["due_reviews"]+=1
