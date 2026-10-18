@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -32,6 +33,7 @@ RESEND_DEFINITION = saas_providers.ProviderDefinition(
         "template_map_json",
         "tenant_default_sender_domain",
         "verified_sender_domains",
+        "tenant_sender_domain_assignments_json",
     ),
     "Transactional and automated portal email through Resend, with encrypted credentials, templates, delivery controls and signed webhooks.",
 )
@@ -110,6 +112,26 @@ def _normalise_domains(value: Any) -> list[str]:
     return domains
 
 
+def _tenant_domain_assignments(value: Any) -> dict[str, list[str]]:
+    """Platform-approved custom domains, bound to exactly one tenant each."""
+    raw = value if isinstance(value, dict) else json.loads(str(value or "{}"))
+    if not isinstance(raw, dict):
+        raise ValueError("tenant_sender_domain_assignments_json must be a JSON object")
+    result: dict[str, list[str]] = {}
+    owners: dict[str, str] = {}
+    for tenant_id, domains in raw.items():
+        key = str(tenant_id).strip()
+        if not key or len(key) > 128 or not isinstance(domains, list):
+            raise ValueError("Each tenant domain assignment requires a tenant ID and an array of domains")
+        cleaned = _normalise_domains(",".join(str(item) for item in domains))
+        for domain in cleaned:
+            if domain in owners and owners[domain] != key:
+                raise ValueError("A custom sending domain cannot be assigned to multiple tenants")
+            owners[domain] = key
+        result[key] = cleaned
+    return result
+
+
 def _email_domain(value: str) -> str:
     parsed = getaddresses([str(value or "")])
     addresses = [address.strip().lower() for _name, address in parsed if address.strip()]
@@ -122,6 +144,8 @@ def _normalise_tenant_resend_payload(
     payload: dict[str, Any],
     *,
     platform_config: dict[str, Any],
+    tenant_id: str,
+    tenant_slug: str,
 ) -> dict[str, Any]:
     result = dict(payload or {})
     if result.get("secret") or result.get("clear_secret"):
@@ -164,10 +188,21 @@ def _normalise_tenant_resend_payload(
         default_domain = str(platform_config.get("tenant_default_sender_domain") or "").strip().lower()
         if default_domain:
             allowed.add(default_domain)
+        shared_domain = str(platform_config.get("tenant_default_sender_domain") or "").strip().lower()
+        if not shared_domain and platform_sender:
+            shared_domain = _email_domain(platform_sender)
+        slug = re.sub(r"[^a-z0-9]+", ".", str(tenant_slug).lower()).strip(".")
+        shared_sender = f"quality.{slug}@{shared_domain}" if slug and shared_domain else ""
+        assignments = _tenant_domain_assignments(platform_config.get("tenant_sender_domain_assignments_json"))
+        if sender_domain == shared_domain:
+            if address != shared_sender:
+                raise ValueError("The shared Venspera sender address is reserved for this tenant's own identity.")
+        elif sender_domain not in assignments.get(str(tenant_id), []):
+            raise ValueError("This custom sender domain has not been assigned to your tenant by Venspera.")
         if sender_domain not in allowed:
             raise ValueError(
-                f"Sender domain {sender_domain} is not approved for tenant mail. "
-                "Verify the domain in Resend, then add it to verified_sender_domains in the platform Resend configuration."
+                f"Sender domain {sender_domain} is not approved for sending. "
+                "Verify it in Resend and register it in verified_sender_domains."
             )
         config["from_email"] = address
 
@@ -201,6 +236,12 @@ def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _normalise_domains(default_sender_domain)
         config["tenant_default_sender_domain"] = default_sender_domain
     config["verified_sender_domains"] = ", ".join(_normalise_domains(config.get("verified_sender_domains")))
+    assigned_domains = _tenant_domain_assignments(config.get("tenant_sender_domain_assignments_json"))
+    permitted_domains = set(_normalise_domains(config.get("verified_sender_domains")))
+    for tenant_domains in assigned_domains.values():
+        if not set(tenant_domains).issubset(permitted_domains):
+            raise ValueError("Tenant custom domains must also appear in verified_sender_domains.")
+    config["tenant_sender_domain_assignments_json"] = json.dumps(assigned_domains, sort_keys=True)
     config["per_minute_limit"] = int(config.get("per_minute_limit") or 10)
     config["daily_limit"] = int(config.get("daily_limit") or 500)
     if not 1 <= config["per_minute_limit"] <= 60:
@@ -305,9 +346,15 @@ def install_resend_email_provider() -> None:
             )
             if platform_row is None:
                 raise ValueError("Platform Resend transport must be configured before tenant sender identity.")
+            from amodb.apps.accounts import models as account_models
+            tenant = db.get(account_models.AMO, tenant_id)
+            if tenant is None:
+                raise ValueError("Tenant not found")
             effective_payload = _normalise_tenant_resend_payload(
                 payload,
                 platform_config=dict(platform_row.config_json or {}),
+                tenant_id=str(tenant_id),
+                tenant_slug=str(tenant.login_slug or tenant.amo_code or ""),
             )
             return original_upsert(
                 db,
