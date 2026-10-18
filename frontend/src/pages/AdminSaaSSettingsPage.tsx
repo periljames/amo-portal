@@ -206,8 +206,12 @@ export default function AdminSaaSSettingsPage() {
       setError("A configuration-change reason is required.");
       return;
     }
+    const editableConfigFields = setup?.scope === "TENANT" && provider.provider === "resend"
+      ? ["from_name", "from_email", "reply_to"]
+      : Object.keys(configDraft);
     const config = Object.fromEntries(
-      Object.entries(configDraft)
+      editableConfigFields
+        .map((key) => [key, String(configDraft[key] ?? "")] as const)
         .filter(([, value]) => value.trim() !== "")
         .map(([key, value]) => [key, coerceField(value)]),
     );
