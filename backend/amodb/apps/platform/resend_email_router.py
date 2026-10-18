@@ -197,7 +197,16 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     message_id = str((data or {}).get("email_id") or (data or {}).get("id") or "").strip()
     svix_id = str(request.headers.get("svix-id") or "").strip()
-    occurred_at = datetime.now(timezone.utc)
+
+    event_timestamp = str(event.get("created_at") or (data or {}).get("created_at") or "").strip()
+    try:
+        occurred_at = datetime.fromisoformat(event_timestamp.replace("Z", "+00:00")) if event_timestamp else datetime.now(timezone.utc)
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        occurred_at = occurred_at.astimezone(timezone.utc)
+    except ValueError:
+        occurred_at = datetime.now(timezone.utc)
+
     matched_log_id: str | None = None
     duplicate = False
     if svix_id:
@@ -254,7 +263,7 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
         impacted = address_set((data or {}).get("to"))
         delivered = address_set(delivery.get("delivered_recipients"))
         failed = address_set(delivery.get("failed_recipients"))
-        event_at = str(event.get("created_at") or (data or {}).get("created_at") or occurred_at.isoformat())
+        event_at = occurred_at.isoformat()
 
         delivery["last_event_at"] = event_at
         delivery["webhook_signature_verified"] = True
