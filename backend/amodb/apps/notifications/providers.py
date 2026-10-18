@@ -288,33 +288,81 @@ class ResendProvider(EmailProvider):
 
 
 def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvider, bool]:
-    """Resolve the current encrypted Resend credential for every send.
+    """Use one platform Resend credential with tenant-scoped sender identity."""
 
-    No credential is cached. A rotated key is therefore used immediately by the
-    next notification, while already-running requests keep only their local copy.
-    """
-
+    from amodb.apps.accounts import models as account_models
     from amodb.apps.platform import saas_services
 
-    # Inspect through the session connection. Inspecting the Engine can borrow
-    # and roll back the same DBAPI connection used by an in-memory SQLite
-    # transaction, discarding the queued email log before it is updated.
+    # Credentials remain platform-owned. Tenant rows can hold only sender
+    # identity settings and are deliberately never used as a secret source.
     if not inspect(db.connection()).has_table("saas_provider_credentials"):
         return NoopProvider(), False
 
-    row = saas_services.get_provider_credential(
+    platform_row = saas_services.get_provider_credential(
         db,
         provider="resend",
-        tenant_id=amo_id,
-        allow_platform_fallback=True,
+        tenant_id=None,
+        allow_platform_fallback=False,
     )
-    if row is None or str(row.status or "").strip().upper() == "DISABLED":
+    if platform_row is None or str(platform_row.status or "").strip().upper() == "DISABLED":
         return NoopProvider(), False
+
+    config = dict(platform_row.config_json or {})
+    tenant_config: dict[str, Any] = {}
+    tenant = None
+    if amo_id:
+        tenant_row = saas_services.get_provider_credential(
+            db,
+            provider="resend",
+            tenant_id=amo_id,
+            allow_platform_fallback=False,
+        )
+        if tenant_row is not None and str(tenant_row.status or "").strip().upper() != "DISABLED":
+            tenant_config = {
+                key: value
+                for key, value in dict(tenant_row.config_json or {}).items()
+                if key in {"from_email", "from_name", "reply_to"}
+            }
+            config.update(tenant_config)
+        tenant = db.get(account_models.AMO, amo_id)
+
+    if tenant is not None:
+        if not str(tenant_config.get("from_name") or "").strip():
+            config["from_name"] = str(tenant.name or "AMO Portal").strip()
+        if not str(tenant_config.get("from_email") or "").strip():
+            default_domain = str(config.get("tenant_default_sender_domain") or "").strip().lower()
+            if not default_domain:
+                platform_sender = str((platform_row.config_json or {}).get("from_email") or "").strip()
+                default_domain = platform_sender.rsplit("@", 1)[-1].lower() if "@" in platform_sender else ""
+            slug = re.sub(r"[^a-z0-9]+", ".", str(tenant.login_slug or tenant.amo_code or "tenant").lower()).strip(".")
+            if default_domain and slug:
+                config["from_email"] = f"quality.{slug}@{default_domain}"
+        if not str(tenant_config.get("reply_to") or "").strip():
+            quality_users = (
+                db.query(account_models.User)
+                .filter(
+                    account_models.User.amo_id == amo_id,
+                    account_models.User.is_active.is_(True),
+                    account_models.User.is_system_account.is_(False),
+                    account_models.User.role.in_(
+                        (
+                            account_models.AccountRole.QUALITY_MANAGER,
+                            account_models.AccountRole.QUALITY_OFFICER,
+                        )
+                    ),
+                )
+                .order_by(account_models.User.role.asc(), account_models.User.email.asc())
+                .all()
+            )
+            replies = [str(user.email or "").strip() for user in quality_users if str(user.email or "").strip()]
+            if replies:
+                config["reply_to"] = ", ".join(dict.fromkeys(replies))
+
     return (
         ResendProvider(
-            secret=saas_services.provider_secrets(row),
-            config=row.config_json or {},
-            credential_status=str(row.status or ""),
+            secret=saas_services.provider_secrets(platform_row),
+            config=config,
+            credential_status=str(platform_row.status or ""),
             tenant_id=amo_id,
         ),
         True,
