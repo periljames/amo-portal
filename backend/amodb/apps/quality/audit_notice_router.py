@@ -1945,7 +1945,7 @@ def submit_and_deliver_audit_notice(
             },
         )
 
-    resolved_snapshot, recipients = _resolved_recipients(
+    _resolved_snapshot, recipients = _resolved_recipients(
         db,
         amo_id=ctx.amo_id,
         snapshot=row.recipient_snapshot or _recipient_snapshot(audit),
