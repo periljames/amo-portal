@@ -317,7 +317,10 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
             tenant_id=amo_id,
             allow_platform_fallback=False,
         )
-        if tenant_row is not None and str(tenant_row.status or "").strip().upper() != "DISABLED":
+        if tenant_row is not None and str(tenant_row.status or "").strip().upper() == "DISABLED":
+            # An explicit tenant suspension must not fall back to the platform sender.
+            return NoopProvider(), False
+        if tenant_row is not None:
             tenant_config = {
                 key: value
                 for key, value in dict(tenant_row.config_json or {}).items()
@@ -325,6 +328,19 @@ def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvide
             }
             config.update(tenant_config)
         tenant = db.get(account_models.AMO, amo_id)
+        if tenant is not None and str(tenant_config.get("from_email") or "").strip():
+            # Recheck binding on every send; a revoked platform assignment
+            # immediately blocks stale tenant sender overrides.
+            from amodb.apps.platform.resend_email_policy import _normalise_tenant_resend_payload
+            try:
+                _normalise_tenant_resend_payload(
+                    {"config": {"from_email": str(tenant_config["from_email"])}},
+                    platform_config=dict(platform_row.config_json or {}),
+                    tenant_id=str(amo_id),
+                    tenant_slug=str(tenant.login_slug or tenant.amo_code or ""),
+                )
+            except ValueError:
+                return NoopProvider(), False
 
     if tenant is not None:
         if not str(tenant_config.get("from_name") or "").strip():
