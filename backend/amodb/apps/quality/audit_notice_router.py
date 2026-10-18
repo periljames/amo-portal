@@ -2015,6 +2015,33 @@ def submit_and_deliver_audit_notice(
         if str(item.get("role") or "").upper() not in {"AUDITEE", "EXTERNAL_AUDITEE"}
     ]
     cc_emails = unique_emails(cc_recipients)
+    assigned_auditor_ids = {
+        str(user_id)
+        for user_id in (
+            getattr(audit, "lead_auditor_user_id", None),
+            getattr(audit, "observer_auditor_user_id", None),
+            getattr(audit, "assistant_auditor_user_id", None),
+            *(getattr(audit, "supporting_auditor_user_ids", None) or []),
+        )
+        if user_id
+    }
+    if assigned_auditor_ids:
+        assigned_auditors = (
+            db.query(account_models.User)
+            .filter(
+                account_models.User.amo_id == ctx.amo_id,
+                account_models.User.id.in_(assigned_auditor_ids),
+                account_models.User.is_active.is_(True),
+                account_models.User.is_system_account.is_(False),
+            )
+            .all()
+        )
+        seen_cc = {email.casefold() for email in cc_emails}
+        for user in assigned_auditors:
+            email = str(user.email or "").strip()
+            if email and email.casefold() not in seen_cc:
+                seen_cc.add(email.casefold())
+                cc_emails.append(email)
     to_value = "; ".join(auditee_emails)
     log = notification_service.send_email(
         template_key="qms_audit_notice_memo",
