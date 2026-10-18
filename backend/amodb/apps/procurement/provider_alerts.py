@@ -317,33 +317,116 @@ def _schedule_expiries(db, amo, local_now, zone, policy):
     return count
 
 def _scan_transitions(db, amo):
+    """Read immutable, authority-owned source transitions; not frontend state."""
     count = 0
     for row in _rows(db, """SELECT e.id,e.action,e.work_id AS entity_id,
                     w.supplier_id FROM external_contracted_work_events e
                     JOIN external_contracted_work w ON w.id=e.work_id AND w.amo_id=e.amo_id
                     WHERE e.amo_id=:amo ORDER BY e.created_at DESC LIMIT 500""", amo=amo):
-        event = MAINTENANCE_ACTIONS.get(row["action"])
+        event=MAINTENANCE_ACTIONS.get(row["action"])
         if event:
-            count += _queue(db, amo=amo,event=event,source="maintenance_event",
-                            source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
+            count+=_queue(db,amo=amo,event=event,source="maintenance_event",
+                          source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
     for row in _rows(db, """SELECT id,entity_type,entity_id,action,supplier_id
                    FROM external_procurement_events WHERE amo_id=:amo
-                   ORDER BY created_at DESC LIMIT 500""", amo=amo):
-        event = PROCUREMENT_ACTIONS.get(row["action"])
+                   ORDER BY created_at DESC LIMIT 500""",amo=amo):
+        event=PROCUREMENT_ACTIONS.get(row["action"])
+        if row["action"]=="SUBMITTED" and row["entity_type"]!="QUOTE":
+            continue
+        if row["action"]=="ACKNOWLEDGED" and row["entity_type"]!="PO":
+            continue
         if event:
-            count += _queue(db, amo=amo,event=event,source="procurement_event",
-                            source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
+            count+=_queue(db,amo=amo,event=event,source="procurement_event",
+                          source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
+    governance={
+        "QUALIFICATION_OPENED":"provider.approval_requested",
+        "QUALIFICATION_UPDATED":"provider.missing_evidence",
+        "DEPARTMENT_REVIEW":"provider.quality_review_pending",
+        "QUALIFICATION_APPROVED":"provider.approved",
+        "QUALIFICATION_CONDITIONALLY_APPROVED":"provider.approved",
+        "QUALIFICATION_REJECTED":"provider.rejected",
+        "RESTRICTION_IMPOSED":"provider.scope_restricted",
+        "RESTRICTION_LIFTED":"provider.reinstated",
+        "OVERDUE_PROVIDER_ESCALATED":"provider.suspended",
+    }
+    for row in _rows(db, """SELECT id,supplier_id,case_id,action
+           FROM quality_provider_qualification_events WHERE amo_id=:amo
+           ORDER BY occurred_at DESC LIMIT 500""",amo=amo):
+        event=governance.get(row["action"])
+        if event:
+            count+=_queue(db,amo=amo,event=event,source="quality_governance",
+                          source_id=row["case_id"] or row["supplier_id"],
+                          stamp=row["id"],supplier=row["supplier_id"])
+    for row in _rows(db, """SELECT id,supplier_id,event_type,source_identifier
+         FROM external_provider_change_events WHERE amo_id=:amo
+         ORDER BY created_at DESC LIMIT 500""",amo=amo):
+        action=str(row["event_type"]).upper()
+        event=("provider.site_capability_change" if "SITE" in action or "CAPABILITY" in action
+               else "provider.registration" if "CREATE" in action and "PROVIDER" in action
+               else None)
+        if event:
+            count+=_queue(db,amo=amo,event=event,source="provider_change",
+                          source_id=row["supplier_id"],stamp=row["id"],supplier=row["supplier_id"])
     for row in _rows(db, """SELECT id,supplier_id,status,version,technical_state
         FROM quality_provider_qualification_cases WHERE amo_id=:amo
         AND status IN ('SUBMITTED','IN_REVIEW','READY','APPROVED','CONDITIONALLY_APPROVED','REJECTED')
-        ORDER BY updated_at DESC LIMIT 200""", amo=amo):
-        event = ("provider.approved" if row["status"] in ("APPROVED","CONDITIONALLY_APPROVED")
-                 else "provider.rejected" if row["status"]=="REJECTED"
-                 else "provider.technical_review_pending" if row["technical_state"]=="PENDING"
-                 else "provider.quality_review_pending")
-        count += _queue(db,amo=amo,event=event,source="qualification",source_id=row["id"],
-                        stamp=str(row["version"])+":"+row["status"],supplier=row["supplier_id"],
-                        cancel_older=True)
+        ORDER BY updated_at DESC LIMIT 200""",amo=amo):
+        event=("provider.approved" if row["status"] in ("APPROVED","CONDITIONALLY_APPROVED")
+               else "provider.rejected" if row["status"]=="REJECTED"
+               else "provider.technical_review_pending" if row["technical_state"]=="PENDING"
+               else "provider.quality_review_pending")
+        count+=_queue(db,amo=amo,event=event,source="qualification_state",
+                      source_id=row["id"],stamp=str(row["version"])+":"+row["status"],
+                      supplier=row["supplier_id"],cancel_older=True)
+    for row in _rows(db, """SELECT id,supplier_id,status,version FROM
+           quality_external_provider_contracts WHERE amo_id=:amo
+           AND status IN ('SUSPENDED','TERMINATED','PENDING','DRAFT')
+           ORDER BY updated_at DESC LIMIT 150""",amo=amo):
+        event=("contract.suspended_terminated" if row["status"] in ("SUSPENDED","TERMINATED")
+               else "contract.review_pending")
+        count+=_queue(db,amo=amo,event=event,source="agreement_state",
+                      source_id=row["id"],stamp=f"{row['status']}:{row['version']}",
+                      supplier=row["supplier_id"],cancel_older=True)
+    for row in _rows(db, """SELECT i.rfq_id,i.supplier_id,i.invited_at
+          FROM procurement_rfq_suppliers i JOIN procurement_rfqs r
+          ON r.id=i.rfq_id AND r.amo_id=:amo
+          WHERE i.invited_at IS NOT NULL AND r.amo_id=:amo
+          ORDER BY i.invited_at DESC LIMIT 150""",amo=amo):
+        count+=_queue(db,amo=amo,event="procurement.rfq_invited",source="rfq_invite",
+                      source_id=row["rfq_id"],stamp=f"{row['supplier_id']}:{row['invited_at']}",
+                      supplier=row["supplier_id"])
+    return count
+
+def _scan_contracted_work_deadlines(db,amo,local_now,zone,policy):
+    """Optional manager-controlled dates in Phase 7 written requirements."""
+    count=0
+    today=_local_day(local_now,zone)
+    for row in _rows(db, """SELECT id,supplier_id,status,requirements_json,updated_at
+       FROM external_contracted_work WHERE amo_id=:amo
+       AND status NOT IN ('CLOSED','CANCELLED') ORDER BY updated_at DESC LIMIT 400""",amo=amo):
+        requirements=row["requirements_json"] or {}
+        for field,event,state in (
+            ("provider_ack_due_at","maintenance.ack_overdue",{"DISPATCHED"}),
+            ("expected_completion_at","maintenance.completion_missed",
+             {"DISPATCHED","PROVIDER_ACCEPTED","IN_PROGRESS","ADDITIONAL_WORK_REQUESTED","ON_HOLD"}),
+        ):
+            if row["status"] not in state or not requirements.get(field):
+                continue
+            try:
+                due=datetime.fromisoformat(str(requirements[field]).replace("Z","+00:00"))
+                if due.tzinfo is None:due=due.replace(tzinfo=zone)
+                due_date=due.astimezone(zone).date()
+            except (ValueError,TypeError,OverflowError):
+                continue
+            for overdue in policy["escalation_days_json"].get(CATALOG[event],[]):
+                trigger=due_date+timedelta(days=overdue)
+                if trigger!=today:
+                    continue
+                count+=_queue(db,amo=amo,event=event,source="maintenance_due",
+                              source_id=row["id"],stamp=f"{field}:{requirements[field]}:{overdue}",
+                              supplier=row["supplier_id"],
+                              due=datetime.combine(trigger,time(8),zone).astimezone(timezone.utc),
+                              cancel_older=True)
     return count
 
 def _allowed_link(amo_code, row):
@@ -352,9 +435,9 @@ def _allowed_link(amo_code, row):
     source=row["source_kind"]
     supplier=row["supplier_id"]
     source_id=str(row["source_id"]).split(":")[0]
-    if source in ("certificate","capability","evidence","qualification","agreement","surveillance") and supplier:
-        tab=("contracts" if source=="agreement" else "qualification"
-             if source in ("qualification","surveillance") else "evidence")
+    if source in ("certificate","capability","evidence","qualification","agreement","surveillance","quality_governance","qualification_state","provider_change","agreement_state") and supplier:
+        tab=("contracts" if source in ("agreement","agreement_state") else "qualification"
+             if source in ("qualification","qualification_state","quality_governance","surveillance") else "evidence")
         return "/maintenance/"+code+"/quality/suppliers/"+str(int(supplier))+"/"+tab
     if source in ("maintenance_event","maintenance_due"):
         return "/maintenance/"+code+"/contracted-work?work="+quote(source_id,safe="")
@@ -383,7 +466,7 @@ def _still_current(db, amo, row, zone):
         result=db.execute(text("""SELECT status,requirements_json FROM external_contracted_work
             WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
         return bool(result and result["status"] not in ("CLOSED","CANCELLED")
-                    and row["source_stamp"] in json.dumps(result["requirements_json"] or {}))
+                    and any(str(v) in row["source_stamp"] for v in (result["requirements_json"] or {}).values() if isinstance(v,str)))
     return True
 
 
@@ -564,6 +647,7 @@ def scan_provider_alerts():
                 policy = _policy(db, str(amo))
                 report["enqueued"] += _scan_transitions(db,str(amo))
                 report["enqueued"] += _schedule_expiries(db,str(amo),now,zone,policy)
+                report["enqueued"] += _scan_contracted_work_deadlines(db,str(amo),now,zone,policy)
                 report["dispatched"] += _dispatch(db,str(amo),code,zone,policy,now)
                 db.commit()
                 report["tenants"] += 1
