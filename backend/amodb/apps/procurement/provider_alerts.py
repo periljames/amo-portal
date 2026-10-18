@@ -348,17 +348,44 @@ def _scan_transitions(db, amo):
 
 def _allowed_link(amo_code, row):
     from urllib.parse import quote
-    code = quote(str(amo_code), safe="")
-    source = row["source_kind"]
-    supplier = row["supplier_id"]
-    if source in ("certificate","capability","evidence","qualification","agreement") and supplier:
-        tab = "contracts" if source=="agreement" else "qualification" if source=="qualification" else "evidence"
+    code=quote(str(amo_code),safe="")
+    source=row["source_kind"]
+    supplier=row["supplier_id"]
+    source_id=str(row["source_id"]).split(":")[0]
+    if source in ("certificate","capability","evidence","qualification","agreement","surveillance") and supplier:
+        tab=("contracts" if source=="agreement" else "qualification"
+             if source in ("qualification","surveillance") else "evidence")
         return "/maintenance/"+code+"/quality/suppliers/"+str(int(supplier))+"/"+tab
-    if source == "maintenance_event":
-        return "/maintenance/"+code+"/contracted-work"
-    if source == "procurement_event":
-        return "/maintenance/"+code+"/procurement"
+    if source in ("maintenance_event","maintenance_due"):
+        return "/maintenance/"+code+"/contracted-work?work="+quote(source_id,safe="")
+    if source in ("procurement_event","rfq","po_delivery","po_ack"):
+        section="sourcing" if source=="rfq" else "collaboration"
+        return ("/maintenance/"+code+"/procurement/"+section+
+                "?providerRecord="+quote(source_id,safe=""))
     return "/maintenance/"+code+"/quality/suppliers"
+
+def _still_current(db, amo, row, zone):
+    source=row["source_kind"]
+    if source in DATE_SOURCES:
+        current=_active_source(db,amo,source,row["source_id"])
+        if not current:
+            return False
+        actual=_date_in_tenant_zone(current["due"],zone)
+        # Stamp starts with a fixed YYYY-MM-DD date from authoritative data.
+        return bool(actual and str(row["source_stamp"]).startswith(actual.isoformat()+":"))
+    if source=="po_ack":
+        found=db.execute(text("""SELECT id FROM procurement_purchase_orders
+             WHERE amo_id=:amo AND id=:id AND sent_at IS NOT NULL
+             AND supplier_ack_reference IS NULL AND status NOT IN ('CANCELLED','CLOSED')"""),
+             {"amo":amo,"id":row["source_id"]}).first()
+        return found is not None
+    if source=="maintenance_due":
+        result=db.execute(text("""SELECT status,requirements_json FROM external_contracted_work
+            WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
+        return bool(result and result["status"] not in ("CLOSED","CANCELLED")
+                    and row["source_stamp"] in json.dumps(result["requirements_json"] or {}))
+    return True
+
 
 def _restricted_now(local, quiet):
     if not quiet.get("enabled"):
@@ -380,6 +407,12 @@ def _dispatch(db, amo, code, zone, policy, now):
     for job in jobs:
         savepoint = db.begin_nested()
         try:
+            if not _still_current(db,amo,job,zone):
+                db.execute(text("""UPDATE external_provider_alert_jobs
+                    SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
+                    WHERE id=:id"""),{"id":job["id"]})
+                savepoint.commit()
+                continue
             recipient = None
             if job["recipient_user_id"]:
                 recipient = db.query(accounts.User).filter(
@@ -413,10 +446,21 @@ def _dispatch(db, amo, code, zone, policy, now):
                 continue
             # Sensitive descriptions, evidence names, internal notes and
             # object-store URLs are deliberately absent from notification text.
-            message = "External provider action: " + job["event_key"].replace(".", " / ").replace("_", " ")
+            default_message = "External provider action: " + job["event_key"].replace(".", " / ").replace("_", " ")
+            configured = str(policy["templates_json"].get(job["event_key"]) or "").strip()
+            # Tenant-editable content is only a short label; never interpolate
+            # user-provided markup, document bodies or confidential payloads.
+            message = configured if configured else default_message
             label = "Review assigned provider record"
             channels = policy["channels_json"].get(CATALOG[job["event_key"]], {"in_app":True,"email":False})
-            if not job["in_app_id"] and channels.get("in_app", True):
+            partner_in_app = True
+            if job["recipient_identity_id"]:
+                pref = db.execute(text("""SELECT in_app_enabled FROM external_provider_alert_preferences
+                  WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
+                  {"amo":amo,"provider":job["recipient_provider_id"],
+                   "identity":job["recipient_identity_id"]}).scalar()
+                partner_in_app = pref is not False
+            if not job["in_app_id"] and channels.get("in_app", True) and partner_in_app:
                 if recipient:
                     notice = quality.QMSNotification(
                         amo_id=amo, user_id=str(recipient.id), message=message,
@@ -441,6 +485,14 @@ def _dispatch(db, amo, code, zone, policy, now):
             # A Resend API acknowledgement is NOT email delivery, inbox placement
             # or a read receipt. That evidence belongs to the signed webhook log.
             email_on = channels.get("email",False) and recipient is not None
+            if job["recipient_identity_id"]:
+                pref=db.execute(text("""SELECT in_app_enabled FROM external_provider_alert_preferences
+                  WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
+                  {"amo":amo,"provider":job["recipient_provider_id"],
+                   "identity":job["recipient_identity_id"]}).scalar()
+                # No provider email is sent without explicit product support for
+                # verified external addresses and separate provider opt-in.
+                email_on=False
             if email_on and not job["email_log_id"]:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
@@ -460,6 +512,18 @@ def _dispatch(db, amo, code, zone, policy, now):
                     audit_context={"event_key":job["event_key"],"job_id":job["id"]})
                 db.execute(text("""UPDATE external_provider_alert_jobs
                    SET email_log_id=:log WHERE id=:id"""),{"log":str(email.id),"id":job["id"]})
+                delivery_state = str(getattr(email.status,"value",email.status))
+                if delivery_state in ("FAILED","SKIPPED_NO_PROVIDER","QUEUED"):
+                    attempts=int(job["attempts"])+1
+                    db.execute(text("""UPDATE external_provider_alert_jobs
+                      SET status=:status, attempts=:attempts, last_error=:error,
+                          next_attempt_at=:next,updated_at=NOW() WHERE id=:id"""),
+                      {"status":"FAILED" if attempts>=8 else "RETRY","attempts":attempts,
+                       "error":("Email not accepted by configured provider: "+delivery_state)[:500],
+                       "next":now+timedelta(minutes=min(1440,2**min(attempts,10))),
+                       "id":job["id"]})
+                    savepoint.commit()
+                    continue
             db.execute(text("""UPDATE external_provider_alert_jobs SET status='DELIVERED',
                   delivered_at=NOW(),next_attempt_at=NULL,last_error=NULL,updated_at=NOW()
                   WHERE id=:id"""),{"id":job["id"]})
