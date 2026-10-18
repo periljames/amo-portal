@@ -117,6 +117,18 @@ export default function DocumentControlReviewerLifecycleActions({
         {workflow.effective_at ? <small>Existing scheduled effectivity: {new Date(workflow.effective_at).toLocaleString()}</small> : <small>Required for accountable management approval; the backend retains this effectivity control.</small>}
       </label>
     ) : null}
+    <div className="dc-form__actions">
+      {actions.map((item) => <button
+        key={item.action}
+        type="button"
+        className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`}
+        disabled={busy}
+        onClick={() => void transition(item)}
+      >
+        {item.danger ? <RotateCcw size={14} /> : <CheckCircle2 size={14} />}
+        {item.label}
+      </button>)}
+    </div>
     <DocumentEvidencePicker
       tenant={tenant}
       manualId={detail.document.id}
@@ -134,17 +146,6 @@ export default function DocumentControlReviewerLifecycleActions({
         : "This revision has no retained source checksum; supporting controlled evidence is required before approval."}
     </div>
     {error ? <div className="dc-form__error">{error}</div> : null}
-    <div className="dc-form__actions">
-      {actions.map((item) => <button
-        key={item.action}
-        type="button"
-        className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`}
-        disabled={busy}
-        onClick={() => void transition(item)}
-      >
-        {item.danger ? <RotateCcw size={14} /> : <CheckCircle2 size={14} />}
-        {item.label}
-      </button>)}
-    </div>
+
   </div>;
 }
