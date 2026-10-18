@@ -121,11 +121,11 @@ def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) 
             "<p style='font-size:12px;color:#667085'>This controlled notification was sent by AMO Portal.</p>"
             "</body></html>"
         )
-        text_body = "\n".join([
+        text_body = "\n\n".join([
             subject,
             f"Dear {recipient},",
             responsibility,
-            *(f"{label}: {value}" for label, value in details),
+            "\n".join(f"{label}: {value}" for label, value in details),
             "The attached PDF is the issued, electronically signed audit notice.",
             action_url,
         ]).strip()
@@ -199,11 +199,45 @@ class ResendProvider(EmailProvider):
         if mode == "PRODUCTION" and _environment() not in {"production", "prod"}:
             raise EmailDeliveryBlocked("Production email is blocked outside a production deployment")
 
+        from amodb.apps.platform.resend_adapter import email_recipients
+
         effective_recipient = recipient.strip()
+        intended_cc = context.get("_cc")
+        intended_reply_to = context.get("_reply_to")
+
+        def recipient_rows(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, (list, tuple, set)):
+                combined: list[str] = []
+                seen: set[str] = set()
+                for item in value:
+                    for mailbox in email_recipients(str(item)):
+                        key = mailbox.casefold()
+                        if key not in seen:
+                            seen.add(key)
+                            combined.append(mailbox)
+                return combined
+            return email_recipients(str(value)) if str(value).strip() else []
+
+        configured_reply_to = recipient_rows(self.config.get("reply_to"))
+        requested_cc = recipient_rows(intended_cc)
+        requested_reply_to = recipient_rows(intended_reply_to)
         if mode == "SANDBOX":
             effective_recipient = str(self.config.get("sandbox_recipient") or "").strip()
             if not effective_recipient:
                 raise EmailDeliveryBlocked("Sandbox mode requires sandbox_recipient")
+            effective_cc: list[str] = []
+            effective_reply_to = recipient_rows(effective_recipient)
+        else:
+            effective_cc = requested_cc
+            effective_reply_to = []
+            seen_reply: set[str] = set()
+            for mailbox in [*configured_reply_to, *requested_reply_to, *effective_cc]:
+                key = mailbox.casefold()
+                if key not in seen_reply:
+                    seen_reply.add(key)
+                    effective_reply_to.append(mailbox)
 
         api_key = str(self.secret.get("api_key") or "").strip()
         if not api_key:
@@ -227,7 +261,8 @@ class ResendProvider(EmailProvider):
             subject=subject,
             html=html_body,
             text=text_body,
-            reply_to=str(self.config.get("reply_to") or "").strip() or None,
+            cc=effective_cc or None,
+            reply_to=effective_reply_to or None,
             template_id=template_id,
             template_variables=variables if template_id else None,
             idempotency_key=correlation_id or f"{template_key}:{effective_recipient}",
@@ -239,43 +274,145 @@ class ResendProvider(EmailProvider):
             ],
             attachments=attachments,
         )
+        effective_to = recipient_rows(effective_recipient)
         return {
             **result,
             "mode": mode,
             "recipient": effective_recipient,
             "original_recipient": recipient,
+            "cc": effective_cc,
+            "reply_to": effective_reply_to,
+            "effective_recipients": [*effective_to, *effective_cc],
             "template_id": template_id,
         }
 
 
-def get_email_provider(*, db: Session, amo_id: str | None) -> tuple[EmailProvider, bool]:
-    """Resolve the current encrypted Resend credential for every send.
+def _uses_qms_sender(template_key: str | None) -> bool:
+    """Keep tenant Quality suspension out of account-security mail."""
+    if template_key is None:  # Compatibility for existing explicit provider lookups.
+        return True
+    key = str(template_key).strip().lower()
+    return (
+        key.startswith(("qms_", "quality_", "quality-", "audit-", "finding-",
+                        "corrective-action-"))
+        or key == "qms_mail_identity_test"
+    )
 
-    No credential is cached. A rotated key is therefore used immediately by the
-    next notification, while already-running requests keep only their local copy.
-    """
 
+def get_email_provider(
+    *, db: Session, amo_id: str | None, template_key: str | None = None,
+) -> tuple[EmailProvider, bool]:
+    """Use platform Resend transport; Quality identity only for Quality mail."""
+
+    from amodb.apps.accounts import models as account_models
     from amodb.apps.platform import saas_services
 
-    # Inspect through the session connection. Inspecting the Engine can borrow
-    # and roll back the same DBAPI connection used by an in-memory SQLite
-    # transaction, discarding the queued email log before it is updated.
+    # Credentials remain platform-owned. Tenant rows can hold only sender
+    # identity settings and are deliberately never used as a secret source.
     if not inspect(db.connection()).has_table("saas_provider_credentials"):
         return NoopProvider(), False
 
-    row = saas_services.get_provider_credential(
+    platform_row = saas_services.get_provider_credential(
         db,
         provider="resend",
-        tenant_id=amo_id,
-        allow_platform_fallback=True,
+        tenant_id=None,
+        allow_platform_fallback=False,
     )
-    if row is None or str(row.status or "").strip().upper() == "DISABLED":
+    if platform_row is None or str(platform_row.status or "").strip().upper() == "DISABLED":
         return NoopProvider(), False
+
+    config = dict(platform_row.config_json or {})
+    tenant_config: dict[str, Any] = {}
+    tenant = None
+    if amo_id and not _uses_qms_sender(template_key):
+        # Password resets, account alerts and other departments retain the
+        # independent platform sender. Quality managers may suspend QMS email
+        # without accidentally disabling essential account recovery.
+        return (
+            ResendProvider(
+                secret=saas_services.provider_secrets(platform_row),
+                config=config,
+                credential_status=str(platform_row.status or ""),
+                tenant_id=amo_id,
+            ),
+            True,
+        )
+    if amo_id:
+        tenant_row = saas_services.get_provider_credential(
+            db,
+            provider="resend",
+            tenant_id=amo_id,
+            allow_platform_fallback=False,
+        )
+        if tenant_row is not None and str(tenant_row.status or "").strip().upper() == "DISABLED":
+            # An explicit tenant suspension must not fall back to the platform sender.
+            return NoopProvider(), False
+        if tenant_row is not None:
+            tenant_config = {
+                key: value
+                for key, value in dict(tenant_row.config_json or {}).items()
+                if key in {"from_email", "from_name", "reply_to"}
+            }
+            config.update(tenant_config)
+        tenant = db.get(account_models.AMO, amo_id)
+        if tenant is not None and str(tenant_config.get("from_email") or "").strip():
+            # Recheck binding on every send; a revoked platform assignment
+            # immediately blocks stale tenant sender overrides.
+            from amodb.apps.platform.resend_email_policy import _normalise_tenant_resend_payload
+            try:
+                _normalise_tenant_resend_payload(
+                    {"config": {"from_email": str(tenant_config["from_email"])}},
+                    platform_config=dict(platform_row.config_json or {}),
+                    tenant_id=str(amo_id),
+                    tenant_slug=str(tenant.login_slug or tenant.amo_code or ""),
+                )
+            except ValueError:
+                return NoopProvider(), False
+
+    if tenant is not None:
+        if not str(tenant_config.get("from_name") or "").strip():
+            config["from_name"] = str(tenant.name or "AMO Portal").strip()
+        if not str(tenant_config.get("from_email") or "").strip():
+            default_domain = str(config.get("tenant_default_sender_domain") or "").strip().lower()
+            if not default_domain:
+                platform_sender = str((platform_row.config_json or {}).get("from_email") or "").strip()
+                default_domain = platform_sender.rsplit("@", 1)[-1].lower() if "@" in platform_sender else ""
+            slug = re.sub(r"[^a-z0-9]+", ".", str(tenant.login_slug or tenant.amo_code or "tenant").lower()).strip(".")
+            if default_domain and slug:
+                from amodb.apps.platform.resend_email_policy import _normalise_domains
+                platform_domain = str((platform_row.config_json or {}).get("from_email") or "").strip().rsplit("@", 1)[-1].lower()
+                approved = set(_normalise_domains((platform_row.config_json or {}).get("verified_sender_domains")))
+                if default_domain != platform_domain and default_domain not in approved:
+                    # The shared sending domain has not been approved; never
+                    # generate an unusable tenant sender or claim delivery-ready.
+                    return NoopProvider(), False
+                config["from_email"] = f"quality.{slug}@{default_domain}"
+        if not str(tenant_config.get("reply_to") or "").strip():
+            quality_users = (
+                db.query(account_models.User)
+                .filter(
+                    account_models.User.amo_id == amo_id,
+                    account_models.User.is_active.is_(True),
+                    account_models.User.is_system_account.is_(False),
+                    account_models.User.role.in_(
+                        (
+                            account_models.AccountRole.QUALITY_MANAGER,
+                            account_models.AccountRole.QUALITY_OFFICER,
+                        )
+                    ),
+                )
+                .order_by(account_models.User.role.asc(), account_models.User.email.asc())
+                .all()
+            )
+            replies = [str(user.email or "").strip() for user in quality_users if str(user.email or "").strip()]
+            if replies:
+                config["reply_to"] = ", ".join(dict.fromkeys(replies))
+
     return (
         ResendProvider(
-            secret=saas_services.provider_secrets(row),
-            config=row.config_json or {},
-            credential_status=str(row.status or ""),
+            secret=saas_services.provider_secrets(platform_row),
+            config=config,
+            credential_status=str(platform_row.status or ""),
             tenant_id=amo_id,
         ),
         True,

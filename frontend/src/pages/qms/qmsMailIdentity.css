@@ -1,0 +1,43 @@
+.qms-mail{max-width:1480px;margin:0 auto;padding:clamp(16px,2.4vw,36px);color:var(--text-primary,var(--text,#172033))}
+.qms-mail__header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px}
+.qms-mail__header h1{font-size:clamp(24px,2.5vw,34px);margin:6px 0}
+.qms-mail__header p{max-width:780px;line-height:1.6;color:var(--text-secondary,#667085);margin:0}
+.qms-mail__eyebrow{text-transform:uppercase;letter-spacing:.09em;font-size:11px;font-weight:750}
+.qms-mail button{display:inline-flex;justify-content:center;align-items:center;gap:8px;min-height:44px;border-radius:10px;border:1px solid var(--border-default,#cbd5e1);padding:10px 16px;background:var(--surface-card,#fff);color:inherit;font:inherit;font-weight:650;cursor:pointer}
+.qms-mail button:disabled{opacity:.48;cursor:not-allowed}
+.qms-mail__summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.qms-mail__summary>div,.qms-mail__card{border:1px solid var(--border-default,#d9e0eb);background:var(--surface-card,#fff);border-radius:16px;padding:20px;min-width:0}
+.qms-mail__summary>div{display:grid;gap:7px;padding:16px}
+.qms-mail__summary span{color:var(--text-secondary,#667085);font-size:12px}
+.qms-mail__summary strong{overflow-wrap:anywhere;font-size:15px}
+.qms-mail__grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:18px;align-items:start}
+.qms-mail__side{display:grid;gap:18px}
+.qms-mail__card{display:grid;gap:20px}
+.qms-mail__card h2{font-size:19px;margin:0}
+.qms-mail__card p{margin:0;color:var(--text-secondary,#667085);line-height:1.55}
+.qms-mail__card-heading{display:flex;align-items:flex-start;gap:12px}
+.qms-mail__card-heading>svg{flex-shrink:0;margin-top:3px}
+.qms-mail__card-heading p{margin-top:6px;font-size:13px}
+.qms-mail__field{display:grid;gap:9px;margin:0;border:0;padding:0;min-width:0}
+.qms-mail__field>span,.qms-mail__field legend{font-size:13px;font-weight:720;padding:0;margin-bottom:6px}
+.qms-mail__field input,.qms-mail__field textarea{width:100%;box-sizing:border-box;background:var(--surface-canvas,var(--surface-card,#fff));border:1px solid var(--border-default,#cbd5e1);border-radius:9px;min-height:44px;padding:10px 12px;font:inherit;color:inherit}
+.qms-mail__field textarea{resize:vertical;line-height:1.5}
+.qms-mail__field small,.qms-mail__choice small{font-size:12px;line-height:1.4;color:var(--text-secondary,#667085);display:block;margin-top:4px}
+.qms-mail__choice{display:flex;gap:12px;align-items:flex-start;margin:8px 0;font-size:14px;line-height:1.5;cursor:pointer}
+.qms-mail__choice input{width:18px;height:18px;margin:2px 0;flex-shrink:0;accent-color:var(--color-primary,#2563eb)}
+.qms-mail__field-error{color:var(--color-danger,#b42318)!important}
+.qms-mail__actions{display:flex;justify-content:flex-end}
+.qms-mail .qms-mail__primary{background:var(--color-primary,#1f4b99);color:#fff;border:0}
+.qms-mail__message{padding:14px 16px;display:flex;align-items:flex-start;gap:10px;border-radius:10px;margin:14px 0;border:1px solid var(--border-default,#d9e0eb);background:var(--surface-secondary,#eef4ff)}
+.qms-mail__message--warning{border-color:var(--color-warning,#dda440)}
+.qms-mail__message--error{border-color:var(--color-danger,#c24141)}
+.qms-mail__preview{margin:0}
+.qms-mail__preview>div{padding:12px 0;border-top:1px solid var(--border-default,#d9e0eb)}
+.qms-mail__preview dt{font-size:12px;color:var(--text-secondary,#667085);margin-bottom:5px}
+.qms-mail__preview dd{margin:0;overflow-wrap:anywhere;font-size:14px;font-weight:600}
+.qms-mail__footnote{font-size:12px;display:flex;align-items:flex-start;gap:7px}
+.qms-mail__test-result{display:grid;gap:5px;background:var(--surface-secondary,#f4f6fa);padding:12px;border-radius:10px;overflow-wrap:anywhere}
+.qms-mail__test-result small{font-size:12px}
+.qms-mail__side a{display:inline-flex;gap:6px;align-items:center}
+@media(max-width:1000px){.qms-mail__grid{grid-template-columns:1fr}.qms-mail__summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.qms-mail__header{flex-direction:column}.qms-mail__summary{grid-template-columns:1fr}.qms-mail__card{padding:16px}}

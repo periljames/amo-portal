@@ -43,15 +43,72 @@ def test_initial_resend_setup_rejects_missing_api_key(monkeypatch: pytest.Monkey
         )
 
 
-def test_resend_tenant_override_is_blocked():
-    with pytest.raises(ValueError, match="platform-wide credential"):
-        saas_services.upsert_provider_credential(
-            MagicMock(),
-            provider="resend",
-            payload={"enabled": True, "secret": {"api_key": "re_test_key"}},
-            actor_user_id="tenant-admin",
-            tenant_id="amo-1",
+def test_tenant_resend_identity_rejects_secrets_and_unassigned_domains():
+    config = {
+        "from_email": "notifications@notify.venspera.com",
+        "tenant_default_sender_domain": "notify.venspera.com",
+        "verified_sender_domains": "flysafarilink.com",
+        "tenant_sender_domain_assignments_json": '{"tenant-A": ["flysafarilink.com"]}',
+    }
+    shared = {"platform_config": config, "tenant_id": "tenant-A", "tenant_slug": "safarilink"}
+    with pytest.raises(ValueError, match="cannot contain API keys"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"secret": {"api_key": "re_test_key"}, "config": {}}, **shared,
         )
+    with pytest.raises(ValueError, match="not been assigned"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"config": {"from_email": "quality@unverified.example"}}, **shared,
+        )
+    with pytest.raises(ValueError, match="reserved for this tenant"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"config": {"from_email": "quality.other-tenant@notify.venspera.com"}}, **shared,
+        )
+    with pytest.raises(ValueError, match="not been assigned"):
+        resend_email_policy._normalise_tenant_resend_payload(
+            {"config": {"from_email": "quality@flysafarilink.com"}},
+            platform_config=config, tenant_id="tenant-B", tenant_slug="another",
+        )
+
+
+def test_tenant_resend_identity_accepts_verified_custom_domain_and_reply_to_list():
+    prepared = resend_email_policy._normalise_tenant_resend_payload(
+        {
+            "enabled": True,
+            "config": {
+                "from_name": "Safarilink Quality",
+                "from_email": "quality@flysafarilink.com",
+                "reply_to": "qm@flysafarilink.com; qo@flysafarilink.com",
+            },
+        },
+        platform_config={
+            "from_email": "notifications@notify.venspera.com",
+            "tenant_default_sender_domain": "notify.venspera.com",
+            "verified_sender_domains": "flysafarilink.com",
+            "tenant_sender_domain_assignments_json": '{"tenant-A": ["flysafarilink.com"]}',
+        },
+        tenant_id="tenant-A",
+        tenant_slug="safarilink",
+    )
+    assert prepared["config"]["from_email"] == "quality@flysafarilink.com"
+    assert prepared["config"]["reply_to"] == "qm@flysafarilink.com, qo@flysafarilink.com"
+
+
+def test_platform_rejects_duplicate_domain_assignments():
+    with pytest.raises(ValueError, match="cannot be assigned to multiple tenants"):
+        resend_email_policy._tenant_domain_assignments(
+            '{"tenant-A": ["flysafarilink.com"], "tenant-B": ["flysafarilink.com"]}'
+        )
+
+
+
+def test_quality_sender_scope_does_not_override_security_notifications():
+    assert notification_providers._uses_qms_sender("qms_audit_notice_memo")
+    assert notification_providers._uses_qms_sender("finding-issued")
+    assert notification_providers._uses_qms_sender("qms_mail_identity_test")
+    assert not notification_providers._uses_qms_sender("password-reset")
+    assert not notification_providers._uses_qms_sender("email-verification")
+    assert not notification_providers._uses_qms_sender("account-welcome")
+    assert not notification_providers._uses_qms_sender("training-expiry-warning")
 
 
 def test_production_mode_requires_production_environment(monkeypatch: pytest.MonkeyPatch):
@@ -153,6 +210,8 @@ def test_resend_adapter_serializes_binary_attachments_for_sdk(monkeypatch: pytes
         to_email="auditee@example.com",
         subject="Audit notice",
         text="Please see the attached audit notice.",
+        cc=["auditor@example.com"],
+        reply_to=["quality@example.com", "auditor@example.com"],
         idempotency_key="audit-notice:1",
         attachments=[{"filename": "notice.pdf", "content": b"%PDF", "content_type": "application/pdf"}],
     )
@@ -163,6 +222,8 @@ def test_resend_adapter_serializes_binary_attachments_for_sdk(monkeypatch: pytes
     ]
     assert captured["options"] == {"idempotency_key": "audit-notice:1"}
     assert captured["params"]["to"] == ["auditee@example.com"]
+    assert captured["params"]["cc"] == ["auditor@example.com"]
+    assert captured["params"]["reply_to"] == ["quality@example.com", "auditor@example.com"]
 
 
 def test_semicolon_sandbox_list_is_separate_validated_mailboxes():

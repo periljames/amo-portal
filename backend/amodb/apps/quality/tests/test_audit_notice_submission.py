@@ -144,6 +144,7 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
         return SimpleNamespace(
             status=notification_models.EmailStatus.SENT,
             provider_message_id="email-notice-1",
+            delivery_status="ACCEPTED",
             error=None,
         )
 
@@ -261,8 +262,8 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
         db=db_session,
     )
 
-    assert result["delivery_complete"] is True
-    assert result["notice"]["status"] == "DELIVERED"
+    assert result["delivery_complete"] is False
+    assert result["notice"]["status"] == "GENERATED"
     assert result["notice"]["artifact"]["source_type"] == "GENERATED"
     assert result["notice"]["artifact"]["signed_by_name"] == "Quality Officer"
     assert len(sends) == 1
@@ -272,9 +273,11 @@ def test_authorized_quality_officer_submits_signed_pdf_as_email_attachment(db_se
     assert sends[0]["context"]["action_url"].startswith("https://portal.example.test/maintenance/AMO-NOTICE/")
     assert f"noticeId={notice.id}" in sends[0]["context"]["action_url"]
     assert len(sends[0]["correlation_id"]) <= 64
-    assert sends[0]["correlation_id"] == _notice_email_correlation(notice.id, "auditee@example.test")
+    assert sends[0]["correlation_id"] == _notice_email_correlation(notice.id, "dispatch")
+    assert sends[0]["cooldown_seconds"] == 60
+    assert sends[0]["context"]["_cc"] == []
     events = [row.event_type for row in db_session.query(QualityAuditNoticeEvent).order_by(QualityAuditNoticeEvent.created_at).all()]
-    assert events == ["SUBMITTED", "APPROVED", "GENERATED", "DELIVERED"]
+    assert events == ["SUBMITTED", "APPROVED", "GENERATED"]
 
     next_notice = QualityAuditNotice(
         amo_id=amo.id,

@@ -115,7 +115,7 @@ export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
     id: "administration",
     label: "Administration",
     description: "Quality configuration and enabled specialist tools",
-    moduleIds: ["settings", "aerodoc"],
+    moduleIds: ["settings", "mail-identity", "aerodoc"],
   },
 ] as const;
 

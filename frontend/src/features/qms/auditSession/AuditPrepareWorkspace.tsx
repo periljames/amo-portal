@@ -974,7 +974,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       ) : null}
       {fieldworkOpen ? (
         <p className="qms-audit-prepare-stage__notice is-info">
-          <ShieldAlert size={14} aria-hidden /> Checklist changes require a new preparation revision while fieldwork is active.
+          <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Checklist changes require a new governed preparation revision.
         </p>
       ) : null}
 
@@ -1339,6 +1339,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </article>)}
           </div> : <p className="qms-audit-prepare__empty">No governed applicability context is selected. Scoped documentary evidence will remain unverified rather than being assumed applicable or N/A.</p>}
           {canEditFrozenPreparation ? <div className="qms-audit-prepare__applicability-picker">
+            <p className="qms-audit-prepare__guidance">Select only governed DMS applicability rules that are current and attributable to this audit scope.</p>
             <label><span>Search governed rules</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={applicabilitySearch} onChange={(event) => setApplicabilitySearch(event.target.value)} placeholder="Aircraft, base, department, authorization, work package…" /></div></label>
             <label className="is-wide"><span>Selection basis</span><input value={applicabilityReason} onChange={(event) => setApplicabilityReason(event.target.value)} placeholder="Why this governed target belongs to this audit scope" /></label>
             <div className="qms-audit-prepare__applicability-rules is-wide">

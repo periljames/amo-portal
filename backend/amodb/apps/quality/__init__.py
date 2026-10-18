@@ -207,6 +207,11 @@ _include_once(
 # guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
+# Tenant mail identities are Quality settings, not tenant Resend transports.
+# Include the static API before catch-all route finalization.
+from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402
+_canonical_router.router.include_router(_qms_mail_identity_router.router)
+
 # Promote static APIs ahead of the canonical catch-all. Route-family promotion
 # fails startup if two handlers could match the same path and method.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
