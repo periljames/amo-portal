@@ -29,7 +29,7 @@ def _acquire_delivery_lock(db: Session) -> None:
     db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
-def _resolve_provider(*, db: Session, amo_id: str):
+def _resolve_provider(*, db: Session, amo_id: str, template_key: str | None = None):
     """Call the DB-aware resolver while retaining legacy zero-argument test fakes.
 
     Existing notification integrations monkeypatch this seam with a zero-argument
@@ -42,7 +42,10 @@ def _resolve_provider(*, db: Session, amo_id: str):
     accepts_keywords = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
     parameter_names = {parameter.name for parameter in parameters}
     if accepts_keywords or {"db", "amo_id"}.issubset(parameter_names):
-        return resolver(db=db, amo_id=amo_id)
+        kwargs = {"db": db, "amo_id": amo_id}
+        if accepts_keywords or "template_key" in parameter_names:
+            kwargs["template_key"] = template_key
+        return resolver(**kwargs)
     return resolver()
 
 
@@ -248,7 +251,7 @@ def send_email(
             return log
 
         try:
-            provider, configured = _resolve_provider(db=db, amo_id=amo_id)
+            provider, configured = _resolve_provider(db=db, amo_id=amo_id, template_key=template_key)
         except Exception as exc:
             log.status = models.EmailStatus.FAILED
             log.error = str(exc)
