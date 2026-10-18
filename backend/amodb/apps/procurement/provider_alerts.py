@@ -151,7 +151,7 @@ def _utc(value):
 
 def _fingerprint(tenant, source, source_id, stamp, event, recipient_kind, recipient_id, due):
     payload = json.dumps([tenant, source, str(source_id), str(stamp), event,
-                          recipient_kind, str(recipient_id), due.isoformat()], separators=(",", ":"))
+                          recipient_kind, str(recipient_id)], separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
 
 def _qualifying_users(db, amo, roles):
@@ -334,7 +334,7 @@ def _scan_transitions(db, amo):
         JOIN external_contracted_work w ON w.amo_id=e.amo_id AND w.id=e.work_id
         WHERE e.amo_id=:amo AND e.action IN ('DISPATCH','REWORK','HOLD','RESUME')
         ORDER BY e.created_at DESC LIMIT 200""",amo=amo):
-        for grant in _rows(db, """SELECT DISTINCT g.object_scope_json,
+        for grant in _rows(db, """SELECT g.object_scope_json,
             m.identity_id,i.status AS identity_status
             FROM external_tenant_grants g
             JOIN external_organization_memberships m ON m.id=g.membership_id
@@ -573,6 +573,12 @@ def _dispatch(db, amo, code, zone, policy, now):
                   {"amo":amo,"provider":job["recipient_provider_id"],
                    "identity":job["recipient_identity_id"]}).scalar()
                 partner_in_app = pref is not False
+            if not channels.get("in_app",True) and not channels.get("email",False):
+                db.execute(text("""UPDATE external_provider_alert_jobs
+                    SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
+                    WHERE id=:id"""),{"id":job["id"]})
+                savepoint.commit()
+                continue
             if not job["in_app_id"] and channels.get("in_app", True) and partner_in_app:
                 if recipient:
                     notice = quality.QMSNotification(
@@ -602,6 +608,12 @@ def _dispatch(db, amo, code, zone, policy, now):
                 # Vendor member email requires verified-address support; the
                 # existing vendor in-app notification register remains primary.
                 email_on=False
+            if not (channels.get("in_app",True) and partner_in_app) and not email_on:
+                db.execute(text("""UPDATE external_provider_alert_jobs
+                    SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
+                    WHERE id=:id"""),{"id":job["id"]})
+                savepoint.commit()
+                continue
             if email_on:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
