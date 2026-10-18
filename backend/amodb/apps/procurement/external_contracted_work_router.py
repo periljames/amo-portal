@@ -352,6 +352,13 @@ class NewWork(BaseModel):
 
     @model_validator(mode="after")
     def valid(self):
+        for field in ("expected_completion_at","provider_ack_due_at"):
+            raw=self.requirements.get(field)
+            if raw:
+                try:
+                    datetime.fromisoformat(str(raw).replace("Z","+00:00"))
+                except ValueError as exc:
+                    raise ValueError(f"{field} must be a valid ISO local date/time") from exc
         if bool(self.data_manual_id) != bool(self.data_revision_id):
             raise ValueError("Controlled maintenance data requires a document and an exact revision")
         if not any([self.registration,self.part_number,self.serial_number,self.asset_description]):
@@ -419,6 +426,61 @@ class InspectionDecision(BaseModel):
     reason: str = Field(min_length=8,max_length=2000)
     expected_version: int = Field(ge=1)
 
+
+class ExpectedWorkDates(BaseModel):
+    expected_version: int = Field(ge=1)
+    expected_completion_at: str | None = None
+    provider_ack_due_at: str | None = None
+    reason: str = Field(min_length=8,max_length=2000)
+    idempotency_key: str = Field(min_length=12,max_length=80)
+
+    @model_validator(mode="after")
+    def valid_dates(self):
+        for field in ("expected_completion_at","provider_ack_due_at"):
+            raw=getattr(self,field)
+            if raw:
+                try: datetime.fromisoformat(raw.replace("Z","+00:00"))
+                except ValueError as exc:
+                    raise ValueError(field+" must be ISO local date/time") from exc
+        return self
+
+@staff_router.put("/{work_id}/schedule")
+def revise_work_schedule(amo_code:str,work_id:str,payload:ExpectedWorkDates,
+                        db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    """Only responsible Maintenance Manager may accept an ETA amendment."""
+    amo=_staff(db,amo_code,user)
+    work=_work(db,amo,work_id,lock=True)
+    if _role(user)!=MANAGERS[work["work_type"]]:
+        raise HTTPException(403,"Responsible Maintenance Manager schedule control required")
+    prior=_one(db,"""SELECT id,action,actor_user_id FROM external_contracted_work_events
+       WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:key""",
+       amo=amo,work=work_id,key=payload.idempotency_key)
+    if prior:
+        if prior["action"]!="EXPECTED_DATES_CHANGED" or prior["actor_user_id"]!=str(user.id):
+            raise HTTPException(409,"Idempotency key belongs to a different action")
+        return {"id":work_id,"retry":True,"version":work["version"]}
+    if work["version"]!=payload.expected_version:
+        raise HTTPException(409,"Work order changed; refresh before revising its schedule")
+    if work["status"] in {"CANCELLED","CLOSED"}:
+        raise HTTPException(409,"Closed or cancelled maintenance cannot be rescheduled")
+    requirements=dict(work["requirements_json"] or {})
+    for field in ("expected_completion_at","provider_ack_due_at"):
+        raw=getattr(payload,field)
+        if raw:requirements[field]=raw
+        else:requirements.pop(field,None)
+    # Signed-off schedule is a manager-controlled requirement amendment;
+    # a contractor ETA_CHANGE note is only a proposal, not an authorization.
+    db.execute(text("""UPDATE external_contracted_work SET
+       requirements_json=CAST(:requirements AS JSON),version=version+1,updated_at=NOW()
+       WHERE amo_id=:amo AND id=:id AND version=:version"""),
+       {"amo":amo,"id":work_id,"version":payload.expected_version,
+        "requirements":json.dumps(requirements)})
+    _event(db,work,"EXPECTED_DATES_CHANGED",payload.reason,staff=str(user.id),
+           details={"expected_completion_at":payload.expected_completion_at,
+                    "provider_ack_due_at":payload.provider_ack_due_at},
+           retry=payload.idempotency_key)
+    db.commit()
+    return {"id":work_id,"version":payload.expected_version+1,"updated":True}
 
 @staff_router.get("")
 def staff_queue(amo_code:str,db:Session=Depends(get_db),user=Depends(get_current_active_user),
