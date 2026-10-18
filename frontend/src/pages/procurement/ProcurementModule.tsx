@@ -10,6 +10,7 @@ import type { ProcurementDocumentEntityType, ProcurementRequisition } from "../.
 import { submitProcurementForm } from "./procurementActions";
 import ProcurementDocumentCenter from "./ProcurementDocumentCenter";
 import ProviderProcurementInbox from "./ProviderProcurementInbox";
+import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 import ProviderAlternateTechnicalReview from "./ProviderAlternateTechnicalReview";
 import { Command, Control, Orders, Receiving, Requests, Sourcing, Suppliers } from "./ProcurementSections";
 import { renderFields } from "./ProcurementForms";
@@ -210,6 +211,7 @@ export default function ProcurementModule() {
         <main className="proc-content">
           {section === "command" ? <Command data={data} loading={loading} go={go} openModal={openModal} /> : null}
           {section === "requests" ? <Requests items={filtered(data.requisitions, (item) => `${item.requisition_number} ${item.title} ${item.requesting_department} ${item.status}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} act={act} /> : null}
+          {section === "collaboration" ? <ProviderAlertSettingsPanel amoCode={amoCode} department="PROCUREMENT" /> : null}
           {section === "collaboration" ? <ProviderProcurementInbox amoCode={amoCode} /> : null}
           {section === "sourcing" && ["PLANNING_ENGINEER","PRODUCTION_ENGINEER","CERTIFYING_ENGINEER"].includes(role) ? <ProviderAlternateTechnicalReview amoCode={amoCode} /> : null}
           {section === "sourcing" ? <Sourcing rfqs={filtered(data.rfqs, (item) => `${item.rfq_number} ${item.title} ${item.status}`)} quotes={filtered(data.quotes, (item) => `${item.quote_reference} ${item.status}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} /> : null}
