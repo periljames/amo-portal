@@ -245,6 +245,17 @@ const MODULES: readonly QmsModuleRoute[] = [
     allowRecordDetails: true,
   },
   {
+    id: "mail-identity",
+    segment: "mail-identity",
+    label: "QMS Email Notifications",
+    navigationLabel: "Mail Identity",
+    permission: "qms.settings.view",
+    section: "administration",
+    defaultView: "overview",
+    validViews: ["overview"],
+    componentType: "specialist",
+  },
+  {
     id: "settings",
     segment: "settings",
     label: "QMS Settings",
