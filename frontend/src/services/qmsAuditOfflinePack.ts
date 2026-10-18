@@ -124,6 +124,7 @@ type StoredAuditOfflinePack = {
   workPackageSha256: string;
   storedAt: number;
   verifiedAt: number;
+  offlineReferences?: number;
   expiresAt: number | null;
   encrypted: EncryptedDeviceValue;
 };
@@ -179,23 +180,7 @@ export async function fetchAuditOfflinePack(
   );
 }
 
-function governedOfflineReferenceCount(pack: AuditOfflinePack): number {
-  const references = [
-    ...(pack.work_package.package_snapshot.source_references || []),
-    ...(pack.work_package.package_snapshot.checklist_bindings || []).flatMap((binding) => binding.source_references || []),
-  ].filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
-  return new Set(
-    references.flatMap((reference) => {
-      const manualId = String(reference.document_id || "").trim();
-      const revisionId = String(reference.revision_id || "").trim();
-      const sourceSha256 = String(reference.offline_reader_sha256 || reference.source_sha256 || "").trim().toLowerCase();
-      const readerUrl = String(reference.offline_reader_url || "").trim();
-      return manualId && revisionId && sourceSha256 && readerUrl
-        ? [`${manualId}:${revisionId}:${sourceSha256}`]
-        : [];
-    }),
-  ).size;
-}
+
 
 /** Audit preparation requires working offline SPA chunks, not only cached JSON. */
 export async function verifyBrowserAuditShell(): Promise<number> {
@@ -303,6 +288,22 @@ export async function prepareAuditOfflinePack(
     }
   }
 
+  return storeAuditOfflinePack(amoCode, auditId, pack, offlineReferences.size);
+}
+
+/** Cache executable fieldwork immediately; reference downloads must not gate local capture. */
+export async function cacheAuditFieldworkPack(amoCode: string, auditId: string) {
+  const pack = await fetchAuditOfflinePack(amoCode, auditId);
+  const stored = await storeAuditOfflinePack(amoCode, auditId, pack, 0);
+  // Warm the application's offline chunks without making local capture wait
+  // for service-worker installation or controlled-reference downloads.
+  void verifyBrowserAuditShell().catch(() => undefined);
+  return stored;
+}
+
+async function storeAuditOfflinePack(amoCode: string, auditId: string, pack: AuditOfflinePack, referenceCount: number) {
+  const scope = currentOfflineScope();
+  if (scope.startsWith("anonymous:")) throw new Error("Sign in before saving audit work.");
   const encrypted = await encryptDeviceValue(pack);
   if (!encrypted) throw new Error("Secure device encryption is unavailable; the audit package was not stored.");
 
@@ -320,6 +321,7 @@ export async function prepareAuditOfflinePack(
     workPackageSha256: pack.work_package.content_sha256,
     storedAt: now,
     verifiedAt: now,
+    offlineReferences: referenceCount,
     expiresAt,
     encrypted,
   };
@@ -340,7 +342,7 @@ export async function prepareAuditOfflinePack(
       workPackageSha256: row.workPackageSha256,
       checklistItems: pack.work_package.package_snapshot.checklist_snapshot.length,
       evidenceRecords: pack.evidence.length,
-      offlineReferences: offlineReferences.size,
+      offlineReferences: referenceCount,
       expiresAt: row.expiresAt,
     },
   };
@@ -359,7 +361,7 @@ export async function readAuditOfflinePack(
     ) as StoredAuditOfflinePack | undefined;
     await transactionDone(transaction);
     if (!row || row.scope !== scope || row.amoCode !== amoCode) return null;
-    if (row.expiresAt != null && row.expiresAt <= Date.now()) return null;
+    // Expiry requires server revalidation on replay; keep local work available.
     return decryptDeviceValue<AuditOfflinePack>(row.encrypted);
   } finally {
     db.close();
@@ -392,7 +394,7 @@ export async function auditOfflinePackStatus(
       workPackageSha256: row.workPackageSha256,
       checklistItems: pack.work_package.package_snapshot.checklist_snapshot.length,
       evidenceRecords: pack.evidence.length,
-      offlineReferences: governedOfflineReferenceCount(pack),
+      offlineReferences: row.offlineReferences ?? 0,
       expiresAt: row.expiresAt,
     };
   } finally {
@@ -426,7 +428,7 @@ export async function readAuditOfflinePackByKey(
   if (!target) return null;
   for (const row of await scopedStoredPacks()) {
     if (row.amoCode !== amoCode) continue;
-    if (row.expiresAt != null && row.expiresAt <= Date.now()) continue;
+    // Keep the captured package available for local work after its refresh deadline.
     const pack = await decryptDeviceValue<AuditOfflinePack>(row.encrypted).catch(() => null);
     if (!pack) continue;
     const audit = pack.work_package.package_snapshot.audit;

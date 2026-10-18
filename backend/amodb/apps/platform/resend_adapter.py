@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
+from email.utils import getaddresses, formataddr
 from contextlib import contextmanager
 from threading import RLock
 from typing import Any, Iterator, Mapping
 
 import resend
+from pydantic import EmailStr, TypeAdapter
 from svix.webhooks import Webhook
 
 from amodb.observability import operation_span, record_provider_call
@@ -13,6 +15,25 @@ from amodb.observability import operation_span, record_provider_call
 
 _SDK_LOCK = RLock()
 _DEFAULT_API_URL = "https://api.resend.com"
+
+
+def email_recipients(value: str) -> list[str]:
+    """Normalize the configured comma/semicolon list into actual mailboxes."""
+    if "\r" in value or "\n" in value:
+        raise ValueError("Recipient addresses must not contain line breaks.")
+    parsed = getaddresses([value.replace(";", ",")])
+    result: list[str] = []
+    seen: set[str] = set()
+    for name, address in parsed:
+        if not address:
+            raise ValueError("Choose valid recipient email addresses, separated by commas or semicolons.")
+        normalized = str(TypeAdapter(EmailStr).validate_python(address))
+        if normalized.casefold() not in seen:
+            seen.add(normalized.casefold())
+            result.append(formataddr((name, normalized)) if name else normalized)
+    if not result:
+        raise ValueError("At least one recipient email address is required.")
+    return result
 
 
 def _clean_api_key(value: Any) -> str:
@@ -72,7 +93,7 @@ def send_email(
         raise ValueError("Resend sender and recipient are required.")
     params: dict[str, Any] = {
         "from": from_value.strip(),
-        "to": to_email.strip(),
+        "to": email_recipients(to_email),
         "subject": subject.strip(),
     }
     if reply_to and reply_to.strip():

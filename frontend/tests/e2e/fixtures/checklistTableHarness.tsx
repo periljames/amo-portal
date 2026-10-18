@@ -1,3 +1,4 @@
+import QuestionEvidenceCapture from "../../../src/features/qms/auditSession/QuestionEvidenceCapture";
 import "../../../src/styles/index.css";
 import AuditWorkspaceDetails from "../../../src/features/qms/auditSession/AuditWorkspaceDetails";
 import { useState } from "react";
@@ -43,6 +44,8 @@ function Harness({ initialRows = rows, mode = {} }: { initialRows?: Item[]; mode
       onResponse={(row, option) => { setItems((current) => current.map((item) => item === row ? { ...item, response_value: option.value } : item)); setPending((current) => ({ ...current, [row.checklist_item_id]: { status: "pending" } })); }}
       onNotes={(row, value) => setNotes((current) => ({ ...current, [row.checklist_item_id]: value }))}
       onSaveNotes={(row) => setItems((current) => current.map((item) => item === row ? { ...item, auditor_notes: notes[row.checklist_item_id] } : item))}
+      renderAttachments={(row) => <QuestionEvidenceCapture amoCode="test-amo" auditId="audit" item={row} disabled={Boolean(mode.readOnly)} />}
+      renderDetails={(row) => <section aria-label="Question context"><h2>Criteria for {row.checklist_item_id}</h2><p>Review the applicable regulation and previous evidence.</p></section>}
       onOpenDetails={(row) => setExpanded(row.checklist_item_id === expanded ? undefined : row.checklist_item_id)} />
     </section></div>
   </div>;

@@ -17,6 +17,10 @@ afterEach(() => vi.unstubAllGlobals());
 function response() { return new Response("{}", { headers: { "Content-Type": "application/json" } }); }
 
 describe("portal networking queue", () => {
+  it("shows the actionable message from a structured workflow failure", async () => {
+    state.fetch.mockResolvedValue(new Response(JSON.stringify({ detail: { code: "AUDIT_NOTICE_MEETINGS_REQUIRED", message: "Save both meetings before generating the notice." } }), { status: 409, headers: { "Content-Type": "application/json" } }));
+    await expect(apiRequest("/network-test/notice", { method: "POST", body: "{}" })).rejects.toThrow("Save both meetings before generating the notice.");
+  });
   it("persists fresh-every-time module reads unless offline caching is explicitly disabled", async () => {
     state.fetch.mockImplementation(async () => response());
     await apiRequest("/api/maintenance/amo/procurement/suppliers", { cacheTtlMs: 0 });

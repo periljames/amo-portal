@@ -1,7 +1,7 @@
 QMS audit UI verification
 =========================
 
-The audit workspace uses the portal's font, spacing, surface, focus, motion and semantic colour tokens. Light mode uses the portal blue accent; dark mode uses its gold accent. Green indicates satisfactory assessments, amber indicates incomplete/pending work and red indicates adverse responses. Labels, selection controls and sync messages accompany these colours.
+The audit workspace uses the portal's font, spacing, surface, focus, motion and semantic colour tokens. Light mode uses warm ivory/stone surfaces with the portal blue accent; dark mode uses warm charcoal with its gold accent. Green indicates satisfactory assessments, amber indicates incomplete/pending work and red indicates adverse responses. Labels, selection controls and sync messages accompany these colours.
 
 Desktop retains a source-ordered assessment table. Phones keep each question, response choices, remarks and evidence action together in a vertical layout. Themes do not replace form state. Native disclosures support keyboard activation; reduced-motion preferences disable entrance animation and smooth scrolling. Theme controls use Lucide icons and synchronize preferences between open screens/tabs. Blocked preference storage does not prevent changing the current theme.
 
@@ -15,4 +15,9 @@ Live retry on 2026-10-17: the API at 127.0.0.1:8080 and frontend proxy at 127.0.
 
 Validation completed: the frontend production build, 59 focused unit/contract tests and 10 checklist/theme/realtime browser tests passed. The browser realtime tests use controlled HTTP responses; they are separate from the live health and login checks above.
 
-These checks do not establish physical-device Safari behavior, authenticated broker event delivery, or successful synchronization between authenticated devices. Live QMS/DMS workspace and cross-device checks remain pending an authenticated test session; broker readiness alone is not evidence of event delivery to those screens.
+Authenticated checks subsequently used a dedicated owner-authorised verification account. Prepare, Fieldwork, DMS Home and the library rendered against the real API. Three live browser checks passed for responsive navigation, complete DMS phone work items, cached offline navigation and offline theme changes; all six accents met 4.5:1 primary-button text contrast in light and dark. The browser realtime flag had been absent despite the backend flag being enabled; the local setting was corrected and authenticated /api/events returned 200 with a connected audit workspace. The source-rebuild command returned 500 and the operational 236-row binding has not been confirmed repaired. See the [detailed live UX review and deferred failure queue](portal-ux-live-review-2026-10-17.md).
+
+Physical-device Safari behaviour, domain-event delivery between independent devices and all offline business writes remain unverified. Broker readiness or a connected stream alone is not evidence of those outcomes.
+
+
+The subsequent [checklist workspace review](checklist-workspace-review-2026-10-17.md) records the compact fieldwork layout, direct camera/upload controls, encrypted draft/completion recovery, live mobile/offline checks and remaining backend contracts.

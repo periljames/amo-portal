@@ -165,12 +165,10 @@ describe("Quality workflow integrity and public CAR UI contracts", () => {
     "utf8",
   );
 
-  it("fails closed when the authoritative audit workflow is unavailable", () => {
-    expect(enhancementsHostSource).toContain("occurrenceQuery.isError || sessionQuery.isError");
-    expect(enhancementsHostSource).not.toContain("getQueryCache().subscribe");
-    expect(enhancementsHostSource).toContain("Authoritative workflow unavailable");
-    expect(enhancementsHostSource).toContain("It will not use locally invented completion values");
-    expect(enhancementsHostSource).toContain("quality-workflow-is-degraded");
+  it("keeps background workflow errors from blocking offline capture", () => {
+    expect(enhancementsHostSource).not.toContain('role="alertdialog"');
+    expect(enhancementsHostSource).not.toContain("quality-workflow-is-degraded");
+    expect(enhancementsHostSource).toContain("Each stage owns its cached data");
   });
 
   it("does not load PDF.js into unrelated portal workspaces", () => {

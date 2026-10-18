@@ -6,22 +6,39 @@
 :root,
 html[data-color-scheme="dark"],
 body[data-color-scheme="dark"] {
-  --font-family-sans: "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --font-size-caption: 0.8125rem;
+  --font-size-label: 0.875rem;
+  --font-size-body: 0.9375rem;
+  --font-size-reading: 1rem;
+  --font-weight-body: 400;
+  --font-weight-label: 500;
+  --font-weight-heading: 600;
+  --line-height-body: 1.55;
+  --line-height-heading: 1.25;
+  --reading-measure: 72ch;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --accent-option-blue: #2563eb;
+  --accent-option-teal: #087670;
+  --accent-option-green: #16834a;
+  --accent-option-amber: #995b00;
+  --accent-option-violet: #7357d9;
+  --accent-option-contrast: #ffffff;
   color-scheme: dark;
 
   /* Charcoal / graphite dark canvas (Origin-like depth; accents unchanged). */
-  --bg-base: #141618;
-  --bg-base-alt: #0f1113;
+  --bg-base: #1b1a18;
+  --bg-base-alt: #151412;
   --bg-accent: rgba(56, 189, 248, 0.14);
   --bg-accent-2: rgba(45, 212, 191, 0.1);
 
-  --surface: rgba(38, 40, 43, 0.92);
-  --surface-elevated: rgba(43, 45, 49, 0.94);
-  --surface-soft: rgba(32, 34, 37, 0.86);
+  --surface: #252320;
+  --surface-elevated: #2d2a26;
+  --surface-soft: #211f1c;
   --surface-border: rgba(255, 255, 255, 0.11);
   --border-subtle: rgba(255, 255, 255, 0.075);
   --panel-divider: rgba(255, 255, 255, 0.065);
-  --menu-surface: rgba(38, 40, 44, 0.88);
+  --menu-surface: #252320;
 
   --text-primary: rgba(255, 255, 255, 0.96);
   /* Keep secondary readable on charcoal — 0.72 was washing labels/meta across QMS. */
@@ -132,23 +149,23 @@ html[data-color-scheme="light"],
 body[data-color-scheme="light"] {
   color-scheme: light;
 
-  --bg-base: #edf2f7;
-  --bg-base-alt: #f8fafc;
+  --bg-base: #f4f1eb;
+  --bg-base-alt: #faf8f4;
   --bg-accent: rgba(37, 99, 235, 0.07);
   --bg-accent-2: rgba(15, 143, 139, 0.06);
 
-  --surface: #ffffff;
-  --surface-elevated: #ffffff;
-  --surface-soft: #f4f7fb;
-  --surface-border: #c4ceda;
-  --border-subtle: #d1d9e3;
-  --panel-divider: #dbe2ea;
-  --menu-surface: #ffffff;
+  --surface: #fffdfa;
+  --surface-elevated: #fffdfa;
+  --surface-soft: #f6f3ed;
+  --surface-border: #cbc6bd;
+  --border-subtle: #d8d3ca;
+  --panel-divider: #e4dfd6;
+  --menu-surface: #fffdfa;
 
   --text-primary: #111827;
   --text-secondary: #475569;
   --text-muted: #64748b;
-  --text-inverse: #f8fafc;
+  --text-inverse: #faf8f4;
 
   --brand: #1d4ed8;
   --brand-weak: rgba(29, 78, 216, 0.12);

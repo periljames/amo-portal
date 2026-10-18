@@ -23,6 +23,18 @@
   font-size: 0.7rem;
 }
 
+#audit-fieldwork-release-controls .qms-live-release-launcher {
+  position: static;
+  min-height: 44px;
+  margin-block-end: 8px;
+  border-color: var(--fw-line);
+  border-radius: var(--fw-radius);
+  background: var(--fw-surface);
+  color: var(--fw-ink);
+  font-weight: 500;
+  box-shadow: none;
+}
+
 .qms-live-release-panel {
   position: fixed;
   right: 1rem;
@@ -204,4 +216,9 @@
     bottom: 3.8rem;
     width: calc(100vw - 1rem);
   }
+}
+
+.qms-live-release-panel, .qms-live-release-decision {
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #0f172a));
 }

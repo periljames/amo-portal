@@ -61,6 +61,26 @@
   min-height: 0;
 }
 
+/* Closing is a page within the occurrence shell, rather than a fixed overlay. */
+.tenant-shell[data-workspace-module="quality"] .qms-audit-occurrence-shell .qms-audit-closing {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  display: block;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-audit-occurrence-shell .qms-audit-closing__body {
+  overflow: visible;
+  padding: 0;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-audit-occurrence-shell .qms-audit-closing__body:has(> main:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* Calendar owns its scrollport — do not let the tenant main absorb week/day overflow. */
 .tenant-shell[data-workspace-module="quality"]:has(.qa-workspace-shell--calendar-focus) .tenant-shell__main {
   overflow: hidden;

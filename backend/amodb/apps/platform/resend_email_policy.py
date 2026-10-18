@@ -112,6 +112,9 @@ def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if mode == "SANDBOX" and not str(config.get("sandbox_recipient") or "").strip():
         raise ValueError("sandbox_recipient is required while sending_mode is SANDBOX")
+    if mode == "SANDBOX":
+        from .resend_adapter import email_recipients
+        config["sandbox_recipient"] = ", ".join(email_recipients(str(config["sandbox_recipient"])))
     if mode == "PRODUCTION":
         if _environment() not in {"production", "prod"}:
             raise ValueError("Production email cannot be enabled outside a production deployment")

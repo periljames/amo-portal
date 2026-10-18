@@ -452,7 +452,7 @@ body :where(.modal-backdrop, .drawer-backdrop, .overlay-backdrop) {
 .portal-offline-recovery__primary {
   border-color: var(--accent-primary) !important;
   background: var(--accent-primary) !important;
-  color: #fff !important;
+  color: var(--brand-accent-contrast) !important;
 }
 
 .portal-offline-recovery__error {

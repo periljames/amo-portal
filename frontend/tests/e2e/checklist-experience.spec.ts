@@ -15,7 +15,7 @@ test("light, dark and system themes preserve edits and use readable semantic col
       const ctx = canvas.getContext("2d")!;
       const rgba = (value: string) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data); };
       const luminance = (rgb: number[]) => rgb.slice(0, 3).map((value) => { const n = value / 255; return n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
-      return [".audit-fieldwork-header h1", ".audit-checklist-table__question", ".audit-checklist-heading__source", ".audit-checklist-heading__eyebrow", ".audit-fieldwork-status__connection"].map((selector) => {
+      return [".audit-fieldwork-header h1", ".audit-checklist-table__question", ".audit-checklist-heading__source", ".audit-fieldwork-header__sync"].map((selector) => {
         const element = document.querySelector(selector)!;
         let background = [255, 255, 255];
         const ancestors: Element[] = []; for (let node: Element | null = element; node; node = node.parentElement) ancestors.unshift(node);
@@ -81,4 +81,22 @@ test("reduced motion disables disclosure animation and smooth section scrolling"
   await page.getByRole("combobox", { name: "Jump to section" }).selectOption("third");
   expect(await page.evaluate(() => (window as any).__scrollBehaviour)).toBe("instant");
   await expect(page.locator(".audit-fieldwork-utilities__content")).toHaveCSS("animation-name", "none");
+});
+
+
+test("collapsed background errors do not produce global task interruptions", async ({ page }) => {
+  const count = await page.evaluate(async () => {
+    const { installPortalInlineErrorMirror } = await import(/* @vite-ignore */ "/src/services/portalInlineErrorMirror.ts");
+    let errors = 0;
+    const listener = () => errors++;
+    window.addEventListener("amo:portal-error", listener);
+    const stop = installPortalInlineErrorMirror();
+    const details = document.createElement("details");
+    details.innerHTML = '<summary>Evidence</summary><p role="alert">Offline evidence refresh unavailable</p>';
+    document.body.append(details);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    stop(); details.remove(); window.removeEventListener("amo:portal-error", listener);
+    return errors;
+  });
+  expect(count).toBe(0);
 });

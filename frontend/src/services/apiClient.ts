@@ -10,6 +10,7 @@ import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { isQmsLiveAuthority } from "./qmsCachePolicy";
 import { newOfflineIdempotencyKey } from "./offlinePersistence";
 import { classifyOfflineMutation } from "./offlineCapabilities";
+import { portalErrorMessage } from "./portalError";
 import {
   isProxyTransportFailureResponse,
   portalFetch,
@@ -241,13 +242,7 @@ function errorMessageFromBody(response: Response, responseBody: unknown): string
     const body = responseBody as { detail?: unknown; message?: unknown; error?: unknown };
     const detail = body.detail ?? body.message ?? body.error;
     if (typeof detail === "string") return detail;
-    if (detail != null) {
-      try {
-        return JSON.stringify(detail);
-      } catch {
-        return String(detail);
-      }
-    }
+    if (detail != null) return portalErrorMessage({ detail }, response.statusText || "Request failed");
   }
   if (typeof responseBody === "string" && responseBody.trim()) return responseBody.trim();
   return response.statusText || "Request failed";

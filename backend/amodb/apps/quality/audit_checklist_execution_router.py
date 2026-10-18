@@ -135,7 +135,7 @@ class FieldworkFindingMutation(BaseModel):
     client_timestamp: datetime
     base_version: int = Field(ge=0)
     operation: Literal["CREATE_FINDING"] = "CREATE_FINDING"
-    canonical_response_status: FindingResponse
+    canonical_response_status: CanonicalResponse
     response_value: str | None = Field(default=None, max_length=64)
     severity: QMSFindingSeverity
     level: FindingLevel
@@ -940,13 +940,13 @@ def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid
 
 
 def _finding_classification(payload: FieldworkFindingMutation) -> tuple[FindingLevel, QMSFindingType]:
-    requested_type = QMSFindingType.OBSERVATION if payload.canonical_response_status == "OBSERVATION" else QMSFindingType.NON_CONFORMITY
+    requested_type = QMSFindingType.OBSERVATION if payload.level == FindingLevel.LEVEL_4 or payload.canonical_response_status == "OBSERVATION" else QMSFindingType.NON_CONFORMITY
     level = normalize_finding_level(payload.severity, payload.level, requested_type)
     finding_type = QMSFindingType.OBSERVATION if level == FindingLevel.LEVEL_4 else QMSFindingType.NON_CONFORMITY
     if payload.canonical_response_status == "OBSERVATION" and finding_type != QMSFindingType.OBSERVATION:
         raise HTTPException(status_code=422, detail="An OBSERVATION checklist response must use the governed Level 4 observation classification.")
-    if payload.canonical_response_status == "NONCOMPLIANT" and finding_type != QMSFindingType.NON_CONFORMITY:
-        raise HTTPException(status_code=422, detail="A NONCOMPLIANT checklist response must use a governed Level 1, 2 or 3 non-conformity classification.")
+    if finding_type == QMSFindingType.NON_CONFORMITY and payload.canonical_response_status != "NONCOMPLIANT":
+        raise HTTPException(status_code=422, detail="A Level 1, 2 or 3 non-conformity must record the source's noncompliant response.")
     return level, finding_type
 
 

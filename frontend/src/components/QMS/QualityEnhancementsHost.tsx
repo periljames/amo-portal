@@ -1,7 +1,8 @@
+import { FileText } from "lucide-react";
+import WorkflowDisclosure from "../../features/qms/auditSession/WorkflowDisclosure";
 import React, { Suspense, lazy, useEffect, useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCcw, ShieldAlert } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import AuditLifecycleRail from "../../features/qms/auditSession/AuditLifecycleRail";
 import OccurrenceToolbarPortal, { AUDIT_OCCURRENCE_MOUNT_ID } from "../../features/qms/auditSession/OccurrenceToolbarPortal";
@@ -16,6 +17,7 @@ import QualityDataFreshnessCoordinator from "./QualityDataFreshnessCoordinator";
 import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 import "../../styles/qms-text-scale-override.css";
 import "../../styles/qms-audit-occurrence-shell.css";
+import "../../styles/qms-audit-workflow-experience.css";
 
 const AuditSetupWorkspace = lazy(() => import("../../features/qms/auditSession/AuditSetupWorkspace"));
 const AuditPrepareWorkspace = lazy(() => import("../../features/qms/auditSession/AuditPrepareWorkspace"));
@@ -109,7 +111,6 @@ const QualityDialogFocusRestorer: React.FC = () => {
 
 const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
   const location = useLocation();
-  const queryClient = useQueryClient();
   const occurrenceKey = auditOccurrenceQueryKey(route.amoCode, route.auditKey);
   const occurrenceQuery = useQuery({
     queryKey: occurrenceKey,
@@ -124,11 +125,6 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
-  const degraded = occurrenceQuery.isError || sessionQuery.isError;
-  useEffect(() => {
-    document.documentElement.classList.toggle("quality-workflow-is-degraded", degraded);
-    return () => document.documentElement.classList.remove("quality-workflow-is-degraded");
-  }, [degraded]);
   const routeStage = auditSessionStageFromPath(location.pathname);
   // Preparation drafts can be composed while team eligibility is being resolved.
   // The server readiness checks still block issue and entry into fieldwork.
@@ -154,8 +150,9 @@ const WorkflowIntegrityGuard: React.FC<{ route: AuditRoute }> = ({ route }) => {
       />
     );
   }
-  if (!degraded) return null;
-  return <div className="quality-workflow-integrity-blocker" role="alertdialog" aria-modal="true" aria-label="Audit workflow unavailable"><section><ShieldAlert size={28} /><div><p>Authoritative workflow unavailable</p><h2>Audit progress has been placed in safe read-only mode.</h2><span>The portal could not verify stage completion, CAR state, evidence gates or closeout readiness from the backend. It will not use locally invented completion values or permit workflow advancement.</span></div><div className="quality-workflow-integrity-blocker__actions"><button type="button" onClick={() => void Promise.all([queryClient.invalidateQueries({ queryKey: occurrenceKey }), queryClient.invalidateQueries({ queryKey: sessionKey })])}><RefreshCcw size={17} /> Retry workflow</button><a href={`/maintenance/${encodeURIComponent(route.amoCode)}/quality/audits/register`}>Open audit register</a></div></section></div>;
+  // Background refresh failures must not place an offline auditor behind a modal.
+  // Each stage owns its cached data, local capture and eventual server reconciliation.
+  return null;
 };
 
 const QualityEnhancementsHost: React.FC = () => {
@@ -198,7 +195,7 @@ const QualityEnhancementsHost: React.FC = () => {
 
     {route && auditSessionStage ? (
       <OccurrenceToolbarPortal containerId={AUDIT_OCCURRENCE_MOUNT_ID}>
-      <div className="qms-audit-occurrence-shell">
+      <div className="qms-audit-occurrence-shell" data-audit-stage={auditSessionStage}>
         <AuditLifecycleRail amoCode={route.amoCode} auditKey={route.auditKey} />
         <div className="qms-audit-occurrence-shell__body">
           <WorkflowIntegrityGuard route={route} />
@@ -225,7 +222,7 @@ const QualityEnhancementsHost: React.FC = () => {
           ) : null}
           {auditSessionStage === "closing" ? (
             <Suspense fallback={<div className="qms-audit-stage-suspense" role="status">Loading closing workspace…</div>}>
-              <PortalErrorBoundary inline title="Closing narrative unavailable"><AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
+              <WorkflowDisclosure title="Report narrative & closing meeting" description="Summary, conclusions, shared findings and meeting record" icon={FileText} className="audit-workflow-closing-context"><PortalErrorBoundary inline title="Closing narrative unavailable"><AuditClosingNarrativePanel amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary></WorkflowDisclosure>
               <PortalErrorBoundary inline title="Closing workspace unavailable" exitHref={auditSessionPath(route.amoCode, route.auditKey, "live")} exitLabel="Back to Fieldwork"><AuditClosingWorkspace amoCode={route.amoCode} auditKey={route.auditKey} /></PortalErrorBoundary>
             </Suspense>
           ) : null}

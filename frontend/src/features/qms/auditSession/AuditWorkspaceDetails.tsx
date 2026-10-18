@@ -6,7 +6,6 @@ export default function AuditWorkspaceDetails({ children, pendingChecks = 0 }: {
   return <details className="audit-fieldwork-utilities">
     <summary><ChevronDown size={14} aria-hidden />Audit details &amp; source
       {pendingChecks ? <span className="audit-fieldwork-utilities__checks">{pendingChecks} completion checks</span> : null}
-      <span className="audit-fieldwork-utilities__hint">Schedule · source review · completion checks</span>
     </summary>
     <div className="audit-fieldwork-utilities__content">{children}</div>
   </details>;

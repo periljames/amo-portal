@@ -162,3 +162,15 @@ def test_resend_adapter_serializes_binary_attachments_for_sdk(monkeypatch: pytes
         {"filename": "notice.pdf", "content": [37, 80, 68, 70], "content_type": "application/pdf"}
     ]
     assert captured["options"] == {"idempotency_key": "audit-notice:1"}
+    assert captured["params"]["to"] == ["auditee@example.com"]
+
+
+def test_semicolon_sandbox_list_is_separate_validated_mailboxes():
+    assert resend_adapter.email_recipients('one@example.com; "Test, Auditor" <two@example.com>') == [
+        "one@example.com", '"Test, Auditor" <two@example.com>',
+    ]
+    assert resend_adapter.email_recipients("one@example.com; one@example.com") == ["one@example.com"]
+    with pytest.raises(ValueError):
+        resend_adapter.email_recipients("one@example.com; not-an-email")
+    with pytest.raises(ValueError):
+        resend_adapter.email_recipients("one@example.com\r\nBcc: other@example.com")

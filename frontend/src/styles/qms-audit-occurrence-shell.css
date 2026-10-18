@@ -54,7 +54,7 @@
   min-height: 10rem;
   padding: 2rem 1rem;
   color: var(--qms-muted);
-  font-weight: 700;
+  font-weight: var(--font-weight-heading);
 }
 
 /* Kill the rounded translucent QMS card that makes stages look like a dialog. */

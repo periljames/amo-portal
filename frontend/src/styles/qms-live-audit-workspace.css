@@ -824,6 +824,33 @@
   background: var(--surface-subtle, #f8fafc);
 }
 
+.qms-live-audit-focus__sync-notice.qms-live-audit-focus__finding-drafts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.qms-live-audit-focus__finding-drafts > span {
+  flex: 1 0 100%;
+  font-size: 12px;
+  font-weight: 400;
+}
+.qms-live-audit-focus__finding-drafts > button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 6px 9px;
+  border: 1px solid var(--fw-line);
+  border-radius: var(--fw-radius);
+  background: var(--fw-surface);
+  color: var(--fw-ink);
+  font: 500 12px var(--fw-font);
+}
+@media (min-width: 768px) {
+  .qms-live-audit-focus__finding-drafts > span { flex: 0 0 auto; margin-inline-end: 4px; }
+}
+
 
 /* Auditor-first Fieldwork: keep governed detail accessible without burying response entry.
    These rules intentionally override the legacy three-panel dashboard styles above. */
@@ -1478,4 +1505,41 @@
   padding: 0.4rem 0.55rem;
   cursor: pointer;
   font-size: 0.76rem;
+}
+
+/* A fieldwork session keeps the answer legend and working row in one viewport. */
+.qms-audit-occurrence-shell .qms-live-audit-focus.qms-live-audit-focus {
+  height: calc(100dvh - 100px);
+  min-height: 400px;
+  overflow: hidden;
+}
+.qms-live-audit-focus .qms-live-audit-focus__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 12px;
+}
+.qms-live-audit-focus .qms-live-audit-focus__matrix {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.qms-live-audit-focus .audit-checklist-table-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+.qms-live-audit-focus .audit-checklist-table__context-row .qms-live-audit-focus__question {
+  margin-top: 0;
+  padding: 12px;
+  border-top-width: 2px;
+}
+.audit-question-history-panel > summary { padding: 12px; cursor: pointer; min-height: 44px; box-sizing: border-box; }
+.audit-question-history { padding: 12px; }
+.audit-question-history h3, .audit-question-history h4 { font-size: 14px; font-weight: 500; }
+.audit-question-history p { font-size: 13px; line-height: 1.6; color: var(--fw-muted); }
+@media (max-width: 600px) {
+  .qms-live-audit-focus .qms-live-audit-focus__body { padding-inline: 4px; }
+  .qms-live-audit-focus .audit-checklist-table-scroll { overflow: auto; }
 }

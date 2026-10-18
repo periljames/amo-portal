@@ -11,7 +11,7 @@ describe("paper-familiar QMS Fieldwork table", () => {
     expect(table).toContain('className="qms-live-audit-focus__matrix-table audit-checklist-table"');
     expect(table).toContain("props.items.map((item, index)");
     expect(table).toContain("columns.map((column)");
-    expect(table).toContain("props.onResponse(item, option)");
+    expect(table).toContain("actions.current.onResponse(item, option)");
     expect(live).toContain("selected && detailOpen");
     expect(live).toContain("<LiveAuditEvidenceStrip");
     expect(live).toContain('className="qms-live-audit-focus__compliance"');
@@ -28,7 +28,7 @@ describe("paper-familiar QMS Fieldwork table", () => {
     expect(handler).toContain("await updateMutation.mutateAsync");
     expect(handler).toContain("if (isOfflineQueuedError(error)) selectItem(nextItemId)");
     expect(live).toContain("localAnswers");
-    expect(readFileSync(new URL("./AuditFieldworkHeader.tsx", import.meta.url), "utf8")).toContain("server-confirmed");
+    expect(readFileSync(new URL("./AuditFieldworkHeader.tsx", import.meta.url), "utf8")).not.toContain("server-confirmed");
     expect(live).toContain("syncFieldworkNow");
     expect(live).toContain("prepareAuditOfflinePack");
     expect(live).toContain("onOfflineSyncComplete");

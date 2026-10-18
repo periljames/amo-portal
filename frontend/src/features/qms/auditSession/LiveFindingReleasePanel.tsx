@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, FileCheck2, ShieldAlert, X } from "lucide-react";
 
@@ -33,6 +34,14 @@ function releasedArtifactIds(release: AuditFindingReleaseState | undefined): str
 }
 
 const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
+  const [controlsHost, setControlsHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const locate = () => setControlsHost(document.getElementById("audit-fieldwork-release-controls"));
+    locate();
+    const observer = new MutationObserver(locate);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   const queryClient = useQueryClient();
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const [open, setOpen] = useState(false);
@@ -131,11 +140,14 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const releasedCount = findings.filter((finding) => releaseByFinding.get(finding.id)?.action === "RELEASED").length;
   const draftEvidence = draft ? evidenceByFinding.get(draft.findingId) || [] : [];
 
-  return (
-    <>
+  const launcher = (
       <button className="qms-live-release-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <Eye size={16} /> Auditee releases <span>{loadError ? "Retry" : findingsQuery.isSuccess ? `${releasedCount}/${findings.length}` : "View"}</span>
       </button>
+  );
+  return (
+    <>
+      {controlsHost ? createPortal(launcher, controlsHost) : launcher}
       {open ? (
         <aside className="qms-live-release-panel" aria-label="Auditee finding release controls">
           <header><div><span>EXTERNAL VISIBILITY</span><strong>Released findings</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close finding release controls"><X size={17} /></button></header>

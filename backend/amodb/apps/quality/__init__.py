@@ -21,6 +21,7 @@ for _helper_name in (
     "_next_audit_finding_ref",
     "_date_to_datetime",
     "_ensure_car_for_finding",
+    "_serialize_finding",
     "task_services",
 ):
     setattr(router, _helper_name, getattr(_router_module, _helper_name))

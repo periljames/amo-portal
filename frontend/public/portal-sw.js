@@ -234,7 +234,10 @@ async function cachedShellNavigation(request, preloadResponsePromise, event) {
 
 async function cacheFirstAsset(request) {
   const cache = await caches.open(ASSET_CACHE);
-  const cached = await cache.match(request);
+  // Release assets are public and same-origin. A server's Vary: Origin must
+  // not distinguish a precache fetch from a module/CSS request after reload.
+  // API and controlled-document requests never enter this handler.
+  const cached = await cache.match(request, { ignoreVary: true });
   const networkPromise = fetch(request)
     .then(async (response) => {
       if (response.ok) await cache.put(request, response.clone());
@@ -254,7 +257,7 @@ async function cacheFirstAsset(request) {
     .filter((name) => name.startsWith("amo-portal-assets-") && name !== ASSET_CACHE)
     .sort().reverse();
   for (const name of priorNames) {
-    const fallback = await (await caches.open(name)).match(request);
+    const fallback = await (await caches.open(name)).match(request, { ignoreVary: true });
     if (fallback) return fallback;
   }
   return Response.error();

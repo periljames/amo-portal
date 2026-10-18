@@ -40,6 +40,20 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("serves precached public code when a module reload adds an Origin header", async () => {
+    const { context } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
+    const response = new Response("cached module", { headers: { Vary: "Origin" } });
+    const match = vi.fn(async (_request: Request, options?: CacheQueryOptions) =>
+      options?.ignoreVary ? response.clone() : undefined);
+    context.caches.open = vi.fn().mockResolvedValue({ match, put: vi.fn() });
+    const sandbox = { ...context, request: new Request("https://portal.test/assets/app.js", {
+      headers: { Origin: "https://portal.test" }, mode: "cors",
+    }) };
+    const result = await runInNewContext("cacheFirstAsset(request)", sandbox) as Response;
+    expect(await result.text()).toBe("cached module");
+    expect(match).toHaveBeenCalledWith(sandbox.request, { ignoreVary: true });
+  });
+
   it("warms all module code with bounded concurrency and excludes authenticated data", async () => {
     const assets: string[] = [];
     let active = 0;

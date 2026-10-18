@@ -1,0 +1,215 @@
+/* Audit workflow composition. Colour identifies purpose; status still uses text/icons. */
+.qms-audit-occurrence-shell[data-audit-stage] {
+  font-family: var(--font-family-sans);
+  font-weight: 400;
+  line-height: var(--line-height-body);
+  --qms-page: var(--surface-soft);
+  --qms-panel: var(--surface);
+  --qms-text: var(--text-primary);
+  --qms-muted: var(--text-muted);
+  --qms-line: var(--surface-border);
+  --qms-line-soft: var(--border-subtle);
+  --workflow-accent: #246e66;
+  --workflow-tint: color-mix(in srgb, var(--workflow-accent) 8%, var(--qms-panel));
+  --workflow-border: color-mix(in srgb, var(--workflow-accent) 19%, var(--qms-line));
+  --workflow-radius: 12px;
+  background: var(--qms-page);
+}
+.qms-audit-occurrence-shell[data-audit-stage="closing"] { --workflow-accent: #725281; }
+.qms-audit-occurrence-shell[data-audit-stage="follow-up"] { --workflow-accent: #956026; }
+.qms-audit-occurrence-shell[data-audit-stage="archive"] { --workflow-accent: #45698d; }
+[data-color-scheme="dark"] .qms-audit-occurrence-shell[data-audit-stage] { --workflow-accent: #8cd4c6; }
+[data-color-scheme="dark"] .qms-audit-occurrence-shell[data-audit-stage="closing"] { --workflow-accent: #cfafe1; }
+[data-color-scheme="dark"] .qms-audit-occurrence-shell[data-audit-stage="follow-up"] { --workflow-accent: #e1bd85; }
+[data-color-scheme="dark"] .qms-audit-occurrence-shell[data-audit-stage="archive"] { --workflow-accent: #9cc4e8; }
+.qms-audit-occurrence-shell[data-audit-stage] > .qms-audit-session-rail {
+  position: relative;
+  padding: 18px 24px 0;
+  gap: 14px;
+  background: var(--qms-panel);
+  border-bottom: 1px solid var(--workflow-border);
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__title {
+  font-size: clamp(19px, 1.8vw, 26px);
+  font-weight: 500;
+  letter-spacing: -.025em;
+  line-height: 1.3;
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__meta-row { gap: 10px; margin-top: 4px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__ref { color: var(--qms-muted); font-size: 12px; }
+.audit-workflow-current { color: var(--qms-muted); font-size: 11px; font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__stage-chip {
+  color: var(--workflow-accent); background: var(--workflow-tint); padding: 3px 9px; border-radius: 20px; font-weight: 500;
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__steps {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 0 0 14px; align-items: stretch;
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__line { display: none; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step {
+  display: flex; position: relative; min-width: 0; min-height: 60px; gap: 10px; padding: 10px 12px;
+  border: 1px solid transparent; border-radius: 9px; box-shadow: none;
+  background: var(--qms-page); color: var(--qms-text); font-weight: 400; opacity: 1;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step:hover { background: var(--workflow-tint); border-color: var(--workflow-border); transform: translateY(-1px); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step.is-selected {
+  background: var(--workflow-tint); border-color: var(--workflow-accent); box-shadow: inset 0 -2px var(--workflow-accent);
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__icon {
+  width: 30px; height: 30px; flex: 0 0 30px; color: var(--workflow-accent); background: var(--qms-panel); border-radius: 8px;
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__copy { display: grid; gap: 3px; min-width: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__label { font-size: 13px; font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__copy small { font-size: 11px; color: var(--qms-muted); line-height: 1.3; white-space: normal; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__number { margin-left: auto; align-self: flex-start; font-size: 10px; color: var(--qms-muted); font-variant-numeric: tabular-nums; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step.is-complete .qms-audit-session-step__icon { background: var(--workflow-tint); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__functional { gap: 4px; border: 0; padding: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__functional-link { min-height: 40px; padding: 8px 14px; border: 0; border-radius: 6px 6px 0 0; font-size: 12px; font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__functional-link.is-selected { color: var(--workflow-accent); background: var(--workflow-tint); box-shadow: inset 0 -2px var(--workflow-accent); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__authority { padding: 8px 0; font-size: 12px; border-color: var(--workflow-border); }
+.qms-audit-occurrence-shell[data-audit-stage] > .qms-audit-occurrence-shell__body { padding: 0 20px 24px; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-occurrence-stage, .qms-audit-closing, .qms-audit-archive) {
+  margin: 18px 0 0; border: 0; box-shadow: none; background: transparent;
+}
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__toolbar, .qms-audit-prepare-stage__toolbar, .qms-audit-closing__header, .qms-occurrence-stage__header, .qms-audit-archive__header) {
+  padding: 22px 24px; margin: 0 0 18px; gap: 18px;
+  background: linear-gradient(115deg, var(--workflow-tint), var(--qms-panel) 78%);
+  border: 1px solid var(--workflow-border); border-left: 4px solid var(--workflow-accent); border-radius: var(--workflow-radius);
+}
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__title, .qms-audit-prepare-stage__title, .qms-audit-closing__header h2, .qms-occurrence-stage__header h2, .qms-audit-archive__header h2) {
+  font-size: clamp(23px, 2.1vw, 30px); font-weight: 500; letter-spacing: -.035em; margin: 0; line-height: 1.25;
+}
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__helper, .qms-audit-prepare-stage__helper, .qms-audit-closing__helper, .qms-occurrence-stage__header p) { font-size: 13px; line-height: 1.65; max-width: 65ch; margin-top: 6px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare-stage__eyebrow { font-size: 11px; color: var(--workflow-accent); letter-spacing: .08em; text-transform: uppercase; font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-occurrence-stage__next, button.is-primary):not(:disabled, .is-disabled) { background: var(--accent-primary); color: var(--brand-accent-contrast); border-color: var(--accent-primary); }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-occurrence-stage__next.is-disabled, button.is-primary:disabled) { background: var(--surface-soft); color: var(--qms-muted); border: 1px solid var(--qms-line); opacity: 1; box-shadow: none; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-occurrence-toolbar-btn { font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(button, input, select, textarea) { font-family: inherit; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(input, select, textarea, p, small) { font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__chip, .qms-audit-prepare-stage__meta-chip, .qms-audit-session-step__copy small, .qms-audit-session-rail__progress-pct) { font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-prepare-stage__section, .qms-audit-setup-tile__body, .qms-audit-closing__card, .qms-occurrence-stage__card, .qms-audit-archive__card) p { font-size: 14px; line-height: 1.65; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-closing__card, .qms-occurrence-stage__card, .qms-audit-archive__card) small { font-size: 12px; line-height: 1.55; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__helper, .qms-audit-prepare-stage__helper) { font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { border-radius: 8px; background: var(--qms-panel); }
+.qms-audit-occurrence-shell[data-audit-stage] :is(button, a, summary, input, select, textarea):focus-visible { outline: 2px solid var(--workflow-accent); outline-offset: 3px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__navigation { gap: 6px; padding: 5px; border: 1px solid var(--qms-line); border-radius: 10px; background: var(--qms-panel); margin: 14px 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__navigation a { font-size: 12px; padding: 8px 12px; min-height: 44px; border-radius: 7px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__navigation a span { background: var(--workflow-tint); color: var(--workflow-accent); padding: 2px 6px; border-radius: 5px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__offline-pack { padding: 14px 18px; margin: 14px 0; border: 1px solid var(--workflow-border); background: var(--workflow-tint); border-radius: 10px; }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-disclosure .qms-audit-prepare__offline-pack { margin: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare-stage__stack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare-stage__stack > section { grid-column: 1 / -1; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-prepare-stage__section, .qms-audit-setup-tile, .qms-audit-closing__card, .qms-occurrence-stage__card, .qms-audit-archive__card) {
+  padding: 20px; border: 1px solid var(--qms-line); border-radius: var(--workflow-radius); background: var(--qms-panel); box-shadow: 0 3px 12px rgb(0 0 0 / .025);
+}
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-prepare-stage__section > header, .qms-audit-closing__card > header, .qms-audit-archive__card > header) { gap: 12px; margin-bottom: 18px; padding: 0 0 14px; border-bottom: 1px solid var(--qms-line-soft); align-items: center; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-prepare-stage__section > header h3, .qms-audit-closing__card h3, .qms-occurrence-stage__card h3) { font-size: 16px; font-weight: 500; line-height: 1.4; }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-section-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; height: 36px; border-radius: 10px; background: var(--workflow-tint); color: var(--workflow-accent); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__readiness-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__readiness-list > div { padding: 12px; border: 1px solid var(--qms-line-soft); border-radius: 8px; background: var(--qms-page); font-size: 13px; font-weight: 400; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__readiness-list .is-complete { border-color: var(--workflow-border); background: var(--workflow-tint); color: var(--qms-text); }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-disclosure { padding: 0; align-self: start; overflow: hidden; }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-disclosure[open] { grid-column: 1 / -1; border-color: var(--workflow-border); }
+.audit-workflow-disclosure > summary { display: flex; gap: 12px; align-items: center; padding: 16px 20px; cursor: pointer; list-style: none; min-height: 76px; box-sizing: border-box; }
+.audit-workflow-disclosure > summary::-webkit-details-marker { display: none; }
+.audit-workflow-disclosure > summary > span:nth-child(2) { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.audit-workflow-disclosure__title { font-size: 15px; font-weight: 500; color: var(--qms-text); }
+.audit-workflow-disclosure > summary small { font-size: 12px; color: var(--qms-muted); line-height: 1.5; }
+.audit-workflow-disclosure__chevron { color: var(--qms-muted); transition: transform 180ms ease; flex-shrink: 0; }
+.audit-workflow-disclosure[open] > summary .audit-workflow-disclosure__chevron { transform: rotate(180deg); }
+.audit-workflow-disclosure__content { padding: 0 20px 20px; }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-closing-context { align-self: stretch; margin-top: 18px; border: 1px solid var(--workflow-border); border-radius: var(--workflow-radius); background: var(--qms-panel); }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-closing-context .qms-occurrence-stage--closing-record { margin-top: 0; }
+.audit-workflow-disclosure[open] .audit-workflow-disclosure__content { animation: audit-workflow-reveal 180ms ease-out; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-stage__tiles { display: grid; gap: 14px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-tile { padding: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-tile > summary { padding: 18px 20px; min-height: 72px; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-tile__step { background: var(--workflow-tint); color: var(--workflow-accent); border-color: var(--workflow-border); width: 32px; height: 32px; border-radius: 9px; font-size: 14px; font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-tile__title { font-size: 16px; font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-tile[open] { border-color: var(--workflow-border); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-closing__card.is-current { border-color: var(--workflow-accent); border-left-width: 3px; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; list-style: none; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary::-webkit-details-marker { display: none; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary > div { flex: 1; min-width: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary h3 { margin: 0; font-size: 16px; font-weight: 500; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary small { display: block; margin-top: 4px; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card > summary::after { content: ""; width: 7px; height: 7px; flex: 0 0 7px; border-right: 1.5px solid var(--qms-muted); border-bottom: 1.5px solid var(--qms-muted); transform: rotate(45deg); margin: 0 4px 4px 8px; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card[open] > summary { border-bottom: 1px solid var(--qms-line-soft); padding-bottom: 14px; margin-bottom: 18px; }
+.qms-audit-occurrence-shell[data-audit-stage] details.qms-audit-closing__card[open] > summary::after { transform: rotate(225deg); margin-bottom: 0; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-closing__card.is-locked { opacity: 1; background: var(--qms-panel); }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-closing__metrics, .qms-audit-archive__facts) > div { border-radius: 8px; padding: 12px; background: var(--workflow-tint); }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-closing__metrics strong, .qms-audit-archive__facts dd) { font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-stage-load-error__copy { max-width: 60ch; }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-stage-load-error__copy strong { font-weight: 500; font-size: 19px; }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-archive__blocker, .qms-audit-closing__blocker, .qms-audit-prepare-stage__notice.is-warning, .qms-audit-setup-stage__readiness:not(.is-ready), .qms-audit-setup-stage__supporting-warning) {
+  background: var(--alert-warning-bg); color: var(--alert-warning-text); border-color: color-mix(in srgb, var(--alert-warning-text) 30%, var(--qms-line));
+}
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-archive__blocker, .qms-audit-closing__blocker, .qms-audit-setup-stage__readiness:not(.is-ready)) :is(li, p, strong, small, span) { color: var(--alert-warning-text); }
+.qms-audit-occurrence-shell[data-audit-stage] :is(.qms-occurrence-stage__message.is-error, .qms-audit-closing__error, .qms-audit-archive__message.is-error, .qms-audit-setup-stage__required-guide) {
+  color: var(--alert-error-text); background: var(--alert-error-bg); border-color: var(--alert-error-border);
+}
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-setup-stage__readiness.is-ready { color: var(--qms-text); background: color-mix(in srgb, var(--accent-success) 10%, var(--qms-panel)); border-color: color-mix(in srgb, var(--accent-success) 30%, var(--qms-line)); }
+.qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare-stage__notice.is-info { color: var(--qms-text); background: var(--workflow-tint); border-color: var(--workflow-border); }
+@keyframes audit-workflow-reveal { from { opacity: .4; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-unavailable {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 18px;
+  padding: 28px; border: 1px solid var(--workflow-border); border-radius: var(--workflow-radius); background: var(--qms-panel); text-align: left;
+}
+.audit-workflow-unavailable > svg { color: var(--workflow-accent); flex: 0 0 24px; }
+.audit-workflow-unavailable .qms-audit-stage-load-error__actions { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
+.audit-workflow-unavailable .qms-audit-stage-load-error__actions :is(a, button) { display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 8px; min-height: 44px; }
+.audit-workflow-loading { display: grid; align-content: start; grid-auto-rows: max-content; gap: 20px; padding: 20px 0; }
+.audit-workflow-loading__hero { display: grid; gap: 12px; padding: 24px; border: 1px solid var(--workflow-border); background: var(--workflow-tint); border-radius: var(--workflow-radius); }
+.audit-workflow-loading i { display: block; height: 14px; background: color-mix(in srgb, var(--qms-muted) 13%, transparent); border-radius: 5px; animation: audit-workflow-pulse 1.6s ease-in-out infinite alternate; }
+.audit-workflow-loading__hero i:first-child { height: 26px; width: min(300px, 75%); }
+.audit-workflow-loading__hero i:last-child { width: min(480px, 95%); }
+.audit-workflow-loading__body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.audit-workflow-loading__body i { height: 160px; border: 1px solid var(--qms-line); background: var(--qms-panel); }
+@keyframes audit-workflow-pulse { from { opacity: .45; } to { opacity: 1; } }
+.audit-workflow-empty { display: grid; justify-items: start; gap: 10px; padding: 20px; background: var(--workflow-tint); border-radius: 9px; }
+.audit-workflow-empty > svg { color: var(--workflow-accent); }
+.audit-workflow-empty h4 { font-size: 17px; font-weight: 500; margin: 0; }
+.audit-workflow-empty p { margin: 0; color: var(--qms-muted); max-width: 50ch; }
+.audit-workflow-empty a { display: inline-flex; align-items: center; gap: 8px; color: var(--workflow-accent); font-size: 13px; min-height: 44px; }
+@media (max-width: 1050px) {
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__steps { display: flex; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: thin; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step { flex: 0 0 160px; scroll-snap-align: center; }
+}
+@media (max-width: 640px) {
+  .qms-audit-occurrence-shell[data-audit-stage] > .qms-audit-session-rail { padding: 12px 12px 0; gap: 10px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__title { font-size: 20px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__meta-row { gap: 6px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__steps { padding-bottom: 10px; gap: 6px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step { flex-basis: 144px; padding: 8px; min-height: 56px; gap: 8px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step__number { display: none; }
+  .qms-audit-occurrence-shell[data-audit-stage] > .qms-audit-occurrence-shell__body { padding: 0 10px 16px; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__toolbar, .qms-audit-prepare-stage__toolbar, .qms-audit-closing__header, .qms-occurrence-stage__header, .qms-audit-archive__header) { padding: 16px; margin-bottom: 12px; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__toolbar, .qms-audit-prepare-stage__toolbar, .qms-audit-closing__header, .qms-occurrence-stage__header, .qms-audit-archive__header) { flex-direction: column; align-items: stretch; gap: 12px; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__intro, .qms-audit-prepare-stage__intro) { flex: none; width: 100%; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__toolbar-actions, .qms-audit-prepare-stage__toolbar-actions, .qms-audit-closing__header-actions, .qms-occurrence-stage__header-actions) { width: 100%; display: flex; flex-wrap: wrap; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__authority { flex-direction: row; flex-wrap: nowrap; align-items: center; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-rail__next-action { flex-shrink: 0; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-closing__body { grid-template-columns: minmax(0, 1fr); }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-occurrence-stage__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-closing__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-setup-stage__title, .qms-audit-prepare-stage__title, .qms-audit-closing__header h2, .qms-occurrence-stage__header h2, .qms-audit-archive__header h2) { font-size: 23px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare-stage__stack { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(.qms-audit-prepare-stage__section, .qms-audit-closing__card, .qms-occurrence-stage__card, .qms-audit-archive__card) { padding: 14px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .audit-workflow-disclosure { padding: 0; }
+  .audit-workflow-disclosure > summary { padding: 14px; }
+  .audit-workflow-disclosure__content { padding: 0 14px 14px; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__navigation { overflow-x: auto; flex-wrap: nowrap; }
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-prepare__navigation a { white-space: nowrap; flex-shrink: 0; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(button, .qms-occurrence-stage__next, .qms-audit-session-rail__functional-link) { min-height: 44px; }
+  .audit-workflow-loading__body { grid-template-columns: 1fr; }
+  .audit-workflow-loading__body i { height: 90px; }
+  .qms-audit-occurrence-shell[data-audit-stage] :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qms-audit-occurrence-shell[data-audit-stage] .qms-audit-session-step, .audit-workflow-disclosure__chevron { transition: none; transform: none; }
+  .audit-workflow-disclosure[open] .audit-workflow-disclosure__content { animation: none; }
+  .audit-workflow-loading i { animation: none; }
+}
+:is(html, body)[data-portal-motion="reduced"] :is(.qms-audit-session-step, .audit-workflow-disclosure__chevron) { transition: none; transform: none; }
+:is(html, body)[data-portal-motion="reduced"] .audit-workflow-disclosure__content { animation: none; }
+:is(html, body)[data-portal-motion="reduced"] .audit-workflow-loading i { animation: none; }

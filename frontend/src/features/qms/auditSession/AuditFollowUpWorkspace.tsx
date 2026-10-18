@@ -1,8 +1,9 @@
+import AuditStageLoading from "./AuditStageLoading";
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, ExternalLink, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
@@ -145,7 +146,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
   ], []);
 
-  if (auditQuery.isPending || (Boolean(auditId) && (carsQuery.isPending || closureQuery.isPending))) return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit follow-up…</section>;
+  if (auditQuery.isPending || (Boolean(auditId) && (carsQuery.isPending || closureQuery.isPending))) return <AuditStageLoading label="follow-up" />;
   if (loadError || !auditQuery.data || !closure) {
     return (
       <AuditStageLoadError
@@ -192,7 +193,7 @@ const AuditFollowUpWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <main>
           <article className="qms-occurrence-stage__card">
             <header><Clock3 size={18} /><div><h3>Corrective-action queue</h3><small>Select a CAR to see its owner, milestones and closure requirements.</small></div></header>
-            {!cars.length ? <p>No corrective actions are linked to this audit.</p> : <div className="qms-followup-car-grid ag-theme-alpine"><AgGridReact<AuditCar> rowData={cars} columnDefs={carColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.id} rowHeight={48} headerHeight={34} domLayout="autoHeight" animateRows={false} suppressCellFocus onRowClicked={(event: RowClickedEvent<AuditCar>) => event.data && setSelectedCarId(event.data.id)} rowClassRules={{ "is-selected": ({ data }) => data?.id === effectiveSelectedCarId }} /></div>}
+            {!cars.length ? <div className="audit-workflow-empty"><Clock3 size={26} aria-hidden /><h4>No corrective actions yet</h4><p>Linked corrective actions appear here as audit findings are recorded.</p><Link to={auditSessionPath(amoCode, auditKey, "live")}>Review fieldwork <ArrowRight size={15} aria-hidden /></Link></div> : <div className="qms-followup-car-grid ag-theme-alpine"><AgGridReact<AuditCar> rowData={cars} columnDefs={carColumns} defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }} getRowId={({ data }) => data.id} rowHeight={48} headerHeight={34} domLayout="autoHeight" animateRows={false} suppressCellFocus onRowClicked={(event: RowClickedEvent<AuditCar>) => event.data && setSelectedCarId(event.data.id)} rowClassRules={{ "is-selected": ({ data }) => data?.id === effectiveSelectedCarId }} /></div>}
           </article>
 
           {selectedCar ? <article className="qms-occurrence-stage__card">

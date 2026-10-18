@@ -1,6 +1,6 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Check, Circle } from "lucide-react";
+import { Archive, Check, ClipboardCheck, FileCheck2, ListChecks, RotateCcw, Settings2 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 import { auditOccurrenceQueryKey, resolveAuditOccurrence } from "../../../services/qmsAuditOccurrenceResolver";
@@ -24,12 +24,32 @@ const STAGE_LABELS: Record<AuditSessionStageId, string> = {
   archive: "Archive",
 };
 
+const STAGE_PRESENTATION = {
+  setup: { icon: Settings2, detail: "Scope & team" },
+  prepare: { icon: ClipboardCheck, detail: "Checklist & evidence" },
+  live: { icon: ListChecks, detail: "Assess & record" },
+  closing: { icon: FileCheck2, detail: "Report & approve" },
+  "follow-up": { icon: RotateCcw, detail: "Corrective actions" },
+  archive: { icon: Archive, detail: "Retention & records" },
+};
+
 type Props = { amoCode: string; auditKey: string };
 
 const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
   const routeStage = auditSessionStageFromPath(location.pathname);
   const functionalTab = auditOccurrenceFunctionalTabFromLocation(location.pathname, location.hash);
+  const navigation = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const nav = navigation.current;
+      const active = nav?.querySelector<HTMLElement>('[aria-current="step"]');
+      if (nav && active && nav.scrollWidth > nav.clientWidth) {
+        nav.scrollLeft = active.offsetLeft - nav.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [routeStage]);
 
   const auditQuery = useQuery({
     queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
@@ -52,7 +72,6 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
 
   const authoritativeId = sessionQuery.data?.current_stage_id as AuditSessionStageId | undefined;
   const viewingOtherStage = Boolean(routeStage && authoritativeId && routeStage !== authoritativeId);
-  const nextStageHref = authoritativeId ? auditSessionPath(amoCode, auditKey, authoritativeId) : null;
   const nextStageIndex = authoritativeId ? AUDIT_SESSION_STAGES.indexOf(authoritativeId) : -1;
 
   const stageTabs = auditOccurrenceFunctionalTabsForStage(routeStage);
@@ -62,6 +81,8 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     routeStage && STAGE_LABELS[routeStage]
       ? STAGE_LABELS[routeStage]
       : sessionQuery.data?.current_stage_label || null;
+
+  if (routeStage === "live") return null;
 
   return (
     <section className="qms-audit-session-rail qms-audit-session-rail--progress" aria-label="Audit occurrence progress">
@@ -73,6 +94,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
           <div className="qms-audit-session-rail__meta-row">
             <span className="qms-audit-session-rail__ref">{auditRef}</span>
             {stageChip ? <span className="qms-audit-session-rail__stage-chip">{stageChip}</span> : null}
+            {viewingOtherStage && authoritativeId ? <span className="audit-workflow-current">Current: {STAGE_LABELS[authoritativeId]}</span> : null}
             {sessionQuery.isError || auditQuery.isError ? (
               <span className="qms-audit-session-rail__degraded" title="Authoritative session state could not be verified.">
                 State unavailable
@@ -86,7 +108,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       </div>
 
-      <nav className="qms-audit-session-rail__steps" aria-label="Lifecycle progress">
+      <nav ref={navigation} className="qms-audit-session-rail__steps" aria-label="Lifecycle progress">
         {stageState.map(({ id, server }, index) => {
           const selected = routeStage === id || (!routeStage && server?.active === true);
           const complete = server?.complete === true;
@@ -98,6 +120,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
             !complete &&
             !authoritative;
           const muted = !selected && !authoritative && !isNext && !complete;
+          const StageIcon = STAGE_PRESENTATION[id].icon;
           return (
             <React.Fragment key={id}>
               <Link
@@ -121,9 +144,10 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
                 }
               >
                 <span className="qms-audit-session-step__icon" aria-hidden="true">
-                  {complete ? <Check size={12} /> : <Circle size={8} />}
+                  {complete ? <Check size={17} /> : <StageIcon size={17} />}
                 </span>
-                <span className="qms-audit-session-step__label">{STAGE_LABELS[id]}</span>
+                <span className="qms-audit-session-step__copy"><span className="qms-audit-session-step__label">{STAGE_LABELS[id]}</span><small>{STAGE_PRESENTATION[id].detail}</small></span>
+                <span className="qms-audit-session-step__number" aria-hidden>{String(index + 1).padStart(2, "0")}</span>
               </Link>
               {index < stageState.length - 1 ? <span className="qms-audit-session-step__line" aria-hidden="true" /> : null}
             </React.Fragment>
@@ -131,26 +155,8 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
         })}
       </nav>
 
-      {sessionQuery.data && viewingOtherStage ? (
-        <div className="qms-audit-session-rail__authority" role="status">
-          <span>
-            Current workflow stage: <strong>{sessionQuery.data.current_stage_label}</strong>
-            {routeStage ? (
-              <span className="qms-audit-session-rail__viewing"> · Viewing the saved {STAGE_LABELS[routeStage]} record</span>
-            ) : null}
-          </span>
-          {nextStageHref && routeStage !== "setup" ? (
-            <Link to={nextStageHref} className="qms-audit-session-rail__next-action">
-              Go to {sessionQuery.data.current_stage_label}
-              <ArrowRight size={14} aria-hidden />
-            </Link>
-          ) : null}
-        </div>
-      ) : null}
-
       {stageTabs.length > 1 ? (
         <nav className="qms-audit-session-rail__functional" aria-label={`${stageChip || "Current stage"} workspace`}>
-          <span className="qms-audit-session-rail__functional-label">This stage</span>
           {stageTabs.map((tab) => {
           const selected = functionalTab === tab.id;
           return (

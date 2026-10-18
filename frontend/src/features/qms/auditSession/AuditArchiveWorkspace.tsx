@@ -1,3 +1,4 @@
+import AuditStageLoading from "./AuditStageLoading";
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -214,7 +215,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }
   };
 
-  if (auditQuery.isPending || (Boolean(auditId) && governanceQuery.isPending)) return <div className="qms-audit-archive qms-audit-archive--loading">Loading governed audit archive…</div>;
+  if (auditQuery.isPending || (Boolean(auditId) && governanceQuery.isPending)) return <AuditStageLoading label="archive" />;
   if (auditQuery.error || !auditQuery.data) {
     return (
       <AuditStageLoadError
