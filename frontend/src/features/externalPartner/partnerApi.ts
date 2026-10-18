@@ -64,7 +64,7 @@ export function partnerUrl(tenant:string,path:string):string {
   return `${getApiBaseUrl()}${BASE}/partner/${encodeURIComponent(tenant)}/${path.replace(/^\//,"")}`;
 }
 export async function partnerRequest<T>(tenant:string,path:string,options:{
-  method?: "GET"|"POST"|"PATCH"; body?: unknown; csrf?:string; signal?:AbortSignal;
+  method?: "GET"|"POST"|"PATCH"|"PUT"; body?: unknown; csrf?:string; signal?:AbortSignal;
 }={}): Promise<T> {
   const response=await fetch(partnerUrl(tenant,path),{
     method:options.method||"GET",credentials:"include",signal:options.signal,cache:"no-store",
