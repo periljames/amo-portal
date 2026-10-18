@@ -15,7 +15,6 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import text, inspect
-from sqlalchemy.exc import IntegrityError
 
 from amodb.apps.accounts import models as accounts
 from amodb.apps.quality import models as quality
@@ -115,10 +114,10 @@ PROCUREMENT_ACTIONS = {
 
 def defaults():
     return {
-        "lead_days_json": DEFAULT_LEADS[:],
-        "escalation_days_json": [0, 3, 7],
+        "lead_days_json": {name: DEFAULT_LEADS[:] for name in DEPARTMENTS},
+        "escalation_days_json": {name: [0, 3, 7] for name in DEPARTMENTS},
         "routes_json": {key: list(value) for key, value in DEFAULT_ROUTES.items()},
-        "channels_json": {"in_app": True, "email": False},
+        "channels_json": {name: {"in_app": True, "email": False} for name in DEPARTMENTS},
         "templates_json": {},
         "digest_json": {"enabled": False, "hour": 8},
         "quiet_hours_json": {"enabled": False, "start": "21:00", "end": "07:00"},
@@ -235,14 +234,14 @@ def _schedule_expiries(db, amo, local_now, zone, policy):
                 due_date = _local_day(_utc(target), zone)
             else:
                 due_date = target
-            for lead in policy["lead_days_json"]:
+            for lead in policy["lead_days_json"].get(CATALOG[event], DEFAULT_LEADS):
                 remind_date = due_date - timedelta(days=lead)
                 # Scan lookahead is the upcoming day, not all history; first
                 # deployment deliberately schedules expired obligations as overdue.
                 if remind_date > _local_day(local_now, zone) + timedelta(days=1):
                     continue
                 remind_at = datetime.combine(remind_date, time(8, 0), zone).astimezone(timezone.utc)
-                count += _queue(db, amo=amo, event=event, source=source, source_id=row["id"],
+                count += _queue(db, amo=amo, event=event, source=source, source_id=str(row["id"])+":"+str(lead),
                                 stamp=str(due_date)+":"+str(lead), supplier=row["supplier_id"],
                                 due=remind_at, cancel_older=True)
     return count
@@ -309,6 +308,7 @@ def _dispatch(db, amo, code, zone, policy, now):
        AND (next_attempt_at IS NULL OR next_attempt_at<=:now)
        ORDER BY due_at,id LIMIT 100 FOR UPDATE SKIP LOCKED""", amo=amo,now=now)
     for job in jobs:
+        savepoint = db.begin_nested()
         try:
             recipient = None
             if job["recipient_user_id"]:
@@ -319,6 +319,7 @@ def _dispatch(db, amo, code, zone, policy, now):
                 if recipient is None:
                     db.execute(text("""UPDATE external_provider_alert_jobs
                          SET status='CANCELLED',cancelled_at=NOW() WHERE id=:id"""), {"id":job["id"]})
+                    savepoint.commit()
                     continue
             elif job["recipient_identity_id"]:
                 # Never deliver to revoked identities or grants. A vendor may
@@ -335,14 +336,17 @@ def _dispatch(db, amo, code, zone, policy, now):
                     (g["object_scope_json"] or {}).get(scope_kind, [])] for g in grant):
                     db.execute(text("""UPDATE external_provider_alert_jobs
                          SET status='CANCELLED',cancelled_at=NOW() WHERE id=:id"""), {"id":job["id"]})
+                    savepoint.commit()
                     continue
             else:
+                savepoint.commit()
                 continue
             # Sensitive descriptions, evidence names, internal notes and
             # object-store URLs are deliberately absent from notification text.
             message = "External provider action: " + job["event_key"].replace(".", " / ").replace("_", " ")
             label = "Review assigned provider record"
-            if not job["in_app_id"] and policy["channels_json"].get("in_app", True):
+            channels = policy["channels_json"].get(CATALOG[job["event_key"]], {"in_app":True,"email":False})
+            if not job["in_app_id"] and channels.get("in_app", True):
                 if recipient:
                     notice = quality.QMSNotification(
                         amo_id=amo, user_id=str(recipient.id), message=message,
@@ -366,7 +370,7 @@ def _dispatch(db, amo, code, zone, policy, now):
                    {"notification":new_id,"id":job["id"]})
             # A Resend API acknowledgement is NOT email delivery, inbox placement
             # or a read receipt. That evidence belongs to the signed webhook log.
-            email_on = policy["channels_json"].get("email",False) and recipient is not None
+            email_on = channels.get("email",False) and recipient is not None
             if email_on and not job["email_log_id"]:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
@@ -377,6 +381,7 @@ def _dispatch(db, amo, code, zone, policy, now):
                     db.execute(text("""UPDATE external_provider_alert_jobs SET
                         status='RETRY',next_attempt_at=:retry,updated_at=NOW()
                         WHERE id=:id"""),{"retry":retry,"id":job["id"]})
+                    savepoint.commit()
                     continue
                 email = mail_service.send_email("provider.lifecycle",getattr(recipient,"email",None),
                     "External provider action requires review",
@@ -389,7 +394,9 @@ def _dispatch(db, amo, code, zone, policy, now):
                   delivered_at=NOW(),next_attempt_at=NULL,last_error=NULL,updated_at=NOW()
                   WHERE id=:id"""),{"id":job["id"]})
             delivered += 1
+            savepoint.commit()
         except Exception as exc:
+            savepoint.rollback()
             # Roll back only the failing recipient. Do not erase other notices.
             LOGGER.exception("Provider alert dispatch failed %s",job["id"])
             attempts = int(job["attempts"])+1
