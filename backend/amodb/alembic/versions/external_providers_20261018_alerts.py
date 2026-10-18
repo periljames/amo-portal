@@ -11,7 +11,7 @@ down_revision = "extprov_261017_main_merge"
 branch_labels = None
 depends_on = None
 
-TABLES = ("external_provider_alert_policies", "external_provider_alert_jobs")
+TABLES = ("external_provider_alert_policies", "external_provider_alert_jobs", "external_provider_alert_preferences")
 
 
 def upgrade():
@@ -68,13 +68,31 @@ def upgrade():
                     ["amo_id", "source_kind", "source_id", "status"])
     op.create_index("ix_ext_alert_jobs_tenant_recipient", "external_provider_alert_jobs",
                     ["amo_id", "recipient_user_id", "created_at"])
+    op.create_table(
+        "external_provider_alert_preferences",
+        sa.Column("amo_id", sa.String(36), nullable=False),
+        sa.Column("tenant_provider_id", sa.String(36), nullable=False),
+        sa.Column("identity_id", sa.String(36), sa.ForeignKey("external_identities.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("revision", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("in_app_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("email_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("digest_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.PrimaryKeyConstraint("amo_id", "tenant_provider_id", "identity_id", name="pk_ext_alert_preferences"),
+        sa.ForeignKeyConstraint(["amo_id", "tenant_provider_id"],
+            ["external_tenant_providers.amo_id", "external_tenant_providers.id"], ondelete="RESTRICT"),
+        sa.CheckConstraint("revision >= 1", name="ck_ext_alert_pref_revision"),
+    )
     if op.get_bind().dialect.name == "postgresql":
         for table in TABLES:
             op.execute(sa.text('ALTER TABLE "' + table + '" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text('ALTER TABLE "' + table + '" FORCE ROW LEVEL SECURITY'))
+            guard = (" AND (tenant_provider_id = NULLIF(current_setting('app.external_provider_id', true), '') "
+                     "OR current_setting('app.external_provider_id', true) = '__INTERNAL_QUALITY_REVIEW__')"
+                     if table == "external_provider_alert_preferences" else "")
+            condition = "amo_id = NULLIF(current_setting('app.tenant_id', true), '')" + guard
             op.execute(sa.text('CREATE POLICY "' + table + '_tenant" ON "' + table + '" '
-                "USING (amo_id = NULLIF(current_setting('app.tenant_id', true), '')) "
-                "WITH CHECK (amo_id = NULLIF(current_setting('app.tenant_id', true), ''))"))
+                               'USING (' + condition + ') WITH CHECK (' + condition + ')'))
 
 
 def downgrade():
