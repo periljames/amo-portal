@@ -48,6 +48,7 @@ def main() -> None:
     # Import after pool isolation: these modules create/use SQLAlchemy sessions.
     from amodb.apps.quality.planner_schedule_router import start_quality_planner_scheduler, stop_quality_planner_scheduler
     from amodb.apps.quality.provider_surveillance_jobs import scan_due_provider_reviews
+    from amodb.apps.procurement.provider_alerts import scan_provider_alerts
     from amodb.apps.reliability import advanced_scheduler as reliability_scheduler
     from amodb.jobs.portal_job_supervisor import PortalJobSupervisor
     from amodb.jobs import platform_monitor
@@ -124,6 +125,7 @@ def main() -> None:
                 # unexpected tenant-specific database error does not kill workers.
                 try:
                     scan_due_provider_reviews()
+                    scan_provider_alerts()
                 except Exception:
                     logging.exception("Scheduled provider surveillance reminder scan failed")
                 next_provider_review = now + provider_review_interval
