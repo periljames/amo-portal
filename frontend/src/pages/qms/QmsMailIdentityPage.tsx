@@ -25,7 +25,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
   const [notice, setNotice] = useState("");
   const [testResult, setTestResult] = useState<QmsMailTestResult | null>(null);
 
-  const apply = (data: QmsMailIdentity) => {
+  const apply = useCallback((data: QmsMailIdentity) => {
     setSettings(data);
     setDraft({
       from_name: data.from_name,
@@ -36,7 +36,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
     });
     setSenderChoice(data.sender_mode);
     setReplyChoice(data.reply_mode);
-  };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,7 +48,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [amoCode]);
+  }, [amoCode, apply]);
 
   useEffect(() => { void load(); }, [load]);
 
