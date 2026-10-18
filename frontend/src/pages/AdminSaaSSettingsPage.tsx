@@ -198,6 +198,7 @@ export default function AdminSaaSSettingsPage() {
     );
     if (
       setup?.scope === "TENANT"
+      && provider.provider !== "resend"
       && provider.scope === "PLATFORM"
       && provider.has_secret
       && !clearSecret
@@ -339,9 +340,12 @@ export default function AdminSaaSSettingsPage() {
   const jobs: SaaSAdminJob[] = setup?.jobs ?? [];
   const chatModels = aiModels.filter((item) => item.purpose !== "embedding");
   const embeddingModels = aiModels.filter((item) => item.purpose === "embedding");
-  const providerConfigFields = provider?.provider === "openai"
-    ? provider.config_fields.filter((field) => !["model", "default_model", "lightweight_model", "embedding_model"].includes(field))
-    : provider?.config_fields ?? [];
+  const tenantResendIdentity = setup?.scope === "TENANT" && provider?.provider === "resend";
+  const providerConfigFields = tenantResendIdentity
+    ? ["from_name", "from_email", "reply_to"]
+    : provider?.provider === "openai"
+      ? provider.config_fields.filter((field) => !["model", "default_model", "lightweight_model", "embedding_model"].includes(field))
+      : provider?.config_fields ?? [];
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="admin">
@@ -429,15 +433,21 @@ export default function AdminSaaSSettingsPage() {
                     </div>
                     <Status value={provider.status} />
                   </div>
-                  {setup?.scope === "TENANT" && provider.scope === "PLATFORM" ? (
+                  {tenantResendIdentity ? (
+                    <div className="saas-admin__alert">
+                      Resend transport credentials remain platform-managed. This tenant controls only its sender name/address and Reply-To routing. Leave Reply-To blank to route replies to active Quality Manager and Quality Officer accounts.
+                    </div>
+                  ) : setup?.scope === "TENANT" && provider.scope === "PLATFORM" ? (
                     <div className="saas-admin__alert">
                       This tenant currently inherits the platform default. Saving creates a tenant-specific override; if the platform default contains a secret, enter new tenant credentials before saving.
                     </div>
                   ) : null}
-                  <div className="saas-admin__secret-state">
-                    <strong>{provider.has_secret ? "Encrypted secret stored" : "No secret stored"}</strong>
-                    <span>{provider.secret_fingerprint || "Secret values are never returned to the frontend."}</span>
-                  </div>
+                  {!tenantResendIdentity ? (
+                    <div className="saas-admin__secret-state">
+                      <strong>{provider.has_secret ? "Encrypted secret stored" : "No secret stored"}</strong>
+                      <span>{provider.secret_fingerprint || "Secret values are never returned to the frontend."}</span>
+                    </div>
+                  ) : null}
                   <div className="saas-admin__form-grid">
                     {providerConfigFields.map((field) => (
                       <label key={field}>
@@ -450,7 +460,7 @@ export default function AdminSaaSSettingsPage() {
                         {FIELD_HINTS[field] ? <small>{FIELD_HINTS[field]}</small> : null}
                       </label>
                     ))}
-                    {provider.secret_fields.map((field) => (
+                    {!tenantResendIdentity && provider.secret_fields.map((field) => (
                       <label key={field}>
                         <span>{field.replaceAll("_", " ")}</span>
                         <input
@@ -472,8 +482,8 @@ export default function AdminSaaSSettingsPage() {
                     </label>
                   </div>
                   <div className="saas-admin__checks">
-                    <label><input type="checkbox" checked={providerEnabled} onChange={(event) => setProviderEnabled(event.target.checked)} /> Provider enabled</label>
-                    <label><input type="checkbox" checked={clearSecret} onChange={(event) => setClearSecret(event.target.checked)} /> Clear stored secret</label>
+                    <label><input type="checkbox" checked={providerEnabled} onChange={(event) => setProviderEnabled(event.target.checked)} /> {tenantResendIdentity ? "Tenant sender identity enabled" : "Provider enabled"}</label>
+                    {!tenantResendIdentity ? <label><input type="checkbox" checked={clearSecret} onChange={(event) => setClearSecret(event.target.checked)} /> Clear stored secret</label> : null}
                   </div>
                   {provider.provider === "openai" ? (
                     <section className="saas-admin__ai-plan" aria-labelledby="tenant-ai-plan-heading">
@@ -576,11 +586,13 @@ export default function AdminSaaSSettingsPage() {
                     <button type="button" className="primary" onClick={() => void saveProvider()} disabled={busyAction !== null}>
                       {busyAction === `save:${provider.provider}` ? "Saving…" : "Save encrypted configuration"}
                     </button>
-                    <button type="button" onClick={() => void testProvider()} disabled={busyAction !== null}>
-                      {busyAction === `test:${provider.provider}`
-                        ? provider.provider === "openai" ? "Testing…" : "Queueing…"
-                        : provider.provider === "openai" ? "Test AI connection now" : "Queue backend health check"}
-                    </button>
+                    {!tenantResendIdentity ? (
+                      <button type="button" onClick={() => void testProvider()} disabled={busyAction !== null}>
+                        {busyAction === `test:${provider.provider}`
+                          ? provider.provider === "openai" ? "Testing…" : "Queueing…"
+                          : provider.provider === "openai" ? "Test AI connection now" : "Queue backend health check"}
+                      </button>
+                    ) : null}
                   </div>
                   {provider.last_health_detail ? <p className="saas-admin__health-detail">Last check: {provider.last_health_detail} {provider.last_latency_ms != null ? `(${provider.last_latency_ms} ms)` : ""}</p> : null}
                 </>
