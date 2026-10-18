@@ -177,6 +177,7 @@ const AdminInvoicesPage = lazyDefault(() => import("./pages/AdminInvoicesPage"))
 const AdminInvoiceDetailPage = lazyDefault(() => import("./pages/AdminInvoiceDetailPage"));
 const EmailLogsPage = lazyDefault(() => import("./pages/EmailLogsPage"));
 const EmailServerSettingsPage = lazyDefault(() => import("./pages/EmailServerSettingsPage"));
+const QmsMailIdentityPage = lazyDefault(() => import("./pages/qms/QmsMailIdentityPage"));
 const TrainingPage = lazyDefault(() => import("./pages/MyTrainingPage"));
 const TrainingCompetencePage = lazyDefault(() => import("./pages/training/TrainingOperatingSystemPage"));
 const QmsCanonicalPage = lazyDefault(() => import("./pages/qms/QmsCanonicalPage"));
@@ -845,6 +846,8 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
+
+      <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
