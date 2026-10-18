@@ -764,7 +764,7 @@ export async function downloadTrainingFile(
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/files/${encodeURIComponent(fileId)}/download`,
     headers: authHeaders(),
-    fallbackFilename: `training_file_${fileId}`,
+    fallbackFilename: "training-attachment",
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
       : undefined,
@@ -798,7 +798,7 @@ export async function downloadTrainingUserRecordPdf(userId: string, onProgress?:
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/record-pdf`,
     headers: authHeaders(),
-    fallbackFilename: `training-record-${userId}.pdf`,
+    fallbackFilename: "training-record.pdf",
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
       : undefined,
@@ -814,7 +814,7 @@ export async function downloadTrainingUserEvidencePack(userId: string, onProgres
   return downloadWithXhr({
     url: `${getApiBaseUrl()}/training/users/${encodeURIComponent(userId)}/evidence-pack`,
     headers: authHeaders(),
-    fallbackFilename: `training-evidence-${userId}.zip`,
+    fallbackFilename: "training-evidence.zip",
     onProgress: onProgress
       ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt))
       : undefined,

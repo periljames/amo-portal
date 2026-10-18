@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, FileCheck2, ShieldAlert, X } from "lucide-react";
+import { Eye, EyeOff, FileCheck2, Mail, ShieldAlert, X } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { qmsListFindings } from "../../../services/qms";
 import { listAuditEvidence, type AuditEvidenceArtifact } from "../../../services/qmsAuditEvidence";
 import {
   listAuditFindingReleases,
+  emailReleasedCarInvite,
   releaseAuditFinding,
   type AuditFindingReleaseState,
 } from "../../../services/qmsAuditExternalAccess";
@@ -47,6 +48,15 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DecisionDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
+  const emailMutation = useMutation({
+    mutationFn: (findingId: string) => emailReleasedCarInvite(amoCode, auditId, findingId),
+    onSuccess: (result) => {
+      setDeliveryNotice(result.sent ? `${result.car_number} email accepted · ${result.recipient}` : null);
+      setError(result.sent ? null : result.message);
+    },
+    onError: (cause) => setError(cause instanceof Error ? cause.message : "CAR email could not be sent. Retry delivery."),
+  });
 
   const auditQuery = useQuery({
     queryKey: auditOccurrenceQueryKey(amoCode, auditKey),
@@ -150,9 +160,10 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
       {controlsHost ? createPortal(launcher, controlsHost) : launcher}
       {open ? (
         <aside className="qms-live-release-panel" aria-label="Auditee finding release controls">
-          <header><div><span>EXTERNAL VISIBILITY</span><strong>Released findings</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close finding release controls"><X size={17} /></button></header>
-          <p>Choose which findings the auditee can see. Select each evidence file to share and record a reason for the release or withdrawal. Auditor notes remain private.</p>
+          <header><div><span>AUDITEE</span><strong>Released findings</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close finding release controls"><X size={17} /></button></header>
+          <p>Release findings and choose the evidence to share.</p>
           {error ? <div className="qms-live-release-panel__error" role="alert"><ShieldAlert size={15} /> {error}</div> : null}
+          {deliveryNotice ? <p role="status">{deliveryNotice}</p> : null}
           {loadError ? <div className="qms-live-release-panel__error" role="alert"><ShieldAlert size={15} /> {auditPrerequisiteLoadDetail(loadError, "Auditee release records are unavailable. Retry to load the saved findings.")} <button type="button" onClick={retry}>Retry release records</button></div> : null}
           {loading ? <p role="status">Loading findings, release decisions and linked evidence…</p> : null}
           <div className="qms-live-release-panel__list">
@@ -163,7 +174,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
               const releasedFiles = releasedArtifactIds(release).length;
               return (
                 <article key={finding.id}>
-                  <div><span>{finding.level || finding.severity || "Finding"}</span><strong>{finding.finding_ref || "Finding"}</strong><small>{finding.requirement_ref || "No requirement reference"}</small><p>{finding.description}</p><small>{availableEvidence.length} governed evidence file{availableEvidence.length === 1 ? "" : "s"} linked · {releasedFiles} currently released</small></div>
+                  <div><span>{finding.level || finding.severity || "Finding"}</span><strong>{finding.finding_ref || "Finding"}</strong><small>{finding.requirement_ref || "No requirement reference"}</small><p>{finding.description}</p><small>{availableEvidence.length} file{availableEvidence.length === 1 ? "" : "s"} · {releasedFiles} shared</small></div>
                   <div className="qms-live-release-panel__state">{isReleased ? <><Eye size={14} /> Released</> : <><EyeOff size={14} /> Auditor only</>}</div>
                   <button type="button" disabled={!dataReady || decisionMutation.isPending} onClick={() => setDraft({
                     findingId: finding.id,
@@ -172,6 +183,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
                     evidenceArtifactIds: isReleased ? releasedArtifactIds(release) : [],
                     reason: "",
                   })}>{isReleased ? "Withdraw" : "Release"}</button>
+                  {isReleased && finding.finding_type === "NON_CONFORMITY" ? <button type="button" disabled={!dataReady || emailMutation.isPending} onClick={() => { setDeliveryNotice(null); setError(null); emailMutation.mutate(finding.id); }}><Mail size={14} />{emailMutation.isPending && emailMutation.variables === finding.id ? "Sending…" : "Email CAR"}</button> : null}
                 </article>
               );
             })}
@@ -189,8 +201,8 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
               <>
                 <label className="qms-live-release-decision__check"><input type="checkbox" checked={draft.includeObjectiveEvidence} onChange={(event) => setDraft((current) => current ? { ...current, includeObjectiveEvidence: event.target.checked } : current)} /> Include the finding's objective-evidence text in the external view</label>
                 <fieldset className="qms-live-release-decision__evidence">
-                  <legend>Governed evidence files released with this finding</legend>
-                  {!draftEvidence.length ? <p>No governed file artifacts are linked to this finding/checklist yet.</p> : draftEvidence.map((artifact) => (
+                  <legend>Evidence files</legend>
+                  {!draftEvidence.length ? <p>No files attached to this finding.</p> : draftEvidence.map((artifact) => (
                     <label key={artifact.id}>
                       <input type="checkbox" checked={draft.evidenceArtifactIds.includes(artifact.id)} onChange={(event) => setDraft((current) => current ? {
                         ...current,
@@ -206,7 +218,7 @@ const LiveFindingReleasePanel: React.FC<Props> = ({ amoCode, auditKey }) => {
               </>
             ) : null}
             <label><span>Decision reason</span><textarea rows={4} value={draft.reason} onChange={(event) => setDraft((current) => current ? { ...current, reason: event.target.value } : current)} placeholder="Record why this finding is being released or withdrawn." /></label>
-            <p>Private auditor notes are never included. The server revalidates every selected artifact against this audit/finding relationship before release.</p>
+            <p>Private auditor notes stay internal.</p>
             <footer><button type="button" onClick={() => setDraft(null)}>Cancel</button><button type="button" className="is-primary" disabled={!dataReady || draft.reason.trim().length < 3 || decisionMutation.isPending} onClick={() => decisionMutation.mutate(draft)}>{decisionMutation.isPending ? "Saving…" : draft.action === "RELEASED" ? "Release finding" : "Withdraw finding"}</button></footer>
           </section>
         </div>

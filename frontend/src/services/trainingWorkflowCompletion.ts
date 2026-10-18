@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import { apiGet, apiPost, apiPut } from "./crs";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -244,7 +245,7 @@ export async function downloadTrainingInvitationCalendar(invitation: LearnerTrai
   const href = URL.createObjectURL(await response.blob());
   const anchor = document.createElement("a");
   anchor.href = href;
-  anchor.download = `training-${invitation.event_id}.ics`;
+  anchor.download = sanitizeDownloadFilename(`training-${invitation.event_id}.ics`);
   anchor.click();
   URL.revokeObjectURL(href);
 }

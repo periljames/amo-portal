@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -136,7 +137,7 @@ const QualityEvidenceViewerPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${fileName.replace(/\.[^/.]+$/, "")}.review.json`;
+    a.download = sanitizeDownloadFilename(`${fileName.replace(/\.[^/.]+$/, "")}.review.json`);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

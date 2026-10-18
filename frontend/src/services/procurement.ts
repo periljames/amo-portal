@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import { apiRequest } from "./apiClient";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -334,7 +335,7 @@ export async function downloadProcurementDocument(
   const url = URL.createObjectURL(blob);
   const link = window.document.createElement("a");
   link.href = url;
-  link.download = document.original_filename || `procurement-document-${document.id}`;
+  link.download = sanitizeDownloadFilename(document.original_filename || `procurement-document-${document.id}`);
   window.document.body.appendChild(link);
   link.click();
   link.remove();

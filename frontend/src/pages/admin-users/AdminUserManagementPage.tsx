@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import { isTenantAdmin } from "../../utils/tenantAccess";
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -96,7 +97,7 @@ function downloadBlob({ blob, filename }: { blob: Blob; filename: string }): voi
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

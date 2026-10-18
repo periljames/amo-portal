@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
 import hashlib
 import html
 import json
@@ -705,4 +707,4 @@ def register(router: APIRouter) -> None:
     def download_report(report_id: int, current_user: account_models.User = Depends(get_current_active_user), db: Session = Depends(get_write_db)):
         row = db.query(ReliabilityWorkbookReportSnapshot).filter(ReliabilityWorkbookReportSnapshot.id == report_id, ReliabilityWorkbookReportSnapshot.amo_id == _amo_id(current_user)).one_or_none()
         if not row: raise HTTPException(status_code=404, detail="Reliability report snapshot not found.")
-        return Response(content=row.rendered_html, media_type="text/html", headers={"Content-Disposition": f'attachment; filename="reliability-report-{report_id}.html"', "ETag": row.sha256_hash})
+        return Response(content=row.rendered_html, media_type="text/html", headers={"Content-Disposition": attachment_header(download_name("reliability-report", row.period_start, row.period_end, "snapshot", row.id, extension="html")), "ETag": row.sha256_hash})

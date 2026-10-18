@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { useEffect, useState } from "react";
 import { Download, FileImage, FileUp, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { authHeaders } from "../../services/auth";
@@ -160,7 +161,7 @@ export default function ReliabilityTechlogEvidence({ aircraft, techsheet, refere
         {loading ? <Loader2 size={15} aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
         {previewUrl ? "Reload original scan" : "Preview original scan"}
       </button>
-      {previewUrl && <a href={previewUrl} download={asset.filename}><Download size={15} aria-hidden="true" /> Save copy</a>}
+      {previewUrl && <a href={previewUrl} download={sanitizeDownloadFilename(asset.filename)}><Download size={15} aria-hidden="true" /> Save copy</a>}
     </div>}
     {id && !asset && !error && <p role="status">Resolving controlled source scan…</p>}
     {error && <p role="alert" className="rel-techlog-evidence__error">{error}</p>}

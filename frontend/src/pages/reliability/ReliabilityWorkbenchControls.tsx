@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { spreadsheetSafeText } from "./ReliabilityWorkbenchUtils";
@@ -84,7 +85,7 @@ function download(filename: string, body: string, type: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = sanitizeDownloadFilename(filename);
   anchor.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

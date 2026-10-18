@@ -1,3 +1,4 @@
+import { resolveDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import { apiGet, apiPost, apiPut } from "./crs";
@@ -131,15 +132,10 @@ export const createTrainingReportDefinition = (payload: Record<string, unknown>)
 export const listTrainingReportJobs = (limit = 50, offset = 0) => apiGet<ReportJobPage>(`${ROOT}/report-jobs?limit=${limit}&offset=${offset}`);
 export const queueTrainingReportJob = (report_code: string, output_format: "PDF" | "XLSX" | "CSV", filters_json: Record<string, unknown> = {}) => apiPost<ReportJob>(`${ROOT}/report-jobs`, { report_code, output_format, filters_json });
 export const retryTrainingReportJob = (jobId: string) => apiPost<ReportJob>(`${ROOT}/report-jobs/${encodeURIComponent(jobId)}/retry`, {});
-export const downloadTrainingReportJob = (job: ReportJob) => downloadTrainingOperatingReport(`/report-jobs/${encodeURIComponent(job.id)}/download`, `training-${job.report_code.toLowerCase().replaceAll("_", "-")}-${job.id}.${job.output_format.toLowerCase()}`);
+export const downloadTrainingReportJob = (job: ReportJob) => downloadTrainingOperatingReport(`/report-jobs/${encodeURIComponent(job.id)}/download`, `training-${job.report_code.toLowerCase().replaceAll("_", "-")}-${(job.completed_at || job.created_at).replace(/[:.]/g, "-")}.${job.output_format.toLowerCase()}`);
 
 export async function downloadTrainingOperatingReport(path: string, filename: string): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}${ROOT}${path}`, { headers: authHeaders() });
   if (!response.ok) throw new Error(`Report export failed (${response.status}).`);
-  const href = URL.createObjectURL(await response.blob());
-  const anchor = document.createElement("a");
-  anchor.href = href;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(href);
+  saveDownloadedFile(await response.blob(), resolveDownloadFilename(response.headers.get("Content-Disposition"), filename, response.headers.get("Content-Type")));
 }

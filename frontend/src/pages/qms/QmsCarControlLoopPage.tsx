@@ -1,3 +1,5 @@
+import { caseDate } from "../qualityAudits/carCaseModel";
+import "../qualityAudits/caseWorkspace.css";
 import { personDisplay } from "../../utils/personDisplay";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,11 +55,7 @@ function humanize(value: string | null | undefined): string {
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return value ? caseDate(value) : "Not set";
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -227,13 +225,14 @@ const QmsCarControlLoopPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <main className="page qms-car-control-loop">
+      <main className="page qms-surface-root qms-car-control-loop">
         <div className="page-header">
           <div>
-            <button className="btn btn--ghost" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars`)}>← CAR register</button>
+            <button className="btn btn--ghost" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars?carId=${encodeURIComponent(carId)}`)}>← CAR details</button>
             <p className="eyebrow">Corrective action governance</p>
-            <h1>{control.car.car_number} · {control.car.title}</h1>
-            <p>{control.car.summary}</p>
+            <h1>{control.car.car_number}</h1>
+            <p>{control.car.title}</p>
+            <details><summary>Finding statement</summary><p>{control.car.summary}</p></details>
           </div>
           <div className="toolbar">
             <span className={`badge ${toneClass(control.car.status)}`}>{humanize(control.car.status)}</span>
@@ -245,7 +244,7 @@ const QmsCarControlLoopPage: React.FC = () => {
         {actionMessage ? <div className="alert alert--success" role="status">{actionMessage}</div> : null}
 
         <section className="card">
-          <div className="card__header"><div><h2>Control position</h2><p>Deterministic status based on ownership, deadlines, milestone state and blockers.</p></div></div>
+          <div className="card__header"><div><h2>Ownership & closure readiness</h2></div></div>
           <div className="stats-grid">
             <div><span className="muted">Health</span><strong>{humanize(control.health.state)}</strong></div>
             <div><span className="muted">Risk score</span><strong>{control.health.risk_score}/100</strong></div>

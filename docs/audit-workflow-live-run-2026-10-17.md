@@ -1,5 +1,7 @@
 # Audit workflow validation on 17 October 2026
 
+This is the historical frontend-only run. Its blocked findings, email and completion results are superseded by the [18 October repair and live verification](audit-workflow-repair-2026-10-18.md).
+
 This run uses the portal's rendered frontend. Audit records were not seeded, created through a script calling APIs, or edited in the database. Browser automation operates visible form controls. Backend source files remain unchanged.
 
 ## Test occurrence

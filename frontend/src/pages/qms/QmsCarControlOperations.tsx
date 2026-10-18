@@ -1,3 +1,4 @@
+import { caseDate } from "../qualityAudits/carCaseModel";
 import { personDisplay } from "../../utils/personDisplay";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,11 +61,7 @@ function humanize(value: string | null | undefined): string {
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return value ? caseDate(value) : "Not set";
 }
 
 function formatDateTime(value: string | null | undefined): string {

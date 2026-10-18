@@ -40,4 +40,26 @@ Notice `QAR/MO/26/006/N01` was retried through **Send notice and email**. Dispat
 - 53 focused frontend tests passed, including encrypted retained evidence, hash rejection, scope isolation, storage failure, offline finding policy and journal recovery.
 - The production build passed TypeScript, the 49-modal check and heavy-route checks. Large-chunk warnings remain; these checks do not certify performance on every device or network.
 
-Live receipts, screenshots, runtime logs and test output are retained under the ignored `.artifacts/audit-workflow-run/` directory. Final release, offline opening and CAR handoff observations follow below.
+Live receipts, screenshots, runtime logs and test output are retained under the ignored `.artifacts/audit-workflow-run/` directory.
+
+## Completed handoff checks
+
+- All four findings were released through the frontend, each with HTTP 200. One Observation release encountered a transport failure; its explicit retry succeeded. No finding or CAR was recreated to work around that failure.
+- After page reload, questions **1.1, 5.7 and 8.4 each showed the NO radio checked**. The Observation retained YES.
+- The synthetic evidence PDF on question 8.1 was opened online, reopened with the browser network disabled, and reopened again after an offline page reload. All three downloaded files matched SHA-256 `71e3a7eff34f0657fb9e894e2614d1285fb291058a4d9a09a960c74a4340c96f`. The offline page showed all 189 answers without a workflow-unavailable dialog.
+- The three finding assessments were completed with explicitly simulated negative assessment data, saved offline and replayed after reconnection. Major and Minor replay receipts committed version 2; Critical had already replayed when the auditor signed back in.
+- Completion exposed another backend defect: its canonical URL fell through to a generic POST handler and returned 404. An exact canonical adapter now invokes the existing guarded completion implementation, retaining tenant, audit-team, lead-auditor, preparation and checklist readiness checks. The frontend retry returned **HTTP 200**, creating the due report tracker.
+- The CAR register showed **CAR/SAF/26/003–005** as **Open / Awaiting auditee response**, all assigned to **Elvin Kinanga**. Root cause and CAP remained pending. No auditee response or CAR completion was submitted.
+- Each of the three released nonconformities was then sent using **Email CAR**. All three returned HTTP 200 with `sent: true`, status SENT and separate provider message IDs, addressed to the assigned Elvin mailbox. Existing sandbox routing remains active; these receipts establish provider acceptance, not independent mailbox receipt. Observation correctly offers no CAR email action.
+
+## Additional defects repaired during handoff
+
+- Optional dashboard schema/subscription probes now run inside savepoints. A cancelled optional query previously left PostgreSQL's shared read transaction aborted and spoiled the next counter. Four regression cases model PostgreSQL's aborted-transaction behavior and verify recovery without losing the tenant transaction.
+- Automatically created CARs had in-app notifications but no invitation-email action. Released nonconformities now expose **Email CAR**. The endpoint checks the tenant, audit, finding, latest release, linked CAR and recipient; it emails the actual active assignee, falling back to the audit's auditee email. Only released objective-evidence text is included in the email. The release-specific correlation key reuses accepted delivery and permits retries after failed delivery. Provider failure leaves the release intact and displays a failure instead of claiming success.
+- Only the release launcher is placed inside the activity menu; its drawer and decision dialog remain outside that container, avoiding clipping behind the header. Release controls have 44px targets, theme tokens and a scrollable phone-height decision dialog. Technical commentary was shortened.
+
+The completion-route and CAR-email regression suite contains 12 passing tests, including rejection of unreleased, wrong-tenant, missing-CAR and missing-recipient sends, provider failure, selective evidence projection, and preservation of the lead-auditor completion gate.
+
+The final production build passed; the TypeScript build, 49-modal check and heavy-route checks also passed. At a 390px phone viewport, the release drawer measured 359px wide and remained scrollable; its sticky close control measured **44 × 44px** and passed a normal pointer-reachability check after scrolling. The rendered portal reported realtime state **connected**. API `/livez` and `/readyz` both returned **200**. Screenshots and measurements are in `final-release-phone.png` and `final-phone-controls.json` under the private run artifacts. Large-chunk build warnings remain.
+
+This run verifies the named QMS workflow and observed offline paths. It does not certify every portal module, a physically separate device, camera hardware, independent mailbox receipt, or a full day physically disconnected. Report approval and passkey signing have not been performed.

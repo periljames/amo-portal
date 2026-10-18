@@ -47,9 +47,11 @@ export function primaryLinkedCar(cars: CAROut[]): CAROut | null {
 export function findingLifecycleView(finding: QMSFindingOut, cars: CAROut[]): FindingWorkflowStage {
   if (finding.closed_at) return "closed";
   const car = primaryLinkedCar(cars);
-  if (!car || car.status === "DRAFT") return "needs_review";
-  if (car.status === "CLOSED") return "closed";
+  if (!car || car.status === "DRAFT" || car.status === "CANCELLED") return "needs_review";
+  if (car.status === "CLOSED") return "effectiveness";
+  if ([car.root_cause_status, car.capa_status].includes("SUBMITTED")) return "needs_review";
   if (car.status === "PENDING_VERIFICATION") return "effectiveness";
+  if ([car.root_cause_status, car.capa_status].some(value => value === "REJECTED" || value === "NEEDS_EVIDENCE")) return "with_auditee";
   if (car.status === "IN_PROGRESS") return "implementation";
   return "with_auditee";
 }

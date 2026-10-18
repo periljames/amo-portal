@@ -32,7 +32,7 @@ describe("finding lifecycle projection", () => {
     ["ESCALATED", "with_auditee", "Awaiting response"],
     ["IN_PROGRESS", "implementation", "Implementation"],
     ["PENDING_VERIFICATION", "effectiveness", "Effectiveness"],
-    ["CLOSED", "closed", "Closed"],
+    ["CLOSED", "effectiveness", "Effectiveness"],
   ] as const)("maps %s corrective actions to %s (%s)", (status, expected, label) => {
     expect(findingLifecycleView(finding, [car(status)])).toBe(expected);
     expect(findingLifecycleLabel(expected)).toBe(label);
@@ -40,6 +40,11 @@ describe("finding lifecycle projection", () => {
 
   it("treats a closed finding as closed regardless of CAR state", () => {
     expect(findingLifecycleView({ ...finding, closed_at: "2026-08-25T00:00:00Z" }, [car("OPEN")])).toBe("closed");
+  });
+
+  it("puts a submitted response in Quality review before effectiveness", () => {
+    expect(findingLifecycleView(finding, [{...car("PENDING_VERIFICATION"), root_cause_status:"SUBMITTED",capa_status:"SUBMITTED"}])).toBe("needs_review");
+    expect(findingLifecycleView(finding, [{...car("IN_PROGRESS"),capa_status:"NEEDS_EVIDENCE"}])).toBe("with_auditee");
   });
 
   it("documents that OPEN CARs are not Needs review / RCA/CAP", () => {

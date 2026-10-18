@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck, Bot, Building2, CheckCircle2, ClipboardList, Download, FileUp, History, MapPin,
@@ -138,7 +139,7 @@ const TrainingSetupWorkspace: React.FC<Props> = ({ canManage, onOpenImport, onCh
     const bundle = await getTrainingConfigurationExport();
     const href = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }));
     const anchor = document.createElement("a");
-    anchor.href = href; anchor.download = `training-configuration-v${bundle.version || "draft"}.json`; anchor.click();
+    anchor.href = href; anchor.download = sanitizeDownloadFilename(`training-configuration-v${bundle.version || "draft"}.json`); anchor.click();
     URL.revokeObjectURL(href);
   }, "Tenant configuration exported.");
 

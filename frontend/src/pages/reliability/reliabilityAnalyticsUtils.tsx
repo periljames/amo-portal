@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 /* eslint-disable react-refresh/only-export-components */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -127,7 +128,7 @@ function downloadBlob(content: BlobPart, mimeType: string, filename: string): vo
   const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(link);
   link.click();
   link.remove();

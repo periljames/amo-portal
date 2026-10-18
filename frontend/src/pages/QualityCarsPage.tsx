@@ -4,7 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
-import ActionPanel, { type ActionPanelContext } from "../components/panels/ActionPanel";
+import CarRecordView from "./qualityAudits/CarRecordView";
+import { carHasReview, carNextAction, caseDate } from "./qualityAudits/carCaseModel";
+import CarActionsMenu from "./qualityAudits/CarActionsMenu";
 import { hasQmsRolePermission } from "../app/routeGuards";
 import { getCachedUser, getContext } from "../services/auth";
 import { saveDownloadedFile } from "../utils/downloads";
@@ -89,16 +91,6 @@ const STATUS_OPTIONS: Array<{ value: CarStatusFilter; label: string }> = [
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
-const STATUS_CLASS: Record<CARStatus, string> = {
-  DRAFT: "badge--neutral",
-  OPEN: "badge--info",
-  IN_PROGRESS: "badge--warning",
-  PENDING_VERIFICATION: "badge--warning",
-  CLOSED: "badge--success",
-  ESCALATED: "badge--danger",
-  CANCELLED: "badge--neutral",
-};
-
 const EMPTY_FORM: CarFormState = {
   title: "",
   summary: "",
@@ -128,10 +120,7 @@ function humanize(value?: string | null): string {
 }
 
 function dateOnly(value?: string | null): string {
-  if (!value) return "—";
-  const date = new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10) || "—";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return value ? caseDate(value) : "Not set";
 }
 
 function formatFileSize(bytes?: number | null): string {
@@ -139,16 +128,6 @@ function formatFileSize(bytes?: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function workflowStep(car: CAROut): string {
-  if (car.status === "CLOSED") return "Closed";
-  if (car.status === "PENDING_VERIFICATION") return "Effectiveness / closeout review";
-  if (car.root_cause_status === "REJECTED" || car.capa_status === "REJECTED") return "Returned to auditee";
-  if (car.capa_status === "NEEDS_EVIDENCE") return "Additional evidence required";
-  if (car.root_cause_status === "SUBMITTED" || car.capa_status === "SUBMITTED") return "Quality review required";
-  if (!car.submitted_at) return "Awaiting auditee response";
-  return "Corrective action in progress";
 }
 
 function routeScope(pathname: string, queryStatus: string | null): QmsCarRegisterScope {
@@ -289,7 +268,6 @@ const QualityCarsPage: React.FC = () => {
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
-  const [panelContext, setPanelContext] = useState<ActionPanelContext | null>(null);
   const [reviewCar, setReviewCar] = useState<CAROut | null>(null);
   const [reviewForm, setReviewForm] = useState<CarReviewForm>(EMPTY_REVIEW);
   const [reviewAttachments, setReviewAttachments] = useState<CARAttachmentOut[]>([]);
@@ -660,14 +638,15 @@ const QualityCarsPage: React.FC = () => {
 
   return (
     <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <div className="qms-surface-root qms-car-ops">
+      <div className="qms-surface-root qms-car-ops car-register">
+      {localError ? <div className="card card--error" role="alert">{localError}</div> : null}
+      {directCarId ? (cars[0] ? <CarRecordView car={cars[0]} amoCode={amoSlug} owner={cars[0].responsible_personnel || assigneeLookup.get(cars[0].assigned_to_user_id || "")?.full_name || "Unassigned"}
+        canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
+        onEdit={()=>openEdit(cars[0])} onReview={()=>void openReview(cars[0])} onInvite={()=>void handleCopyInvite(cars[0])} onExport={()=>void handleExport(cars[0])}/> : <section className="case-workspace"><button onClick={clearRouteScope}>Back to corrective actions</button><p role={registerQuery.isError?"alert":"status"}>{registerQuery.isError?"This corrective action could not be loaded.":registerQuery.isPending?"Loading corrective action…":"Corrective action not found."}</p>{registerQuery.isError?<button onClick={()=>void registerQuery.refetch()}>Retry</button>:null}</section>) : <>
       <header className="page-header qms-car-page-heading">
         <div>
           <p className="page-header__eyebrow">Quality · Corrective action control</p>
           <h1 className="page-header__title">Corrective action register</h1>
-          <p className="page-header__subtitle">
-            Server-bounded register with governed auditee response, Quality review, evidence, and closeout actions.
-          </p>
         </div>
         <div className="audit-chip-list">
           <button type="button" className="secondary-chip-btn" onClick={() => setHistoryOpen((open) => !open)}>
@@ -684,12 +663,10 @@ const QualityCarsPage: React.FC = () => {
         </div>
       </header>
 
-      {localError ? (
-        <div className="card card--error" role="alert" style={{ marginBottom: 12 }}>
-          <strong>Action could not be completed.</strong>
-          <p style={{ marginBottom: 0 }}>{localError}</p>
-        </div>
-      ) : null}
+      <nav className="car-queue-nav" aria-label="Corrective action queues">
+        {([['register','All','all'],['awaiting-auditee','Awaiting response','awaiting_auditee'],['awaiting-quality-review','Quality review','awaiting_quality_review'],['awaiting-effectiveness-review','Effectiveness','awaiting_effectiveness_review'],['overdue','Overdue','overdue']] as const).map(([path,label,scope])=><button key={path} aria-current={effectiveScope===scope?'page':undefined} onClick={()=>navigate(`/maintenance/${amoSlug}/quality/cars/${path}${actorView==='mine'?'?view=mine':''}`)}>{label}</button>)}
+        <label className="car-personal-scope"><input type="checkbox" checked={actorView==='mine'} onChange={event=>navigate(`${location.pathname}${event.target.checked?'?view=mine':''}`)}/>Assigned to me</label>
+      </nav>
 
       <section className="audit-stats-grid" aria-label="Corrective action summary">
         <div className="audit-stat-card">
@@ -795,7 +772,7 @@ const QualityCarsPage: React.FC = () => {
               ) : cars.map((car) => {
                 const assignee = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id) : undefined;
                 const canModify = car.can_current_user_modify ?? canManageCars;
-                const canReview = (car.can_current_user_review ?? canManageCars) && canManageCars;
+                const canReview = car.can_current_user_review !== false && hasQmsRolePermission("qms.car.review");
                 return (
                   <tr key={car.id}>
                     <td>
@@ -806,7 +783,7 @@ const QualityCarsPage: React.FC = () => {
                       >
                         <strong>{car.car_number}</strong>
                       </button>
-                      <div className="text-muted">{humanize(car.program)} · {humanize(car.priority)}</div>
+                      <div className="text-muted">{humanize(car.program)} · <span className="case-priority" data-priority={car.priority}>{humanize(car.priority)}</span></div>
                     </td>
                     <td>
                       <strong>{car.audit_ref || "No audit reference"}</strong>
@@ -814,15 +791,15 @@ const QualityCarsPage: React.FC = () => {
                     </td>
                     <td>
                       <strong>{car.title}</strong>
-                      <div className="qms-cell-text qms-cell-text--wrap text-muted">{car.summary}</div>
+                      <div className="qms-cell-text car-register-summary text-muted">{car.finding_description || car.summary}</div>
                     </td>
                     <td>
-                      <strong>{workflowStep(car)}</strong>
+                      <strong>{carNextAction(car)}</strong>
                       <div className="text-muted">
                         RC {humanize(car.root_cause_status)} · CAP {humanize(car.capa_status)}
                       </div>
                     </td>
-                    <td><span className={`badge ${STATUS_CLASS[car.status]}`}>{humanize(car.status)}</span></td>
+                    <td><span className="case-status" data-tone={car.status === "CLOSED" ? "success" : car.status === "ESCALATED" ? "danger" : "info"}>{humanize(car.status)}</span></td>
                     <td>
                       <strong>{dateOnly(car.due_date)}</strong>
                       <div className="text-muted">Target {dateOnly(car.target_closure_date)}</div>
@@ -832,33 +809,15 @@ const QualityCarsPage: React.FC = () => {
                       <div className="text-muted">{car.responsible_department || assignee?.department_name || "—"}</div>
                     </td>
                     <td>
-                      <div className="audit-chip-list">
-                        <button
-                          type="button"
-                          className="secondary-chip-btn"
-                          onClick={() => setPanelContext({
-                            type: "car",
-                            id: car.id,
-                            title: car.car_number,
-                            status: car.status,
-                            ownerId: car.assigned_to_user_id,
-                          })}
-                        >
-                          Manage
-                        </button>
-                        {canReview ? <button type="button" className="secondary-chip-btn" onClick={() => void openReview(car)}>Review</button> : null}
-                        <button type="button" className="secondary-chip-btn" disabled={inviteBusyId === car.id} onClick={() => void handleCopyInvite(car)}>
-                          {inviteBusyId === car.id ? "Loading…" : "Invite"}
-                        </button>
-                        <button type="button" className="secondary-chip-btn" disabled={exportingId === car.id} onClick={() => void handleExport(car)}>
-                          {exportingId === car.id ? "Exporting…" : "Evidence pack"}
-                        </button>
-                        {canModify ? <button type="button" className="secondary-chip-btn" onClick={() => openEdit(car)}>Edit</button> : null}
-                        {canManageCars ? (
-                          <button type="button" className="secondary-chip-btn" disabled={deleteBusyId === car.id} onClick={() => void handleDelete(car)}>
-                            {deleteBusyId === car.id ? "Removing…" : "Delete"}
-                          </button>
-                        ) : null}
+                      <div className="car-row-actions">
+                        <button type="button" onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars?carId=${encodeURIComponent(car.id)}`)}>Open</button>
+                        <CarActionsMenu label={car.car_number}>
+                          {canReview && carHasReview(car) ? <button onClick={() => void openReview(car)}>Review submitted response</button> : null}
+                          <button disabled={exportingId === car.id} onClick={() => void handleExport(car)}>Download evidence pack</button>
+                          {canManageCars ? <button disabled={inviteBusyId === car.id} onClick={() => void handleCopyInvite(car)}>Copy response link</button> : null}
+                          {canModify && canManageCars ? <button onClick={() => openEdit(car)}>Edit assignment & dates</button> : null}
+                          {canManageCars && !["CLOSED", "CANCELLED"].includes(car.status) ? <button data-danger disabled={deleteBusyId === car.id} onClick={() => void handleDelete(car)}>Delete CAR…</button> : null}
+                        </CarActionsMenu>
                       </div>
                     </td>
                   </tr>
@@ -907,7 +866,8 @@ const QualityCarsPage: React.FC = () => {
         </div>
       ) : null}
 
-      {!canManageCars ? (
+      </>}
+      {!canManageCars && !directCarId ? (
         <div className="card card--info" style={{ marginTop: 12 }}>
           <p style={{ margin: 0 }}>Updates remain available to assigned users through the governed CAR controls; management actions remain limited to Quality Managers, AMO Admins, and superusers.</p>
         </div>
@@ -1063,7 +1023,7 @@ const QualityCarsPage: React.FC = () => {
           <div className="upsell-modal" style={{ maxWidth: 920 }}>
             <div className="upsell-modal__header">
               <div>
-                <p className="upsell-modal__eyebrow">{reviewCar.car_number} · {workflowStep(reviewCar)}</p>
+                <p className="upsell-modal__eyebrow">{reviewCar.car_number} · {carNextAction(reviewCar)}</p>
                 <h3 className="upsell-modal__title">Quality response review</h3>
                 <p className="upsell-modal__subtitle">Review root cause, corrective action, and submitted evidence before accepting or returning the response.</p>
               </div>
@@ -1118,7 +1078,7 @@ const QualityCarsPage: React.FC = () => {
                 <button
                   type="button"
                   className="secondary-chip-btn"
-                  onClick={() => setPanelContext({ type: "car", id: reviewCar.id, title: reviewCar.car_number, status: reviewCar.status, ownerId: reviewCar.assigned_to_user_id })}
+                  onClick={() => { setReviewCar(null); navigate(`/maintenance/${amoSlug}/quality/cars?control=${encodeURIComponent(reviewCar.id)}`); }}
                 >
                   Manage evidence
                 </button>
@@ -1143,7 +1103,7 @@ const QualityCarsPage: React.FC = () => {
 
             <div className="upsell-modal__actions">
               <button type="button" className="secondary-chip-btn" onClick={() => { setReviewCar(null); setReviewAttachments([]); }} disabled={reviewBusy}>Cancel</button>
-              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy}>
+              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy || reviewAttachmentsLoading || !reviewForm.root_cause_status || !reviewForm.capa_status}>
                 {reviewBusy ? "Saving review…" : "Record review decision"}
               </button>
             </div>
@@ -1178,14 +1138,7 @@ const QualityCarsPage: React.FC = () => {
         </div>
       ) : null}
 
-      <ActionPanel
-        isOpen={Boolean(panelContext)}
-        context={panelContext}
-        onClose={() => {
-          setPanelContext(null);
-          void refreshRegister();
-        }}
-      />
+
       </div>
     </DepartmentLayout>
   );

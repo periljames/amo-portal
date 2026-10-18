@@ -1,3 +1,4 @@
+import { resolveDownloadFilename, sanitizeDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -72,16 +73,7 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
 }
 
 function attachmentFilename(response: Response, fallback: string): string {
-  const disposition = response.headers.get("content-disposition") || "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded.replace(/^"|"$/g, ""));
-    } catch {
-      return encoded.replace(/^"|"$/g, "");
-    }
-  }
-  return disposition.match(/filename="([^"]+)"/i)?.[1] || fallback;
+  return resolveDownloadFilename(response.headers.get("Content-Disposition"), fallback, response.headers.get("Content-Type"));
 }
 
 export async function listDocumentEvidenceAssets(
@@ -137,13 +129,7 @@ export async function downloadDocumentEvidenceAsset(asset: DocumentEvidenceAsset
     credentials: "same-origin",
   });
   if (!response.ok) throw new Error(await errorMessage(response, "Evidence file could not be downloaded"));
-  const blob = await response.blob();
-  const href = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = href;
-  anchor.download = asset.filename;
-  anchor.click();
-  URL.revokeObjectURL(href);
+  saveDownloadedFile(await response.blob(), attachmentFilename(response, asset.filename));
 }
 
 export async function downloadDocumentEvidencePack(
@@ -222,7 +208,7 @@ export function saveDocumentEvidencePack(result: DocumentEvidencePackDownload): 
   const href = URL.createObjectURL(result.blob);
   const anchor = document.createElement("a");
   anchor.href = href;
-  anchor.download = result.filename;
+  anchor.download = sanitizeDownloadFilename(result.filename);
   anchor.click();
   URL.revokeObjectURL(href);
 }

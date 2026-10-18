@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowDownToLine, ArrowLeft, ArrowRight, RefreshCw, Search, SlidersHorizontal } from "lucide-react";
@@ -48,7 +49,7 @@ function csvDownload(name: string, header: string[], values: string[][]): void {
     .map((row) => row.join(",")).join("\r\n");
   const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = name; document.body.append(anchor); anchor.click(); anchor.remove();
+  anchor.href = url; anchor.download = sanitizeDownloadFilename(name); document.body.append(anchor); anchor.click(); anchor.remove();
   URL.revokeObjectURL(url);
 }
 
