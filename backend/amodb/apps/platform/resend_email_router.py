@@ -337,7 +337,7 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
                 notice.delivered_by_user_id = actor_user_id
                 notice.delivered_at = occurred_at
                 notice.delivery_channel = "EMAIL"
-                notice.delivery_reference = f"Resend confirmed delivery · {message_id}"
+                notice.delivery_reference = f"Resend confirmed recipient-server delivery · {message_id}"
                 audit = (
                     db.query(quality_models.QMSAudit)
                     .filter(
