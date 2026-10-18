@@ -121,11 +121,11 @@ def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) 
             "<p style='font-size:12px;color:#667085'>This controlled notification was sent by AMO Portal.</p>"
             "</body></html>"
         )
-        text_body = "\n".join([
+        text_body = "\n\n".join([
             subject,
             f"Dear {recipient},",
             responsibility,
-            *(f"{label}: {value}" for label, value in details),
+            "\n".join(f"{label}: {value}" for label, value in details),
             "The attached PDF is the issued, electronically signed audit notice.",
             action_url,
         ]).strip()
