@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
+from email.utils import getaddresses
 from typing import Any
 
 from . import saas_models, saas_providers, saas_queue, saas_services
@@ -28,6 +30,8 @@ RESEND_DEFINITION = saas_providers.ProviderDefinition(
         "per_minute_limit",
         "daily_limit",
         "template_map_json",
+        "tenant_default_sender_domain",
+        "verified_sender_domains",
     ),
     "Transactional and automated portal email through Resend, with encrypted credentials, templates, delivery controls and signed webhooks.",
 )
@@ -90,6 +94,78 @@ def process_resend_authentication_job(db, job) -> dict[str, Any]:
     return result
 
 
+def _normalise_domains(value: Any) -> list[str]:
+    raw = str(value or "").replace(";", ",")
+    domains: list[str] = []
+    seen: set[str] = set()
+    for item in raw.split(","):
+        domain = item.strip().lower().lstrip("@")
+        if not domain:
+            continue
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", domain) or "." not in domain:
+            raise ValueError(f"Invalid sender domain: {domain}")
+        if domain not in seen:
+            seen.add(domain)
+            domains.append(domain)
+    return domains
+
+
+def _email_domain(value: str) -> str:
+    parsed = getaddresses([str(value or "")])
+    addresses = [address.strip().lower() for _name, address in parsed if address.strip()]
+    if len(addresses) != 1 or "@" not in addresses[0]:
+        raise ValueError("from_email must contain one valid mailbox address")
+    return addresses[0].rsplit("@", 1)[1]
+
+
+def _normalise_tenant_resend_payload(
+    payload: dict[str, Any],
+    *,
+    platform_config: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(payload or {})
+    if result.get("secret") or result.get("clear_secret"):
+        raise ValueError("Tenant Resend settings cannot contain API keys or webhook secrets.")
+    config = dict(result.get("config") or {})
+    unexpected = set(config) - {"from_email", "from_name", "reply_to"}
+    if unexpected:
+        raise ValueError(
+            "Tenant Resend settings may change only from_email, from_name and reply_to: "
+            + ", ".join(sorted(unexpected))
+        )
+
+    from amodb.apps.platform.resend_adapter import email_recipients
+
+    if "from_name" in config:
+        config["from_name"] = str(config.get("from_name") or "").strip()[:255]
+    if str(config.get("reply_to") or "").strip():
+        config["reply_to"] = ", ".join(email_recipients(str(config["reply_to"])))
+
+    if str(config.get("from_email") or "").strip():
+        sender = email_recipients(str(config["from_email"]))
+        if len(sender) != 1:
+            raise ValueError("Tenant from_email must contain exactly one mailbox.")
+        address = getaddresses(sender)[0][1].strip().lower()
+        sender_domain = _email_domain(address)
+        platform_sender = str(platform_config.get("from_email") or "").strip()
+        allowed = set(_normalise_domains(platform_config.get("verified_sender_domains")))
+        if platform_sender:
+            allowed.add(_email_domain(platform_sender))
+        default_domain = str(platform_config.get("tenant_default_sender_domain") or "").strip().lower()
+        if default_domain:
+            allowed.add(default_domain)
+        if sender_domain not in allowed:
+            raise ValueError(
+                f"Sender domain {sender_domain} is not approved for tenant mail. "
+                "Verify the domain in Resend, then add it to verified_sender_domains in the platform Resend configuration."
+            )
+        config["from_email"] = address
+
+    result["config"] = config
+    result.pop("production_confirmation", None)
+    return result
+
+
 def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
     result = dict(payload or {})
     config = dict(result.get("config") or {})
@@ -103,6 +179,18 @@ def _normalise_resend_payload(payload: dict[str, Any]) -> dict[str, Any]:
     config["api_base_url"] = RESEND_API_URL
     config["sending_mode"] = mode
     config["from_name"] = str(config.get("from_name") or "AMO Portal").strip()
+    if str(config.get("from_email") or "").strip():
+        _email_domain(str(config["from_email"]))
+    platform_sender_domain = (
+        _email_domain(str(config.get("from_email") or ""))
+        if str(config.get("from_email") or "").strip()
+        else ""
+    )
+    default_sender_domain = str(config.get("tenant_default_sender_domain") or platform_sender_domain).strip().lower()
+    if default_sender_domain:
+        _normalise_domains(default_sender_domain)
+        config["tenant_default_sender_domain"] = default_sender_domain
+    config["verified_sender_domains"] = ", ".join(_normalise_domains(config.get("verified_sender_domains")))
     config["per_minute_limit"] = int(config.get("per_minute_limit") or 10)
     config["daily_limit"] = int(config.get("daily_limit") or 500)
     if not 1 <= config["per_minute_limit"] <= 60:
@@ -199,7 +287,25 @@ def install_resend_email_provider() -> None:
         if normalized in LEGACY_EMAIL_PROVIDERS:
             raise ValueError("Legacy email providers are disabled; configure Resend instead")
         if normalized == "resend" and tenant_id is not None:
-            raise ValueError("Resend is a platform-wide credential and can only be configured by a platform superuser")
+            platform_row = saas_services.get_provider_credential(
+                db,
+                provider="resend",
+                tenant_id=None,
+                allow_platform_fallback=False,
+            )
+            if platform_row is None:
+                raise ValueError("Platform Resend transport must be configured before tenant sender identity.")
+            effective_payload = _normalise_tenant_resend_payload(
+                payload,
+                platform_config=dict(platform_row.config_json or {}),
+            )
+            return original_upsert(
+                db,
+                provider=normalized,
+                payload=effective_payload,
+                actor_user_id=actor_user_id,
+                tenant_id=tenant_id,
+            )
         secret_changed = normalized == "resend" and bool((payload or {}).get("secret"))
         effective_payload = _normalise_resend_payload(payload) if normalized == "resend" else payload
         response = original_upsert(
