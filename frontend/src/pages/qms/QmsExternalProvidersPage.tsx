@@ -45,6 +45,7 @@ import {
 import "../../styles/qms-external-providers.css";
 import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
 import ProviderAgreementControls from "./ProviderAgreementControls";
+import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
