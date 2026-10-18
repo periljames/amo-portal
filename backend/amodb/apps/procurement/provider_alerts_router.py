@@ -242,3 +242,43 @@ def save_partner_preferences(tenant_slug:str,payload:PartnerPreferenceUpdate,
         raise HTTPException(409,"Preferences changed; reload to reconcile")
     db.commit()
     return {"updated":True,"revision":payload.revision+1}
+
+@partner_router.post("/actions/{job_id}/acknowledge")
+def partner_acknowledge(tenant_slug:str,job_id:str,request:Request,
+                        db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap=None,write=True)
+    ctx=partner._context(user)
+    changed=db.execute(text("""UPDATE external_provider_alert_jobs
+       SET acknowledged_at=COALESCE(acknowledged_at,NOW()),updated_at=NOW()
+       WHERE amo_id=:amo AND recipient_provider_id=:provider
+       AND recipient_identity_id=:person AND id=:id AND status='DELIVERED'"""),
+       {**ctx,"id":job_id})
+    if not changed.rowcount:
+        raise HTTPException(404,"Assigned alert action unavailable")
+    db.commit()
+    return {"acknowledged":True}
+
+@partner_router.get("/actions/{job_id}")
+def partner_alert_action(tenant_slug:str,job_id:str,request:Request,
+                         db:Session=Depends(get_db)):
+    user=partner._ctx(db,request,tenant_slug,cap=None)
+    ctx=partner._context(user)
+    job=db.execute(text("""SELECT id,event_key,source_kind,source_id,status,acknowledged_at
+       FROM external_provider_alert_jobs
+       WHERE amo_id=:amo AND recipient_provider_id=:provider
+       AND recipient_identity_id=:person AND id=:id AND status='DELIVERED'"""),
+       {**ctx,"id":job_id}).mappings().first()
+    if not job:
+        raise HTTPException(404,"Assigned alert action unavailable")
+    scope=user["object_scope_json"] or {}
+    if job["source_kind"]=="maintenance_event":
+        target="contracted_work"
+        link="work"
+    else:
+        raise HTTPException(404,"No actionable provider record")
+    if str(job["source_id"]) not in {str(item) for item in scope.get(target,[])}:
+        raise HTTPException(404,"Work item is not in the current member grant")
+    from urllib.parse import quote
+    return {"event_key":job["event_key"],"acknowledged_at":job["acknowledged_at"],
+            "link":"/partner/"+quote(tenant_slug,safe="")+"/"+link+
+                   "?work="+quote(str(job["source_id"]),safe="")}
