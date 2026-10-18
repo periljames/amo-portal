@@ -75,6 +75,7 @@ const FIELD_HINTS: Record<string, string> = {
   reply_to: "Reply destination(s). Leave blank to use active Quality Manager and Quality Officer accounts.",
   tenant_default_sender_domain: "Verified shared domain used to derive quality.<tenant>@domain senders.",
   verified_sender_domains: "Comma-separated custom domains already verified in Resend and approved for tenant senders.",
+  tenant_sender_domain_assignments_json: 'Platform-only JSON of tenant IDs to approved custom domains, e.g. {"ID-Q50VN737":["flysafarilink.com"]}. Each domain must be verified in Resend and listed under verified_sender_domains. Domain assignment cannot overlap tenants.',
 };
 
 export default function AdminSaaSSettingsPage() {
