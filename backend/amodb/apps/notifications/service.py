@@ -57,6 +57,23 @@ def _existing_delivery(
 ) -> models.EmailLog | None:
     if not correlation_id:
         return None
+    if template_key == "qms_mail_identity_test" and cooldown_seconds > 0:
+        # The QMS configuration self-test has a rolling 60-second limit even
+        # when requests straddle the wall-clock minute boundary. Under the
+        # advisory delivery lock this also prevents concurrent test duplicates.
+        recent_test = (
+            db.query(models.EmailLog)
+            .filter(
+                models.EmailLog.amo_id == amo_id,
+                models.EmailLog.recipient == recipient,
+                models.EmailLog.template_key == template_key,
+                models.EmailLog.created_at >= _utcnow() - timedelta(seconds=min(max(cooldown_seconds, 1), 3600)),
+            )
+            .order_by(models.EmailLog.created_at.desc())
+            .first()
+        )
+        if recent_test is not None:
+            return recent_test
     query = (
         db.query(models.EmailLog)
         .filter(
