@@ -91,7 +91,10 @@ CATALOG = {
 MAINTENANCE_ACTIONS = {
     "DISPATCH": "maintenance.assigned",
     "PROVIDER_ACCEPT": "maintenance.assigned",
-    "ADDITIONAL_REQUEST": "maintenance.additional_pending",
+    "ADDITIONAL_WORK_REQUESTED": "maintenance.additional_pending",
+    "PROGRESS": "maintenance.progress_overdue",
+    "ETA_CHANGE": "maintenance.completion_missed",
+    "FINDING": "maintenance.progress_overdue",
     "SUBMIT_RELEASE": "maintenance.release_submitted",
     "RETURN": "maintenance.inspection_pending",
     "RECEIVE": "maintenance.closure_pending",
@@ -100,15 +103,16 @@ MAINTENANCE_ACTIONS = {
 PROCUREMENT_ACTIONS = {
     "RFQ_INVITED": "procurement.rfq_invited",
     "CLARIFICATION": "procurement.clarification",
-    "QUOTE_SUBMITTED": "procurement.quote_received",
-    "SUBMIT_QUOTE": "procurement.quote_received",
+    "QUOTE_RECEIVED": "procurement.quote_received",
+    "SUBMITTED": "procurement.quote_received",
     "PO_ISSUED": "procurement.po_issued",
-    "ACK_PO": "procurement.po_ack_due",
+    "ACKNOWLEDGED": "procurement.po_ack_due",
     "SHIPMENT_SUBMITTED": "procurement.shipment_submitted",
     "SHIPMENT_ADVISED": "procurement.shipment_submitted",
-    "PROPOSE_DELIVERY_DATE": "procurement.delivery_changed",
-    "RETURN_REQUESTED": "procurement.return_rma",
-    "INSPECTION_DISCREPANCY": "procurement.inspection_discrepancy",
+    "DELIVERY_CHANGE": "procurement.delivery_changed",
+    "RETURN": "procurement.return_rma",
+    "RMA": "procurement.return_rma",
+    "REJECTED_MATERIAL": "procurement.inspection_discrepancy",
     "QUALITY_HOLD": "procurement.quality_hold",
 }
 
@@ -201,49 +205,115 @@ def _queue(db, *, amo, event, source, source_id, stamp, supplier=None, due=None,
 def _local_day(instant, zone):
     return instant.astimezone(zone).date()
 
+# Only trusted, explicitly enumerated source tables may drive expiry events.
+# Event-source checks run again at dispatch to cancel superseded reminders.
+DATE_SOURCES = {
+    "certificate": ("external_provider_certificates", "valid_until", "verification_state='VERIFIED'"),
+    "capability": ("external_provider_capabilities", "valid_until", "1=1"),
+    "evidence": ("quality_external_provider_evidence", "valid_until", "status='VERIFIED'"),
+    "agreement": ("quality_external_provider_contracts", "expires_on", "status='ACTIVE'"),
+    "qualification": ("quality_provider_qualification_cases", "next_review_due_on",
+                      "status IN ('APPROVED','CONDITIONALLY_APPROVED')"),
+    "surveillance": ("quality_provider_surveillance", "due_on", "outcome IN ('SCHEDULED','IN_PROGRESS')"),
+    "rfq": ("procurement_rfqs", "response_due_at", "status NOT IN ('DRAFT','CANCELLED','CLOSED','AWARDED')"),
+    "po_delivery": ("procurement_purchase_orders", "promised_delivery_date",
+                    "status NOT IN ('CANCELLED','CLOSED')"),
+}
+SOURCE_EVENT = {
+    "certificate": "provider.certificate_expiry",
+    "capability": "provider.approval_expiry",
+    "evidence": "provider.approval_expiry",
+    "agreement": "contract.expiry",
+    "qualification": "provider.approval_expiry",
+    "surveillance": "quality.audit_due",
+    "rfq": "procurement.quote_due",
+    "po_delivery": "procurement.delivery_changed",
+}
+
+def _active_source(db, tenant, source, source_id):
+    if source not in DATE_SOURCES:
+        return None
+    table, column, predicate = DATE_SOURCES[source]
+    base_id = str(source_id).split(":")[0]
+    # The table and column are constants in this module, never request values.
+    query = f"SELECT id, {column} AS due FROM {table} WHERE amo_id=:amo AND id=:id AND {predicate}"
+    row = db.execute(text(query), {"amo": tenant, "id": base_id}).mappings().first()
+    if source == "qualification" and row:
+        newer = db.execute(text("""SELECT 1 FROM quality_provider_qualification_cases newer
+            JOIN quality_provider_qualification_cases old
+            ON old.amo_id=newer.amo_id AND old.supplier_id=newer.supplier_id
+            WHERE old.amo_id=:amo AND old.id=:id
+            AND newer.created_at>old.created_at
+            AND newer.status IN ('APPROVED','CONDITIONALLY_APPROVED')
+            LIMIT 1"""), {"amo":tenant,"id":base_id}).first()
+        if newer:
+            return None
+    return row
+
+def _date_in_tenant_zone(target, zone):
+    if isinstance(target, date) and not isinstance(target, datetime):
+        return target
+    value = _utc(target)
+    return value.astimezone(zone).date() if value else None
+
 def _schedule_expiries(db, amo, local_now, zone, policy):
     count = 0
-    sources = [
-        ("certificate", "provider.certificate_expiry", """SELECT id,supplier_id,valid_until AS due
-             FROM external_provider_certificates WHERE amo_id=:amo
-             AND verification_state='VERIFIED' AND valid_until IS NOT NULL"""),
-        ("capability", "provider.approval_expiry", """SELECT id,supplier_id,valid_until AS due
-             FROM external_provider_capabilities WHERE amo_id=:amo AND valid_until IS NOT NULL"""),
-        ("evidence", "provider.approval_expiry", """SELECT id,supplier_id,valid_until AS due
-             FROM quality_external_provider_evidence WHERE amo_id=:amo
-             AND status='VERIFIED' AND valid_until IS NOT NULL"""),
-        ("agreement", "contract.expiry", """SELECT id,supplier_id,expires_on AS due
-             FROM quality_external_provider_contracts WHERE amo_id=:amo
-             AND status='ACTIVE' AND expires_on IS NOT NULL"""),
-        ("qualification", "provider.approval_expiry", """SELECT id,supplier_id,next_review_due_on AS due
-             FROM quality_provider_qualification_cases WHERE amo_id=:amo
-             AND status IN ('APPROVED','CONDITIONALLY_APPROVED')
-             AND next_review_due_on IS NOT NULL AND NOT EXISTS
-             (SELECT 1 FROM quality_provider_qualification_cases newer
-                WHERE newer.amo_id=quality_provider_qualification_cases.amo_id
-                AND newer.supplier_id=quality_provider_qualification_cases.supplier_id
-                AND newer.created_at>quality_provider_qualification_cases.created_at
-                AND newer.status IN ('APPROVED','CONDITIONALLY_APPROVED'))"""),
-    ]
-    for source, event, query in sources:
+    today = _local_day(local_now,zone)
+    for source, (table, column, predicate) in DATE_SOURCES.items():
+        event = SOURCE_EVENT[source]
+        if source == "rfq":
+            query = f"""SELECT id,NULL AS supplier_id,{column} AS due FROM {table}
+               WHERE amo_id=:amo AND {predicate} AND {column} IS NOT NULL"""
+        else:
+            query = f"""SELECT id,supplier_id,{column} AS due FROM {table}
+               WHERE amo_id=:amo AND {predicate} AND {column} IS NOT NULL"""
         for row in _rows(db, query, amo=amo):
-            target = row["due"]
-            if not target:
+            due_date = _date_in_tenant_zone(row["due"], zone)
+            if due_date is None:
                 continue
-            if isinstance(target, datetime):
-                due_date = _local_day(_utc(target), zone)
-            else:
-                due_date = target
-            for lead in policy["lead_days_json"].get(CATALOG[event], DEFAULT_LEADS):
-                remind_date = due_date - timedelta(days=lead)
-                # Scan lookahead is the upcoming day, not all history; first
-                # deployment deliberately schedules expired obligations as overdue.
-                if remind_date > _local_day(local_now, zone) + timedelta(days=1):
+            if source == "qualification" and _active_source(db,amo,source,row["id"]) is None:
+                continue
+            department = CATALOG[event]
+            leads = [(lead,"lead",due_date-timedelta(days=lead))
+                     for lead in policy["lead_days_json"].get(department, DEFAULT_LEADS)]
+            overdue = [(lag,"overdue",due_date+timedelta(days=lag))
+                       for lag in policy["escalation_days_json"].get(department,[])
+                       if lag>=0]
+            for offset, kind, remind_date in leads+overdue:
+                # Backfill is bounded to the present local day: never flood a
+                # newly onboarded tenant with years of historical reminders.
+                if remind_date<today or remind_date>today+timedelta(days=1):
                     continue
-                remind_at = datetime.combine(remind_date, time(8, 0), zone).astimezone(timezone.utc)
-                count += _queue(db, amo=amo, event=event, source=source, source_id=str(row["id"])+":"+str(lead),
-                                stamp=str(due_date)+":"+str(lead), supplier=row["supplier_id"],
-                                due=remind_at, cancel_older=True)
+                remind_at = datetime.combine(remind_date,time(8,0),zone).astimezone(timezone.utc)
+                # Distinct milestone identities avoid cancelling a 90-day alert
+                # when a later 60-day alert is inserted.
+                suffix = f"{kind}:{offset}"
+                count += _queue(db,amo=amo,event=event,source=source,
+                                source_id=f"{row['id']}:{suffix}",
+                                stamp=f"{due_date}:{suffix}",supplier=row.get("supplier_id"),
+                                due=remind_at,cancel_older=True)
+            if source == "agreement":
+                notice = db.execute(text("""SELECT termination_notice_days FROM
+                    quality_external_provider_contracts WHERE amo_id=:amo AND id=:id"""),
+                    {"amo":amo,"id":row["id"]}).scalar()
+                if notice is not None and 0<=int(notice)<=365:
+                    remind = due_date-timedelta(days=int(notice))
+                    if today<=remind<=today+timedelta(days=1):
+                        count += _queue(db,amo=amo,event="contract.renewal_notice",source=source,
+                            source_id=f"{row['id']}:notice",stamp=f"{due_date}:notice:{notice}",
+                            supplier=row["supplier_id"],
+                            due=datetime.combine(remind,time(8,0),zone).astimezone(timezone.utc),
+                            cancel_older=True)
+    # Purchase order acknowledgements are tracked against canonical supplier
+    # acknowledgement, never against manually-entered frontend badge states.
+    for row in _rows(db, """SELECT id,supplier_id,sent_at FROM procurement_purchase_orders
+       WHERE amo_id=:amo AND sent_at IS NOT NULL AND supplier_ack_reference IS NULL
+         AND status NOT IN ('CANCELLED','CLOSED') ORDER BY sent_at DESC LIMIT 200""",amo=amo):
+        sent = _utc(row["sent_at"])
+        if sent and _local_day(sent,zone)<=today:
+            count += _queue(db,amo=amo,event="procurement.po_ack_due",source="po_ack",
+                            source_id=str(row["id"]),stamp=str(sent.date()),
+                            supplier=row["supplier_id"],due=sent,cancel_older=True)
     return count
 
 def _scan_transitions(db, amo):
