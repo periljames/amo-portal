@@ -55,10 +55,17 @@ def upgrade():
         sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["amo_id","supplier_id"],
+            ["procurement_suppliers.amo_id","procurement_suppliers.id"],ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id","recipient_provider_id"],
+            ["external_tenant_providers.amo_id","external_tenant_providers.id"],ondelete="RESTRICT"),
         sa.UniqueConstraint("amo_id", "fingerprint", name="uq_external_provider_alert_fingerprint"),
         sa.CheckConstraint("status IN ('PENDING','RETRY','DELIVERED','CANCELLED','FAILED')",
                            name="ck_external_provider_alert_status"),
         sa.CheckConstraint("attempts >= 0", name="ck_external_provider_alert_attempts"),
+        sa.CheckConstraint("(recipient_identity_id IS NULL AND recipient_provider_id IS NULL) OR "
+                           "(recipient_identity_id IS NOT NULL AND recipient_provider_id IS NOT NULL)",
+                           name="ck_external_provider_alert_provider_recipient"),
         sa.CheckConstraint("(recipient_user_id IS NOT NULL) <> (recipient_identity_id IS NOT NULL)",
                            name="ck_external_provider_alert_recipient"),
     )
