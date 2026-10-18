@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, text, inspect
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -728,7 +728,9 @@ def _transition(db,work,payload,*,user=None,identity=None):
     _event(db,work,action,payload.reason,staff=str(user.id) if user else None,
            identity=identity,previous=previous,target=target,details=payload.details,
            retry=payload.idempotency_key)
-    if user is not None and action in {"AUTHORIZE","DISPATCH","REWORK","REJECT","HOLD","RESUME","CANCEL","CLOSE"}:
+    delegated_phase8=(action in {"DISPATCH","REWORK","HOLD","RESUME"}
+        and inspect(db.get_bind()).has_table("external_provider_alert_jobs"))
+    if user is not None and not delegated_phase8 and action in {"AUTHORIZE","DISPATCH","REWORK","REJECT","HOLD","RESUME","CANCEL","CLOSE"}:
         _notify_assigned_members(db,work,f"Contracted work: {action.replace('_',' ').title()}",
             f"{work['work_number']}: {payload.reason}")
     db.commit()
