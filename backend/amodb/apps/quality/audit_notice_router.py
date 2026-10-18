@@ -1805,7 +1805,7 @@ def _prepare_notice_document(
         notice=notice,
         issuer=issuer,
         signed_at=issued_at,
-        record_url=_notice_record_url(request, ctx=ctx, audit=audit, notice=notice),
+        record_url=_email_notice_record_url(request, ctx=ctx, audit=audit, notice=notice),
     )
     notice.status = "GENERATED"
     notice.generated_by_user_id = ctx.user_id
