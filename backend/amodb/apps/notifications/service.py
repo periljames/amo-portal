@@ -53,21 +53,30 @@ def _existing_delivery(
     recipient: str,
     template_key: str,
     correlation_id: str | None,
+    cooldown_seconds: int = 0,
 ) -> models.EmailLog | None:
     if not correlation_id:
         return None
-    return (
+    query = (
         db.query(models.EmailLog)
         .filter(
             models.EmailLog.amo_id == amo_id,
             models.EmailLog.recipient == recipient,
             models.EmailLog.template_key == template_key,
             models.EmailLog.correlation_id == correlation_id,
-            models.EmailLog.status == models.EmailStatus.SENT,
         )
         .order_by(models.EmailLog.created_at.desc())
-        .first()
     )
+    successful = query.filter(models.EmailLog.status == models.EmailStatus.SENT).first()
+    if successful is not None:
+        return successful
+    if cooldown_seconds > 0:
+        recent = query.filter(
+            models.EmailLog.created_at >= _utcnow() - timedelta(seconds=min(max(cooldown_seconds, 1), 3600))
+        ).first()
+        if recent is not None:
+            return recent
+    return None
 
 
 def _enforce_rate_limits(db: Session, *, config: dict) -> None:
@@ -142,6 +151,7 @@ def send_email(
     recipient_user_id: Optional[str] = None,
     audit_context: Optional[dict] = None,
     attachments: list[dict[str, Any]] | None = None,
+    cooldown_seconds: int = 0,
 ) -> models.EmailLog:
     if not amo_id:
         raise ValueError("amo_id is required to create an email log entry")
@@ -160,6 +170,7 @@ def send_email(
             recipient=normalized_recipient,
             template_key=template_key,
             correlation_id=correlation_id,
+            cooldown_seconds=cooldown_seconds,
         )
         if existing is not None:
             return existing
@@ -262,6 +273,9 @@ def send_email(
                 "mode": result.get("mode"),
                 "effective_recipient": result.get("recipient") or cleaned_recipient,
                 "original_recipient": result.get("original_recipient") or cleaned_recipient,
+                "effective_cc": list(result.get("cc") or []),
+                "reply_to": list(result.get("reply_to") or []),
+                "effective_recipients": list(result.get("effective_recipients") or []),
                 "template_id": result.get("template_id"),
                 "accepted_at": _utcnow().isoformat(),
             }
