@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from "react";
-import {Link} from "react-router-dom";
+import {Link,useLocation} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUrl} from "./partnerApi";
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
@@ -22,6 +22,8 @@ const next:Record<string,string[]>={
 const key=()=>crypto.randomUUID().replace(/-/g,"");
 
 export default function PartnerContractedWork({tenant,csrf,capabilities}:PartnerProps){
+  const location=useLocation();
+  const assignedFromLink=new URLSearchParams(location.search).get("work")||"";
   const [selected,setSelected]=useState("");
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
@@ -37,7 +39,13 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
   const [action,setAction]=useState("");
   const canRespond=capabilities.includes("task.respond");
   const listing=usePartnerLoad(signal=>partnerRequest<{items:WorkRow[]}>(tenant,"maintenance-work",{signal}),tenant+":maintenance:"+revision);
-  useEffect(()=>{if(!selected && listing.value?.items.length)setSelected(listing.value.items[0].id);},[listing.value,selected]);
+  useEffect(()=>{
+    if(assignedFromLink&&/^[0-9a-f-]{36}$/i.test(assignedFromLink)){
+      setSelected(assignedFromLink);
+    }else if(!selected && listing.value?.items.length){
+      setSelected(listing.value.items[0].id);
+    }
+  },[assignedFromLink,listing.value,selected]);
   const detail=usePartnerLoad(signal=>selected?partnerRequest<Detail>(tenant,"maintenance-work/"+encodeURIComponent(selected),{signal}):Promise.resolve(null),tenant+":work:"+selected+":"+revision);
   const refresh=()=>{setRevision(v=>v+1);setError("");};
   async function run(path:string,body:unknown,success:string){
