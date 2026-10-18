@@ -70,6 +70,11 @@ const FIELD_HINTS: Record<string, string> = {
   use_tls: "true for STARTTLS",
   use_ssl: "true for implicit TLS",
   allow_self_signed: "Keep false in production",
+  from_name: "Display name recipients will see, for example Safarilink Quality",
+  from_email: "Tenant sender mailbox. Custom domains must first be verified in Resend.",
+  reply_to: "Reply destination(s). Leave blank to use active Quality Manager and Quality Officer accounts.",
+  tenant_default_sender_domain: "Verified shared domain used to derive quality.<tenant>@domain senders.",
+  verified_sender_domains: "Comma-separated custom domains already verified in Resend and approved for tenant senders.",
 };
 
 export default function AdminSaaSSettingsPage() {
@@ -161,11 +166,24 @@ export default function AdminSaaSSettingsPage() {
       const value = provider.config?.[field];
       next[field] = value === undefined || value === null ? "" : String(value);
     });
+    if (setup?.scope === "TENANT" && provider.provider === "resend" && provider.scope === "PLATFORM") {
+      const platformFrom = String(provider.config?.from_email || "");
+      const defaultDomain = String(
+        provider.config?.tenant_default_sender_domain
+        || (platformFrom.includes("@") ? platformFrom.split("@").pop() : "")
+        || "",
+      ).trim().toLowerCase();
+      const rawSlug = String(setup.tenant?.login_slug || setup.tenant?.amo_code || "tenant").toLowerCase();
+      const senderSlug = rawSlug.replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+      next.from_name = setup.tenant?.name || "";
+      next.from_email = defaultDomain && senderSlug ? `quality.${senderSlug}@${defaultDomain}` : "";
+      next.reply_to = "";
+    }
     setConfigDraft(next);
     setSecretDraft({});
     setProviderEnabled(provider.status !== "DISABLED");
     setClearSecret(false);
-  }, [provider]);
+  }, [provider, setup?.scope, setup?.tenant]);
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusyAction(key);
