@@ -127,11 +127,21 @@ def _normalise_tenant_resend_payload(
     if result.get("secret") or result.get("clear_secret"):
         raise ValueError("Tenant Resend settings cannot contain API keys or webhook secrets.")
     config = dict(result.get("config") or {})
-    unexpected = set(config) - {"from_email", "from_name", "reply_to"}
+    allowed_identity_fields = {"from_email", "from_name", "reply_to"}
+    unexpected = set(config) - allowed_identity_fields
     if unexpected:
         raise ValueError(
             "Tenant Resend settings may change only from_email, from_name and reply_to: "
             + ", ".join(sorted(unexpected))
+        )
+    clear_fields = result.get("clear_config_fields") or []
+    if not isinstance(clear_fields, list):
+        raise ValueError("clear_config_fields must be a list")
+    unexpected_clear = set(clear_fields) - allowed_identity_fields
+    if unexpected_clear:
+        raise ValueError(
+            "Tenant Resend settings cannot clear platform transport fields: "
+            + ", ".join(sorted(unexpected_clear))
         )
 
     from amodb.apps.platform.resend_adapter import email_recipients
