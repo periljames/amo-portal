@@ -1,5 +1,5 @@
 import React, {useCallback,useEffect,useState} from "react";
-import {Link} from "react-router-dom";
+import {Link,useLocation} from "react-router-dom";
 import {apiRequest} from "../../services/apiClient";
 
 type Event={id:string;supplier_id:number;legal_name:string;entity_type:string;entity_id:string;
@@ -11,6 +11,8 @@ type Candidate={id:string;filename:string;evidence_type:string;related_kind:stri
 type Inbox={events:Event[];quotes:Quote[];shipments:Shipment[];document_candidates:Candidate[];boundary:string};
 type Decision="REPLY"|"ACCEPT_DATE_PROPOSAL"|"REJECT_PROPOSAL"|"ACKNOWLEDGE"|"REFER_ALTERNATE_TO_TECHNICAL";
 export default function ProviderProcurementInbox({amoCode}:{amoCode:string}){
+  const location=useLocation();
+  const targetRecord=new URLSearchParams(location.search).get("providerRecord")||"";
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/procurement/partner-collaboration";
   const [view,setView]=useState<"inbox"|"quotes"|"shipments"|"documents">("inbox");
   const [data,setData]=useState<Inbox|null>(null);
@@ -28,6 +30,10 @@ export default function ProviderProcurementInbox({amoCode}:{amoCode:string}){
     finally{setLoading(false);}
   },[root]);
   useEffect(()=>{void reload();},[reload]);
+  useEffect(()=>{
+    const event=data?.events.find((item)=>String(item.entity_id)===targetRecord);
+    if(event){setView("inbox");setSelected(event);}
+  },[targetRecord,data]);
   async function decide(event:React.FormEvent){
     event.preventDefault();if(!selected||message.trim().length<8)return;
     setSaving(true);setError("");setNotice("");
