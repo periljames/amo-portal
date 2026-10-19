@@ -648,7 +648,15 @@ export default function PdfReaderCoreV4({
 
   const publishPhysicalPage = useCallback((page: number) => {
     const next = clampPdfValue(page, 1, Math.max(1, pageCount));
-    settleNavigation(next);
+    // A virtualizer estimate can reach page N before PDF.js has rendered it.
+    // Clearing the pending jump at that point lets a subsequent scroll defer
+    // and evict N, bouncing a 2,000-page reader back to page 1.
+    if (pendingPageRef.current === next) {
+      const readyPage = viewportRef.current?.querySelector<HTMLElement>(
+        `.pdfv3-page[data-page-number="${next}"].is-ready`,
+      );
+      if (readyPage && pageIsAtReadingLine(next)) settleNavigation(next);
+    }
     if (next === currentPageRef.current) return;
     currentPageRef.current = next;
     setCurrentPage(next);
@@ -667,7 +675,7 @@ export default function PdfReaderCoreV4({
           .slice(0, profile.hotPageLimit);
       });
     }
-  }, [onPageChange, pageCount, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
+  }, [onPageChange, pageCount, pageIsAtReadingLine, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
     // Do not let a transient virtualizer range at the old scroll offset
