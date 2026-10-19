@@ -162,12 +162,17 @@ def history(amo_code:str,department:str|None=None,status:str|None=None,
     permitted=_departments(user)
     if department and department.upper() not in permitted:
         raise HTTPException(403,"Department history not permitted")
-    rows=db.execute(text("""SELECT id,event_key,source_kind,source_id,due_at,status,attempts,
-            next_attempt_at,last_error,in_app_id,email_log_id,acknowledged_at,
-            delivered_at,cancelled_at,created_at
-         FROM external_provider_alert_jobs WHERE amo_id=:amo
-         AND (:status IS NULL OR status=:status)
-         ORDER BY created_at DESC LIMIT :limit"""),{"amo":amo,"status":status,"limit":min(1000,limit*8)}).mappings()
+    rows=db.execute(text("""SELECT j.id,j.event_key,j.source_kind,j.source_id,j.due_at,
+            j.status,j.attempts,j.next_attempt_at,j.last_error,j.in_app_id,
+            j.email_log_id,j.acknowledged_at,j.delivered_at,j.cancelled_at,j.created_at,
+            e.status AS email_processing_status,e.delivery_status AS email_delivery_status,
+            e.provider_message_id AS email_provider_message_id
+         FROM external_provider_alert_jobs j
+         LEFT JOIN email_logs e ON e.id=j.email_log_id AND e.amo_id=j.amo_id
+         WHERE j.amo_id=:amo
+         AND (:status IS NULL OR j.status=:status)
+         ORDER BY j.created_at DESC LIMIT :limit"""),
+         {"amo":amo,"status":status,"limit":min(1000,limit*8)}).mappings()
     items=[dict(r) for r in rows if alerts.CATALOG.get(r["event_key"]) in permitted
            and (department is None or alerts.CATALOG.get(r["event_key"])==department.upper())]
     return {"items":items[:limit],"has_more":len(items)>limit,
