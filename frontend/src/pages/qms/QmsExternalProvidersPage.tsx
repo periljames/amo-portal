@@ -47,6 +47,9 @@ import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
 import ProviderAgreementControls from "./ProviderAgreementControls";
 import ProviderAgreementsWorkspace from "./ProviderAgreementsWorkspace";
 import { hasQmsRolePermission } from "../../app/routeGuards";
+import { canAccessDepartment, getAssignedDepartment } from "../../utils/departmentAccess";
+import { getContext } from "../../services/auth";
+import { Link } from "react-router-dom";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 import ProviderOversight, { ProviderPortfolio } from "./ProviderOversight";
 
@@ -466,6 +469,31 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
         {tabs.map(([id, label]) => <button key={id} className={tab === id ? "is-active" : ""} onClick={() => navigate(`${basePath}/${id}`)}>{label}</button>)}
       </nav>
 
+      {tab === "overview" && <section className="qms-provider-detail-section" aria-label="Linked provider workflows">
+        <div className="qms-provider-section-heading">
+          <div><span className="qms-provider-eyebrow">Shared data · separate decisions</span>
+            <h3>Authorized workspaces</h3></div>
+        </div>
+        <p>All workflows use this supplier identity. Quality remains responsible for approval, Procurement for orders, DMS for controlled originals and Maintenance for technical authorization. A link never grants additional privileges.</p>
+        <nav className="qms-provider-scope-list" aria-label="Provider cross-module actions">
+          <Link to={`${basePath}/contracts`}>Quality agreements and amendments</Link>
+          <Link to={`${basePath}/qualification`}>Qualification and scope reviews</Link>
+          <Link to={`${basePath}/evidence`}>Evidence decisions and expiry</Link>
+          <Link to={`${basePath}/monitoring`}>Surveillance and provider oversight</Link>
+          {hasQmsRolePermission("qms.audit.view") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/register`}>QMS audits and findings</Link>}
+          {hasQmsRolePermission("qms.car.view") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/register`}>CAR / CAPA and effectiveness reviews</Link>}
+          {hasQmsRolePermission("qms.audit.manage") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts`}>Provider accounts and delegated access</Link>}
+          {hasQmsRolePermission("qms.document.view") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/doc-control/provider-evidence`}>Document Control: governed originals and retention</Link>}
+          {canAccessDepartment(getCachedUser(), getAssignedDepartment(getCachedUser(), getContext().department), "procurement") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/procurement/suppliers`}>Procurement: sourcing, contracts and receiving</Link>}
+          {canAccessDepartment(getCachedUser(), getAssignedDepartment(getCachedUser(), getContext().department), "maintenance") &&
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/contracted-work`}>Maintenance: contracted work and technical closeout</Link>}
+        </nav>
+      </section>}
       {tab === "overview" && (
         <div className="qms-provider-detail-grid">
           <section className="qms-provider-detail-section">
