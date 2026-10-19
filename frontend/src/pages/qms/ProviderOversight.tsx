@@ -1,10 +1,12 @@
 import React, {useEffect,useState} from "react";
 import {apiRequest,qmsPath} from "../../services/apiClient";
+import {getCachedUser} from "../../services/auth";
 
 type Summary={states:{status:string;risk_level:string;total:number}[];
   queue:{qualification_pending:number;reviews_due:number};
   next_120_days:{contracts:number;certificates:number;scopes:number};
-  as_of:string;computed_not_approval:boolean};
+  as_of:string;computed_not_approval:boolean;
+  human_classifications:{critical:number;sole_source:number}};
 type CalendarRow={kind:string;supplier_code:string;reference:string;due_on:string};
 type Profile={supplier:{legal_name:string;risk_level:string;status:string};
   sites:{site_code:string;site_name:string;country:string|null;is_primary:boolean}[];
@@ -20,6 +22,9 @@ type Profile={supplier:{legal_name:string;risk_level:string;status:string};
   returns:{return_requests:number;warranty_requests:number};
   concentration:{po_count_share_percent:number|null;provider_orders:number;tenant_orders:number};
   lifecycle_snapshots:{action:string;previous_status:string|null;current_status:string;risk_level:string;occurred_at:string}[];
+  special_classification:{critical_service:boolean;sole_source:boolean;reason:string;revision:number}|null;
+  qms_assurance:{findings:number;open_cars:number;overdue_cars:number;verified_caps:number};
+  finding_months:{month:string;total:number}[];
   limitations:string[];as_of:string;computed_not_approval:boolean};
 function value(n:number|string|null|undefined):string{
   return n===null||n===undefined?"Insufficient data":String(n);
@@ -74,6 +79,8 @@ export function ProviderPortfolio({amoCode}:{amoCode:string}) {
         <Stat label="Contracts expiring (120 days)" content={summary.next_120_days.contracts}/>
         <Stat label="Certificates expiring (120 days)" content={summary.next_120_days.certificates}/>
         <Stat label="Scopes expiring (120 days)" content={summary.next_120_days.scopes}/>
+        <Stat label="Quality-classified critical providers" content={summary.human_classifications.critical}/>
+        <Stat label="Quality-classified sole-source providers" content={summary.human_classifications.sole_source}/>
       </div><h3>Provider risk and lifecycle distribution</h3>
       <Table head={["Lifecycle","Human-classified risk","Providers"]}
         items={summary.states.map(r=>[r.status,r.risk_level,r.total])}/>
@@ -86,18 +93,41 @@ export function ProviderPortfolio({amoCode}:{amoCode:string}) {
     </div>}
   </section>;
 }
-export default function ProviderOversight({amoCode,supplierId}:{amoCode:string;supplierId:number}){
+export default function ProviderOversight({amoCode,supplierId,evidenceOptions}:{
+  amoCode:string;supplierId:number;evidenceOptions:{id:string;title:string}[]
+}){
+  const canClassify=getCachedUser()?.role==="QUALITY_MANAGER";
+  const [critical,setCritical]=useState(false);
+  const [sole,setSole]=useState(false);
+  const [evidenceId,setEvidenceId]=useState("");
+  const [reason,setReason]=useState("");
+  const [saving,setSaving]=useState(false);
   const [data,setData]=useState<Profile|null>(null);
   const [error,setError]=useState("");
   const [pending,setPending]=useState(true);
   const [revision,setRevision]=useState(0);
   useEffect(()=>{let live=true;setPending(true);setError("");setData(null);
     apiRequest<Profile>(qmsPath(amoCode,"/provider-oversight/providers/"+supplierId),{cacheTtlMs:0})
-      .then(v=>{if(live)setData(v);})
+      .then(v=>{if(live){setData(v);setCritical(Boolean(v.special_classification?.critical_service));
+        setSole(Boolean(v.special_classification?.sole_source));setReason("");setEvidenceId("");}})
       .catch(e=>{if(live)setError(e instanceof Error?e.message:"Provider oversight unavailable.");})
       .finally(()=>{if(live)setPending(false);});
     return()=>{live=false;};
   },[amoCode,supplierId,revision]);
+  async function saveClassification(){
+    if(!data||reason.trim().length<12)return;
+    setSaving(true);setError("");
+    try{
+      await apiRequest(qmsPath(amoCode,"/provider-oversight/providers/"+supplierId+"/classification"),{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({expected_revision:data.special_classification?.revision||0,
+          critical_service:critical,sole_source:sole,evidence_id:evidenceId||null,reason:reason.trim()}),
+        cacheTtlMs:0,
+      });
+      setRevision(v=>v+1);
+    }catch(e){setError(e instanceof Error?e.message:"Classification not recorded.");}
+    finally{setSaving(false);}
+  }
   return <section className="qms-provider-detail-section" aria-label="Provider 360-degree performance">
     <h3>Provider 360° oversight</h3>
     <p>Computed operating indicators. They neither extend regulatory approvals nor authorize work.</p>
@@ -113,9 +143,29 @@ export default function ProviderOversight({amoCode,supplierId}:{amoCode:string;s
         <Stat label="Receiving discrepancies" content={data.receiving.discrepancies}/>
         <Stat label="Open contracted work" content={data.contracted_maintenance.outstanding}/>
         <Stat label="Active scope restrictions" content={data.restrictions.active}/>
+        <Stat label="QMS findings (linked audits)" content={data.qms_assurance.findings}/>
+        <Stat label="Overdue QMS CARs" content={data.qms_assurance.overdue_cars}/>
         <Stat label="Current verified evidence" content={data.evidence.current_verified}/>
         <Stat label="PO count concentration" content={data.concentration.po_count_share_percent===null?"N/A":data.concentration.po_count_share_percent+"%"}/>
       </div>
+      <h4>Documented critical / sole-source classification</h4>
+      <p>Critical service: {data.special_classification?.critical_service?"Yes":"No"}.
+        Sole-source: {data.special_classification?.sole_source?"Yes":"No"}. These labels do not approve or suspend suppliers.</p>
+      {canClassify&&<div className="qp-fields">
+        <label><input type="checkbox" checked={critical} onChange={e=>setCritical(e.target.checked)}/> Critical service</label>
+        <label><input type="checkbox" checked={sole} onChange={e=>setSole(e.target.checked)}/> Sole-source (confirmed evidence)</label>
+        <label>Verified QMS evidence
+          <select value={evidenceId} onChange={e=>setEvidenceId(e.target.value)}>
+            <option value="">Select current verified record</option>
+            {evidenceOptions.map(e=><option key={e.id} value={e.id}>{e.title}</option>)}
+          </select>
+        </label>
+        <label>Quality Manager's documented classification reason
+          <textarea rows={2} value={reason} onChange={e=>setReason(e.target.value)}/>
+        </label>
+        <button type="button" className="qms-provider-button" disabled={saving||reason.trim().length<12||((critical||sole)&&!evidenceId)}
+          onClick={()=>void saveClassification()}>{saving?"Recording…":"Record controlled classification"}</button>
+      </div>}
       <h4>Sites and approved capability records</h4>
       <Table head={["Site","Name","Country","Primary"]}
         items={data.sites.map(s=>[s.site_code,s.site_name,s.country,s.is_primary?"Yes":"No"])}/>
@@ -135,6 +185,13 @@ export default function ProviderOversight({amoCode,supplierId}:{amoCode:string;s
         <Stat label="Avg closed repair turnaround (hours)"
           content={data.contracted_maintenance.avg_turnaround_hours==null?"N/A":value(Math.round(data.contracted_maintenance.avg_turnaround_hours))}/>
       </div>
+      <h4>QMS assurance and findings trend</h4>
+      <div className="qms-provider-summary">
+        <Stat label="Open linked CARs" content={data.qms_assurance.open_cars}/>
+        <Stat label="CAP verification records" content={data.qms_assurance.verified_caps}/>
+      </div>
+      <Table head={["Finding month","Finding count"]}
+        items={data.finding_months.map(r=>[r.month,r.total])}/>
       <h4>Qualification and surveillance</h4>
       <Table head={["Category","Case","State","Next due"]}
         items={data.qualification_cases.map(c=>[c.category,c.case_kind,c.status,c.next_review_due_on])}/>

@@ -23,6 +23,27 @@ def upgrade():
          ["procurement_suppliers.amo_id","procurement_suppliers.id"],ondelete="RESTRICT"))
     op.create_index("ix_provider_snapshots_tenant_history","external_provider_oversight_snapshots",
                     ["amo_id","supplier_id","occurred_at"])
+
+    # Explicit, human-owned critical/sole-source classifications. These labels
+    # never grant procurement eligibility or technical maintenance approval.
+    op.create_table("external_provider_special_classifications",
+        sa.Column("amo_id",sa.String(36),nullable=False),
+        sa.Column("supplier_id",sa.Integer(),nullable=False),
+        sa.Column("critical_service",sa.Boolean(),nullable=False,server_default=sa.false()),
+        sa.Column("sole_source",sa.Boolean(),nullable=False,server_default=sa.false()),
+        sa.Column("evidence_id",sa.String(36)),
+        sa.Column("reason",sa.Text(),nullable=False),
+        sa.Column("revision",sa.Integer(),nullable=False,server_default="1"),
+        sa.Column("decided_by_user_id",sa.String(36),sa.ForeignKey("users.id",ondelete="SET NULL")),
+        sa.Column("decided_at",sa.DateTime(timezone=True),nullable=False,server_default=sa.func.now()),
+        sa.PrimaryKeyConstraint("amo_id","supplier_id",name="pk_ext_special_classification"),
+        sa.ForeignKeyConstraint(["amo_id","supplier_id"],
+            ["procurement_suppliers.amo_id","procurement_suppliers.id"],ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["amo_id","supplier_id","evidence_id"],
+            ["quality_external_provider_evidence.amo_id",
+             "quality_external_provider_evidence.supplier_id",
+             "quality_external_provider_evidence.id"],ondelete="RESTRICT"),
+        sa.CheckConstraint("revision>0",name="ck_ext_classification_revision"))
     op.create_index("ix_external_provider_contract_expiry",
        "quality_external_provider_contracts",["amo_id","status","expires_on"])
     op.create_index("ix_external_provider_certificate_expiry",
@@ -32,12 +53,15 @@ def upgrade():
     op.create_index("ix_external_provider_work_provider_state",
        "external_contracted_work",["amo_id","supplier_id","status","closed_at"])
     if op.get_bind().dialect.name=="postgresql":
+        op.execute(sa.text("ALTER TABLE external_provider_special_classifications ENABLE ROW LEVEL SECURITY"))
+        op.execute(sa.text("ALTER TABLE external_provider_special_classifications FORCE ROW LEVEL SECURITY"))
         op.execute(sa.text("ALTER TABLE external_provider_oversight_snapshots ENABLE ROW LEVEL SECURITY"))
         op.execute(sa.text("ALTER TABLE external_provider_oversight_snapshots FORCE ROW LEVEL SECURITY"))
         condition="""amo_id=NULLIF(current_setting('app.tenant_id',true),'')
            AND (NULLIF(current_setting('app.external_provider_id',true),'') IS NULL
            OR current_setting('app.external_provider_id',true)='__INTERNAL_QUALITY_REVIEW__')"""
         op.execute(sa.text("CREATE POLICY ext_provider_snapshot_tenant ON external_provider_oversight_snapshots USING ("+condition+") WITH CHECK ("+condition+")"))
+        op.execute(sa.text("CREATE POLICY ext_provider_classification_tenant ON external_provider_special_classifications USING ("+condition+") WITH CHECK ("+condition+")"))
         op.execute(sa.text("""CREATE TRIGGER trg_ext_provider_snapshots_immutable
            BEFORE UPDATE OR DELETE ON external_provider_oversight_snapshots
            FOR EACH ROW EXECUTE FUNCTION external_provider_prevent_event_mutation()"""))
@@ -50,4 +74,5 @@ def downgrade():
     op.drop_index("ix_external_provider_certificate_expiry",table_name="external_provider_certificates")
     op.drop_index("ix_external_provider_contract_expiry",table_name="quality_external_provider_contracts")
     op.drop_index("ix_provider_snapshots_tenant_history",table_name="external_provider_oversight_snapshots")
+    op.drop_table("external_provider_special_classifications")
     op.drop_table("external_provider_oversight_snapshots")

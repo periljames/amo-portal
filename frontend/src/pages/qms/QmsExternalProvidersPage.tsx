@@ -506,7 +506,9 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
       {tab === "qualification" && <ProviderQualificationWorkspace amoCode={amoCode} supplierId={provider.id} />}
       {tab === "monitoring" && (
         <div className="qms-provider-detail-grid">
-          <ProviderOversight amoCode={amoCode} supplierId={providerId} />
+          <ProviderOversight amoCode={amoCode} supplierId={providerId}
+            evidenceOptions={provider.evidence.filter(e=>e.effective_status==="VERIFIED")
+              .map(e=>({id:e.id,title:e.title}))} />
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Review cycle</span><h3>Oversight</h3></div></div><dl className="qms-provider-definition-list"><div><dt>Last reviewed</dt><dd>{dateLabel(provider.last_reviewed_on)}</dd></div><div><dt>Next review</dt><dd className={provider.review_due ? "is-alert" : ""}>{dateLabel(provider.next_review_due_on)}</dd></div><div><dt>Interval</dt><dd>{provider.review_interval_days ? `${provider.review_interval_days} days` : "Not set"}</dd></div></dl></section>
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Current controls</span><h3>Attention required</h3></div></div><div className="qms-provider-health-list"><span className={provider.review_due ? "is-alert" : "is-ok"}>{provider.review_due ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{provider.review_due ? "Provider review is due" : "Review date is current"}</span><span className={approvalBlocked ? "is-alert" : "is-ok"}>{approvalBlocked ? <Ban size={17} /> : <ShieldCheck size={17} />}{approvalBlocked ? "Required contract is missing" : "Contract gate satisfied"}</span></div></section>
         </div>

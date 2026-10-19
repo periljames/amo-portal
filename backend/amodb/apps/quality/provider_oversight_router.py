@@ -9,6 +9,10 @@ from uuid import uuid4
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from amodb.security import require_roles
+from amodb.apps.accounts import models as accounts
+from .tenant_security import assert_quality_permission, write_tenant_context
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -112,6 +116,27 @@ def provider_360(amo_code: str,supplier_id: int,
         (SELECT COUNT(*) FROM procurement_purchase_orders WHERE amo_id=:amo) tenant_orders,
         (SELECT COUNT(*) FROM procurement_purchase_orders
          WHERE amo_id=:amo AND supplier_id=:supplier) provider_orders""",**key)
+    special=_one(db,"""SELECT critical_service,sole_source,reason,revision,
+        decided_at FROM external_provider_special_classifications
+        WHERE amo_id=:amo AND supplier_id=:supplier""",**key)
+    qms_findings=_one(db,"""SELECT COUNT(DISTINCT f.id) findings,
+        COUNT(DISTINCT c.id) FILTER (WHERE c.closed_at IS NULL) open_cars,
+        COUNT(DISTINCT c.id) FILTER (WHERE c.closed_at IS NULL
+          AND c.due_date<:today) overdue_cars,
+        COUNT(DISTINCT cap.id) FILTER (WHERE cap.verified_at IS NOT NULL) verified_caps
+        FROM quality_provider_surveillance sv
+        JOIN qms_audit_findings f ON f.amo_id=sv.amo_id
+          AND CAST(f.audit_id AS TEXT)=sv.audit_id
+        LEFT JOIN quality_cars c ON c.amo_id=f.amo_id AND c.finding_id=f.id
+        LEFT JOIN qms_corrective_actions cap ON cap.amo_id=f.amo_id AND cap.finding_id=f.id
+        WHERE sv.amo_id=:amo AND sv.supplier_id=:supplier""",**key,today=today)
+    finding_months=_all(db,"""SELECT CAST(DATE_TRUNC('month',f.created_at) AS DATE) month,
+        COUNT(DISTINCT f.id) total
+        FROM quality_provider_surveillance sv JOIN qms_audit_findings f
+        ON f.amo_id=sv.amo_id AND CAST(f.audit_id AS TEXT)=sv.audit_id
+        WHERE sv.amo_id=:amo AND sv.supplier_id=:supplier
+        GROUP BY DATE_TRUNC('month',f.created_at)
+        ORDER BY month DESC LIMIT 12""",**key)
     history=_all(db,"""SELECT action,occurred_at
         FROM quality_provider_qualification_events WHERE amo_id=:amo
         AND supplier_id=:supplier ORDER BY occurred_at DESC,id DESC LIMIT 40""",**key)
@@ -128,15 +153,86 @@ def provider_360(amo_code: str,supplier_id: int,
             "certificates":certificates,"evidence":evidence,"qualification_cases":cases,
             "surveillance":surveillance,"restrictions":restrictions,"procurement":purchasing,
             "receiving":receiving,"contracted_maintenance":work,"returns":returns,
-            "concentration":concentration,"qualification_history":history,
+            "concentration":concentration,"special_classification":special,
+            "qms_assurance":qms_findings,"finding_months":finding_months,
+            "qualification_history":history,
             "lifecycle_snapshots":snapshots,"as_of":today.isoformat(),
             "computed_not_approval":True,
             "limitations":[
               "On-time indicator uses last recorded receipt of fulfilled orders, not carrier delivery proof.",
               "Concentration uses purchase-order count; multi-currency totals are not combined.",
               "Sole-source and critical supplier determinations require documented human review.",
-              "Repeat findings, CAR effectiveness and warranty outcomes remain governed by their source departments.",
+              "Finding counts use linked surveillance audits; repeat-finding classification needs a verified common-cause record.",
+              "Verified CAP evidence is not proof that the effectiveness review passed; QMS owns that decision.",
+              "Warranty outcomes remain with commercial source records.",
               "Snapshots begin with Phase 9 deployment; historic QMS events remain separately retained."]}
+
+
+
+class SpecialClassification(BaseModel):
+    expected_revision:int=Field(ge=0)
+    critical_service:bool=False
+    sole_source:bool=False
+    evidence_id:str|None=Field(default=None,max_length=36)
+    reason:str=Field(min_length=12,max_length=2000)
+
+@router.put("/providers/{supplier_id}/classification")
+def classify_provider(amo_code:str,supplier_id:int,payload:SpecialClassification,
+    ctx:TenantContext=Depends(write_tenant_context),
+    db:Session=Depends(get_write_db),
+    manager=Depends(require_roles(accounts.AccountRole.QUALITY_MANAGER))):
+    _context(db,ctx)
+    assert_quality_permission(db,ctx,"qms.supplier.manage")
+    source=db.execute(text("""SELECT CAST(status AS TEXT) status FROM procurement_suppliers
+      WHERE amo_id=:amo AND id=:supplier FOR UPDATE"""),
+      {"amo":ctx.amo_id,"supplier":supplier_id}).mappings().first()
+    if not source:raise HTTPException(404,"Provider not found")
+    current=db.execute(text("""SELECT revision,critical_service,sole_source
+      FROM external_provider_special_classifications
+      WHERE amo_id=:amo AND supplier_id=:supplier FOR UPDATE"""),
+      {"amo":ctx.amo_id,"supplier":supplier_id}).mappings().first()
+    if int(current["revision"] if current else 0)!=payload.expected_revision:
+        raise HTTPException(409,"Provider classification changed; reload before saving")
+    if payload.critical_service or payload.sole_source:
+        if not payload.evidence_id:
+            raise HTTPException(422,"Current independently verified Quality evidence is required")
+        evidence=db.execute(text("""SELECT id FROM quality_external_provider_evidence
+          WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id
+          AND status='VERIFIED' AND (valid_until IS NULL OR valid_until>=:today)"""),
+          {"amo":ctx.amo_id,"supplier":supplier_id,"id":payload.evidence_id,
+           "today":_tenant_today(db,ctx.amo_id)}).first()
+        if not evidence:
+            raise HTTPException(409,"The referenced Quality evidence is not verified and current")
+    params={"amo":ctx.amo_id,"supplier":supplier_id,
+       "critical":payload.critical_service,"sole":payload.sole_source,
+       "evidence":payload.evidence_id,"reason":payload.reason,"actor":ctx.user_id,
+       "revision":payload.expected_revision}
+    if current:
+        result=db.execute(text("""UPDATE external_provider_special_classifications
+          SET critical_service=:critical,sole_source=:sole,evidence_id=:evidence,
+          reason=:reason,decided_by_user_id=:actor,decided_at=NOW(),revision=revision+1
+          WHERE amo_id=:amo AND supplier_id=:supplier AND revision=:revision"""),params)
+    else:
+        result=db.execute(text("""INSERT INTO external_provider_special_classifications
+          (amo_id,supplier_id,critical_service,sole_source,evidence_id,reason,decided_by_user_id)
+          VALUES(:amo,:supplier,:critical,:sole,:evidence,:reason,:actor)
+          ON CONFLICT (amo_id,supplier_id) DO NOTHING"""),params)
+    if result.rowcount!=1:raise HTTPException(409,"Concurrent provider classification update")
+    audit_services.log_event(db,amo_id=ctx.amo_id,actor_user_id=ctx.user_id,
+      entity_type="external_provider_classification",entity_id=str(supplier_id),
+      action="classified_by_quality_manager",
+      before=dict(current) if current else None,
+      after={"critical_service":payload.critical_service,"sole_source":payload.sole_source,
+             "quality_evidence_id":payload.evidence_id},
+      correlation_id=str(uuid4()),metadata={"reason":payload.reason},critical=True)
+    from .provider_oversight_events import record_status_snapshot
+    record_status_snapshot(db,amo_id=ctx.amo_id,supplier_id=supplier_id,
+      actor_id=ctx.user_id,previous_status=source["status"],
+      current_status=source["status"],action="QUALITY_SPECIAL_CLASSIFICATION",
+      source_reference=payload.evidence_id)
+    db.commit()
+    return {"revision":payload.expected_revision+1,"critical_service":payload.critical_service,
+            "sole_source":payload.sole_source,"classified":True}
 
 @router.get("/portfolio")
 def portfolio(amo_code: str,
@@ -164,7 +260,12 @@ def portfolio(amo_code: str,
           WHERE amo_id=:amo AND CAST(status AS TEXT)='ACTIVE'
           AND expires_on BETWEEN :today AND :end) scopes""",
         amo=ctx.amo_id,today=today,end=today+timedelta(days=120))
+    classifications=_one(db,"""SELECT COUNT(*) FILTER (WHERE critical_service) critical,
+        COUNT(*) FILTER (WHERE sole_source) sole_source
+        FROM external_provider_special_classifications WHERE amo_id=:amo""",
+        amo=ctx.amo_id)
     return {"states":states,"queue":queue,"next_120_days":expires,
+            "human_classifications":classifications,
             "as_of":today.isoformat(),"computed_not_approval":True}
 
 @router.get("/calendar")
