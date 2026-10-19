@@ -232,9 +232,11 @@ DATE_SOURCES = {
     "qualification": ("quality_provider_qualification_cases", "next_review_due_on",
                       "status IN ('APPROVED','CONDITIONALLY_APPROVED')"),
     "surveillance": ("quality_provider_surveillance", "due_on", "outcome IN ('SCHEDULED','IN_PROGRESS')"),
-    "rfq": ("procurement_rfqs", "response_due_at", "status NOT IN ('DRAFT','CANCELLED','CLOSED','AWARDED')"),
+    "rfq": ("procurement_rfqs", "response_due_at", "status IN ('ISSUED','PARTIALLY_RESPONDED') AND EXISTS ("
+            "SELECT 1 FROM procurement_rfq_suppliers invited WHERE invited.rfq_id=procurement_rfqs.id "
+            "AND invited.responded_at IS NULL AND invited.declined_at IS NULL)"),
     "po_delivery": ("procurement_purchase_orders", "promised_delivery_date",
-                    "status NOT IN ('CANCELLED','CLOSED')"),
+                    "status NOT IN ('CANCELLED','CLOSED','FULFILLED')"),
 }
 SOURCE_EVENT = {
     "certificate": "provider.certificate_expiry",
@@ -299,7 +301,7 @@ def _schedule_expiries(db, amo, local_now, zone, policy):
             for offset, kind, remind_date in leads+overdue:
                 # Backfill is bounded to the present local day: never flood a
                 # newly onboarded tenant with years of historical reminders.
-                if remind_date<today or remind_date>today+timedelta(days=1):
+                if remind_date<today-timedelta(days=7) or remind_date>today+timedelta(days=1):
                     continue
                 remind_at = datetime.combine(remind_date,time(8,0),zone).astimezone(timezone.utc)
                 # Distinct milestone identities avoid cancelling a 90-day alert
@@ -371,7 +373,7 @@ def _scan_transitions(db, amo):
                    FROM external_procurement_events WHERE amo_id=:amo
                    ORDER BY created_at DESC LIMIT 500""",amo=amo):
         event=PROCUREMENT_ACTIONS.get(row["action"])
-        if row["action"]=="SUBMITTED" and row["entity_type"]!="QUOTE":
+        if row["action"]=="SUBMITTED":
             continue
         if row["action"]=="ACKNOWLEDGED" and row["entity_type"]!="PO":
             continue
@@ -485,7 +487,6 @@ def _scan_canonical_procurement(db, amo):
     """Map canonical Procurement transactions to alerts without inventing stock events."""
     count=0
     event_map={
-        ("ProcurementRFQ","issue"):"procurement.rfq_invited",
         ("ProcurementQuote","receive"):"procurement.quote_received",
         ("ProcurementPurchaseOrder","send"):"procurement.po_issued",
         ("ProcurementPurchaseOrder","acknowledge"):"procurement.po_acknowledged",
