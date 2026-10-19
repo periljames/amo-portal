@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import re
+from zipfile import BadZipFile, ZipFile
 from datetime import date, datetime
 from uuid import uuid4
 
@@ -52,6 +53,46 @@ _CONTRACT_COLUMNS = {
 }
 
 _MAX_BYTES = 10 * 1024 * 1024
+_MAX_UNPACKED_BYTES = 128 * 1024 * 1024
+_MAX_MEMBER_BYTES = 64 * 1024 * 1024
+_MAX_ZIP_MEMBERS = 500
+_MAX_WORKSHEETS = 40
+_MAX_COLUMNS = 128
+_MAX_CELL_CHARS = 16_384
+_MAX_SCANNED_ROWS = 10_000
+
+def _validate_workbook_archive(data: bytes) -> None:
+    """Bound XLSX/XLSM decompression before openpyxl expands untrusted XML."""
+    try:
+        with ZipFile(io.BytesIO(data)) as archive:
+            members = archive.infolist()
+            if not members or len(members) > _MAX_ZIP_MEMBERS:
+                raise HTTPException(413, "Workbook archive has too many parts.")
+            total = 0
+            for part in members:
+                if part.flag_bits & 1:
+                    raise HTTPException(422, "Encrypted workbook parts are not accepted.")
+                if part.file_size > _MAX_MEMBER_BYTES:
+                    raise HTTPException(413, "Workbook contains an oversized part.")
+                total += part.file_size
+                if total > _MAX_UNPACKED_BYTES:
+                    raise HTTPException(413, "Workbook expands beyond the allowed limit.")
+                if part.file_size > 1024 * 1024 and (
+                    part.compress_size == 0
+                    or part.file_size > 250 * part.compress_size
+                ):
+                    raise HTTPException(413, "Workbook compression ratio is unsafe.")
+            names = {part.filename for part in members}
+            if "[Content_Types].xml" not in names or "xl/workbook.xml" not in names:
+                raise HTTPException(422, "File is not an XLSX/XLSM workbook.")
+    except BadZipFile as exc:
+        raise HTTPException(422, "Invalid workbook archive.") from exc
+
+def _guard_row(cells: tuple) -> None:
+    if len(cells) > _MAX_COLUMNS:
+        raise HTTPException(413, "Workbook row contains too many columns.")
+    if any(isinstance(cell, str) and len(cell) > _MAX_CELL_CHARS for cell in cells):
+        raise HTTPException(413, "Workbook contains an oversized cell.")
 
 def _tenant(db, amo_code, user):
     tenant = service.resolve_tenant_amo_id(db, amo_code=amo_code, current_user=user)
@@ -108,6 +149,7 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     data = await file.read(_MAX_BYTES + 1)
     if len(data) > _MAX_BYTES:
         raise HTTPException(413, "Workbook exceeds 10 MB.")
+    _validate_workbook_archive(data)
     digest = hashlib.sha256(data).hexdigest()
     existing = db.execute(text("""SELECT id, status FROM external_provider_import_batches
         WHERE amo_id=:amo AND source_sha256=:digest AND import_kind=:kind
@@ -134,6 +176,8 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
              "kind":import_kind,
              "sheet":source_sheet[:128] or None, "header_row":header_row,
              "actor": str(user.id)})
+        if len(workbook.worksheets) > _MAX_WORKSHEETS:
+            raise HTTPException(413, "Workbook contains too many worksheets.")
         seen = set()
         seen_names = set()
         matched_sheet = False
@@ -147,8 +191,12 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
             headers = next(rows, None)
             if not headers:
                 continue
+            _guard_row(headers)
             matched = _mapping(headers, overrides, columns)
             for row_number, cells in enumerate(rows, start=header_row + 1):
+                if row_number - header_row > _MAX_SCANNED_ROWS:
+                    raise HTTPException(413, "Workbook exceeds the scanned-row safety limit.")
+                _guard_row(cells)
                 if not any(cell is not None for cell in cells):
                     continue
                 counts["total"] += 1
