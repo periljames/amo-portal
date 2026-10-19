@@ -154,7 +154,7 @@ export default function ProviderAlertSettingsPanel({ amoCode, department }:
             <thead><tr><th>Event</th><th>Scheduled</th><th>State</th><th>Email</th><th>Retry</th></tr></thead>
             <tbody>{rows.map((row) => <tr key={row.id}>
               <td>{row.event_key}</td><td>{new Date(row.due_at).toLocaleString()}</td>
-              <td>{row.status}{row.acknowledged_at ? " · acknowledged" : ""}{row.last_error ? " · " + row.last_error : ""}</td>
+              <td>{row.status === "DELIVERED" ? "Dispatched (in-app or email accepted)" : row.status}{row.acknowledged_at ? " · acknowledged in portal" : ""}{row.last_error ? " · " + row.last_error : ""}</td>
               <td>{row.email_log_id ? (row.email_delivery_status || row.email_processing_status || "Pending provider evidence") : "Not attempted"}</td>
               <td>{["FAILED", "RETRY"].includes(row.status) ?
                 <button disabled={busy} onClick={() => void retry(row.id)}>Retry</button> : "—"}</td>
