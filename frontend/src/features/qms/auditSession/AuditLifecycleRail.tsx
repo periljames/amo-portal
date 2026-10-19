@@ -88,7 +88,7 @@ const AuditLifecycleRail: React.FC<Props> = ({ amoCode, auditKey }) => {
     <section className="qms-audit-session-rail qms-audit-session-rail--progress" aria-label="Audit occurrence progress">
       <div className="qms-audit-session-rail__meta">
         <div className="qms-audit-session-rail__identity">
-          <h1 className="qms-audit-session-rail__title" title={auditTitle}>
+          <h1 className="qms-audit-session-rail__title" title={auditTitle} aria-label={`${auditRef} · ${auditTitle}`}>
             {auditTitle}
           </h1>
           <div className="qms-audit-session-rail__meta-row">
