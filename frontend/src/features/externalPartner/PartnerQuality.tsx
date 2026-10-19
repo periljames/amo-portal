@@ -1,4 +1,5 @@
 import React,{useEffect,useRef,useState} from "react";
+import { useSearchParams } from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUpload,type QualityPage} from "./partnerApi";
 import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
@@ -7,9 +8,13 @@ type AuditDocumentRequest=QualityPage["document_requests"]["items"][number];
 type Draft={containment_action:string;root_cause:string;corrective_action:string;preventive_action:string;evidence_submission_id:string};
 const empty:Draft={containment_action:"",root_cause:"",corrective_action:"",preventive_action:"",evidence_submission_id:""};
 export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
+  const [searchParams,setSearchParams]=useSearchParams();
+  const assignedAudit=searchParams.get("audit")||"";
   const [offset,setOffset]=useState(0);
+  useEffect(()=>setOffset(0),[assignedAudit,tenant]);
   const data=usePartnerLoad((signal)=>partnerRequest<QualityPage>(tenant,
-    `quality?limit=15&offset=${offset}`,{signal}),`${tenant}:${offset}`);
+    `quality?limit=15&offset=${offset}${assignedAudit?`&audit_id=${encodeURIComponent(assignedAudit)}`:""}`,{signal}),
+    `${tenant}:${offset}:${assignedAudit}`);
   const [activeCar,setActiveCar]=useState<Car|null>(null);
   const [carRequirement,setCarRequirement]=useState("");
   const configuredRequirements=usePartnerLoad(signal=>partnerRequest<{items:{id:string;code:string;title:string}[]}>(
@@ -66,6 +71,14 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
     }).catch(e=>setError(e instanceof Error?e.message:"The CAR submission was not accepted")).finally(()=>setBusy(false));
   };
   return <div className="partner-stack">
+    {assignedAudit&&<div className="partner-record" role="status">
+      <strong>Assigned audit workspace</strong>
+      <p className="partner-muted">Showing released notices, documents, findings and CARs only for your currently authorized audit assignment.</p>
+      <button type="button" onClick={()=>{
+        const next=new URLSearchParams(searchParams);next.delete("audit");
+        setSearchParams(next,{replace:true});
+      }}>Show all assigned audits</button>
+    </div>}
     <State pending={data.pending} error={data.error} retry={data.reload}/>
     {data.value&&<>
       <Section title="Assigned audit notices" description="Only Quality-issued, delivered or acknowledged audit notices for your assigned audits are shown.">
