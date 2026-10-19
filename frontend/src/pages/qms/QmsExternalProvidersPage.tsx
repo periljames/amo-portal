@@ -1,4 +1,4 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BadgeCheck,
@@ -536,8 +536,12 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // A changed tenant, filter, or page must invalidate an older response,
+  // even while the next debounced request has not started.
+  const latestListRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++latestListRequest.current;
     if (!amoCode || detailId) return;
     setLoading(true);
     setError(null);
@@ -546,19 +550,23 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
         getProviderGovernanceSummary(amoCode),
         getExternalProviders(amoCode, { search, status: statusFilter, providerKind: kindFilter, riskLevel: riskFilter, limit: pageSize, offset: page * pageSize }),
       ]);
+      if (requestId !== latestListRequest.current) return;
       setSummary(nextSummary);
       setItems(providers.items);
       setTotal(providers.total);
     } catch (err) {
-      setError(errorMessage(err));
+      if (requestId === latestListRequest.current) setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (requestId === latestListRequest.current) setLoading(false);
     }
   }, [amoCode, detailId, kindFilter, riskFilter, search, statusFilter, page]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, search ? 220 : 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      ++latestListRequest.current;
+    };
   }, [load, search]);
 
   const basePath = useMemo(() => `/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers`, [amoCode]);
