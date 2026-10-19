@@ -94,6 +94,9 @@ CATALOG = {
     "maintenance.finding_reported": "MAINTENANCE",
     "maintenance.date_change_requested": "MAINTENANCE",
     "maintenance.schedule_changed": "MAINTENANCE",
+    "maintenance.rework_notice": "MAINTENANCE",
+    "maintenance.hold_notice": "MAINTENANCE",
+    "maintenance.resumed_notice": "MAINTENANCE",
     "maintenance.ack_overdue": "MAINTENANCE",
     "maintenance.additional_pending": "MAINTENANCE",
     "maintenance.progress_overdue": "MAINTENANCE",
@@ -356,7 +359,7 @@ def _scan_transitions(db, amo):
                           source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
     # Phase 7 already delegates work identity by individual object grants.
     # Only a member assigned THIS exact work receives the vendor projection.
-    for row in _rows(db, """SELECT e.id,e.work_id AS entity_id,w.supplier_id,w.provider_id
+    for row in _rows(db, """SELECT e.id,e.action,e.work_id AS entity_id,w.supplier_id,w.provider_id
         FROM external_contracted_work_events e
         JOIN external_contracted_work w ON w.amo_id=e.amo_id AND w.id=e.work_id
         WHERE e.amo_id=:amo AND e.action IN ('DISPATCH','REWORK','HOLD','RESUME')
@@ -372,8 +375,14 @@ def _scan_transitions(db, amo):
             if str(row["entity_id"]) not in {str(item) for item in
                     (grant["object_scope_json"] or {}).get("contracted_work",[])}:
                 continue
+            vendor_event={"DISPATCH":"maintenance.assigned",
+                          "REWORK":"maintenance.rework_notice",
+                          "HOLD":"maintenance.hold_notice",
+                          "RESUME":"maintenance.resumed_notice"}.get(row["action"])
+            if not vendor_event:
+                continue
             count+=_queue(db,amo=amo,
-                          event="maintenance.assigned",source="maintenance_event",
+                          event=vendor_event,source="maintenance_event",
                           source_id=row["entity_id"],stamp=row["id"],
                           supplier=row["supplier_id"],recipient_kind="provider",
                           provider=row["provider_id"],recipient_id=grant["identity_id"])

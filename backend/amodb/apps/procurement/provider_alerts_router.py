@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 from amodb.apps.procurement import service
+from amodb.apps.audit import services as audit_services
+from uuid import uuid4
 from amodb.apps.procurement import external_partner_router as partner
 from . import provider_alerts as alerts
 
@@ -151,6 +153,20 @@ def update_policy(amo_code:str,department:str,payload:PolicyUpdate,
     if result.rowcount!=1:
         db.rollback()
         raise HTTPException(409,"Notification policy changed concurrently")
+    audit_services.log_event(db,amo_id=amo,actor_user_id=str(user.id),
+       entity_type="external_provider_notification_policy",entity_id=department,
+       action="notification_policy_changed",
+       before={"revision":current["revision"],
+               "lead_days":current["lead_days_json"].get(department),
+               "escalation_days":current["escalation_days_json"].get(department),
+               "roles":current["routes_json"].get(department),
+               "channels":current["channels_json"].get(department)},
+       after={"revision":payload.revision+1,
+              "lead_days":payload.lead_days,
+              "escalation_days":payload.escalation_days,
+              "roles":payload.recipient_roles,
+              "channels":{"in_app":payload.in_app,"email":payload.email}},
+       correlation_id=str(uuid4()),metadata={"owner_department":department},critical=True)
     db.commit()
     return {"revision":payload.revision+1,"department":department,"updated":True}
 
