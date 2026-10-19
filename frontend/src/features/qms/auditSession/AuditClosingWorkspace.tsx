@@ -420,7 +420,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <button type="button" className={canExecutionClose ? "is-primary" : undefined} disabled={!canExecutionClose || !stepAllowsActions(6) || executionCloseMutation.isPending} onClick={() => executionCloseMutation.mutate()}>{executionCloseMutation.isPending ? "Closing execution…" : closure?.execution_status === "CLOSED" ? "Execution closed" : "Close audit execution"}</button>
           </div>
         </details>
-        <details open={activeClosingStep === 7} className={closingCardClass(7)} aria-current={activeClosingStep === 7 ? "step" : undefined}>
+        <details open={activeClosingStep === 7 || verificationAvailable} className={closingCardClass(7)} aria-current={activeClosingStep === 7 ? "step" : undefined}>
           <summary><Stamp size={19} /><div><h3>7 · Policy-controlled assurance output and verification</h3><small>Certificate/approval output is generated only when policy requires it. Verification links are purpose-bound and time-limited.</small></div></summary>
           {lockedReason(7) ? <div className="qms-audit-closing__locked">{lockedReason(7)}</div> : null}
           <p>Output policy: <strong>{policy?.artifact_policy || "Not configured"}</strong>{policy?.rationale ? ` · ${policy.rationale}` : ""}</p>
