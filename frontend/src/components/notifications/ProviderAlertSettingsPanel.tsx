@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { BellRing, RefreshCw, Save } from "lucide-react";
 import { apiRequest } from "../../services/apiClient";
 
-type Dept = "QUALITY" | "PROCUREMENT";
+type Dept = "QUALITY" | "PROCUREMENT" | "MAINTENANCE" | "STORES";
 type Config = {
   lead_days: number[]; escalation_days: number[]; recipient_roles: string[];
   channels: { in_app: boolean; email: boolean }; templates: Record<string, string>;
@@ -20,6 +20,8 @@ type Job = { id: string; event_key: string; due_at: string; status: string;
 const departmentRoles: Record<Dept, string[]> = {
   QUALITY: ["QUALITY_MANAGER", "QUALITY_OFFICER"],
   PROCUREMENT: ["PROCUREMENT_MANAGER", "PROCUREMENT_OFFICER"],
+  MAINTENANCE: ["BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER", "WORKSHOP_MANAGER"],
+  STORES: ["STORES_MANAGER"],
 };
 const days = (value: string): number[] => {
   const parts = value.split(",").map((entry) => entry.trim()).filter(Boolean);
