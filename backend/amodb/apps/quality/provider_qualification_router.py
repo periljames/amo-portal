@@ -583,6 +583,9 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
            user=Depends(get_current_active_user)):
     _require(user,{"QUALITY_MANAGER"})
     amo=_tenant(db,amo_code,user);row=_case(db,amo,case_id,True)
+    previous=_one(db,"""SELECT CAST(status AS TEXT) status
+        FROM procurement_suppliers WHERE amo_id=:amo AND id=:supplier""",
+        amo=amo,supplier=row["supplier_id"])
     if row["status"] in {"APPROVED","CONDITIONALLY_APPROVED","REJECTED"}:
         raise HTTPException(409,"Case already finalized")
     if int(row["version"])!=payload.expected_version:
@@ -643,6 +646,12 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
         "Provider qualification review",
         "The AMO Quality Department has recorded the outcome of the qualification review.",
         "QUALIFICATION",case_id)
+    if new_status in {"APPROVED","CONDITIONALLY_APPROVED","REJECTED"}:
+        from .provider_oversight_events import record_status_snapshot
+        record_status_snapshot(db,amo_id=amo,supplier_id=row["supplier_id"],
+            actor_id=str(user.id),previous_status=(previous or {}).get("status"),
+            current_status=new_status,action="QUALITY_QUALIFICATION_DECISION",
+            source_reference=case_id)
     db.commit()
     return _case_details(db,_case(db,amo,case_id))
 

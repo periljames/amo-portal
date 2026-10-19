@@ -46,6 +46,7 @@ import "../../styles/qms-external-providers.css";
 import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
 import ProviderAgreementControls from "./ProviderAgreementControls";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
+import ProviderOversight, { ProviderPortfolio } from "./ProviderOversight";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
@@ -505,6 +506,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
       {tab === "qualification" && <ProviderQualificationWorkspace amoCode={amoCode} supplierId={provider.id} />}
       {tab === "monitoring" && (
         <div className="qms-provider-detail-grid">
+          <ProviderOversight amoCode={amoCode} supplierId={providerId} />
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Review cycle</span><h3>Oversight</h3></div></div><dl className="qms-provider-definition-list"><div><dt>Last reviewed</dt><dd>{dateLabel(provider.last_reviewed_on)}</dd></div><div><dt>Next review</dt><dd className={provider.review_due ? "is-alert" : ""}>{dateLabel(provider.next_review_due_on)}</dd></div><div><dt>Interval</dt><dd>{provider.review_interval_days ? `${provider.review_interval_days} days` : "Not set"}</dd></div></dl></section>
           <section className="qms-provider-detail-section"><div className="qms-provider-section-heading"><div><span className="qms-provider-eyebrow">Current controls</span><h3>Attention required</h3></div></div><div className="qms-provider-health-list"><span className={provider.review_due ? "is-alert" : "is-ok"}>{provider.review_due ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}{provider.review_due ? "Provider review is due" : "Review date is current"}</span><span className={approvalBlocked ? "is-alert" : "is-ok"}>{approvalBlocked ? <Ban size={17} /> : <ShieldCheck size={17} />}{approvalBlocked ? "Required contract is missing" : "Contract gate satisfied"}</span></div></section>
         </div>
@@ -522,6 +524,9 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const detailTab = (detailMatch?.[2]?.toLowerCase() || "overview") as DetailTab;
   const [summary, setSummary] = useState<ProviderGovernanceSummary | null>(null);
   const [items, setItems] = useState<ProviderListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const pageSize = 50;
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
@@ -537,16 +542,17 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
     try {
       const [nextSummary, providers] = await Promise.all([
         getProviderGovernanceSummary(amoCode),
-        getExternalProviders(amoCode, { search, status: statusFilter, providerKind: kindFilter, riskLevel: riskFilter }),
+        getExternalProviders(amoCode, { search, status: statusFilter, providerKind: kindFilter, riskLevel: riskFilter, limit: pageSize, offset: page * pageSize }),
       ]);
       setSummary(nextSummary);
       setItems(providers.items);
+      setTotal(providers.total);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [amoCode, detailId, kindFilter, riskFilter, search, statusFilter]);
+  }, [amoCode, detailId, kindFilter, riskFilter, search, statusFilter, page]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, search ? 220 : 0);
@@ -574,7 +580,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
         </div>
         <div className="qms-provider-page__actions">
           <button className="qms-provider-button is-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} />Refresh</button>
-          <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>
+          {getCachedUser()?.role === "QUALITY_MANAGER" && <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>}
         </div>
       </header>
 
@@ -589,15 +595,16 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
         </section>
       )}
 
+      <ProviderPortfolio amoCode={amoCode} />
       {creating && <ProviderCreatePanel amoCode={amoCode} onClose={() => setCreating(false)} onCreated={(provider) => navigate(`${basePath}/${provider.id}/overview`)} />}
       {error && <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error}</div>}
 
       <section className="qms-provider-register">
         <div className="qms-provider-toolbar">
-          <label className="qms-provider-search"><Search size={17} /><input aria-label="Search external providers" placeholder="Search code, legal name or trading name" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
-          <select aria-label="Provider status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="">All statuses</option>{PROVIDER_STATUSES.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
-          <select aria-label="Provider type" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}><option value="">All provider types</option>{PROVIDER_KINDS.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
-          <select aria-label="Provider risk" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}><option value="">All risk levels</option>{PROVIDER_RISKS.map((item) => <option key={item}>{item}</option>)}</select>
+          <label className="qms-provider-search"><Search size={17} /><input aria-label="Search external providers" placeholder="Search code, legal name or trading name" value={search} onChange={(e) => {setSearch(e.target.value);setPage(0);}} /></label>
+          <select aria-label="Provider status" value={statusFilter} onChange={(e) => {setStatusFilter(e.target.value);setPage(0);}}><option value="">All statuses</option>{PROVIDER_STATUSES.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
+          <select aria-label="Provider type" value={kindFilter} onChange={(e) => {setKindFilter(e.target.value);setPage(0);}}><option value="">All provider types</option>{PROVIDER_KINDS.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
+          <select aria-label="Provider risk" value={riskFilter} onChange={(e) => {setRiskFilter(e.target.value);setPage(0);}}><option value="">All risk levels</option>{PROVIDER_RISKS.map((item) => <option key={item}>{item}</option>)}</select>
         </div>
         {loading ? <div className="qms-provider-loading"><RefreshCw className="is-spinning" size={20} />Loading provider governance…</div> : (
           <div className="qms-provider-table-wrap">
@@ -620,6 +627,11 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
                 {items.length === 0 && <tr><td colSpan={9}><div className="qms-provider-empty">No external providers match the current filters.</div></td></tr>}
               </tbody>
             </table>
+            <nav aria-label="Provider register pages" style={{display:"flex",gap:12,alignItems:"center",padding:12}}>
+              <button type="button" disabled={loading||page===0} onClick={()=>setPage(x=>x-1)}>Previous</button>
+              <span>Showing {items.length ? page*pageSize+1 : 0}–{page*pageSize+items.length} of {total} governed providers</span>
+              <button type="button" disabled={loading||(page+1)*pageSize>=total} onClick={()=>setPage(x=>x+1)}>Next</button>
+            </nav>
           </div>
         )}
       </section>

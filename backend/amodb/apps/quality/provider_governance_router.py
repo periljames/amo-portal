@@ -886,6 +886,11 @@ def transition_external_provider(
         metadata={"reason": payload.reason},
         critical=True,
     )
+    from .provider_oversight_events import record_status_snapshot
+    record_status_snapshot(db, amo_id=ctx.amo_id, supplier_id=provider_id,
+        actor_id=ctx.user_id, previous_status=current, current_status=target,
+        action="QUALITY_LIFECYCLE_TRANSITION",
+        source_reference=str(payload.expected_version))
     db.commit()
     return _provider_detail(db, ctx=ctx, provider_id=provider_id)
 

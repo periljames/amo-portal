@@ -159,13 +159,15 @@ export function getProviderGovernanceSummary(amoCode: string): Promise<ProviderG
 
 export function getExternalProviders(
   amoCode: string,
-  filters: { search?: string; status?: string; providerKind?: string; riskLevel?: string } = {},
+  filters: { search?: string; status?: string; providerKind?: string; riskLevel?: string; limit?:number; offset?:number } = {},
 ): Promise<ProviderListResponse> {
   const params = new URLSearchParams();
   if (filters.search) params.set("search", filters.search);
   if (filters.status) params.set("status", filters.status);
   if (filters.providerKind) params.set("provider_kind", filters.providerKind);
   if (filters.riskLevel) params.set("risk_level", filters.riskLevel);
+  if (filters.limit) params.set("limit",String(filters.limit));
+  if (filters.offset) params.set("offset",String(filters.offset));
   const query = params.toString();
   return apiRequest<ProviderListResponse>(qmsPath(amoCode, `/suppliers/providers${query ? `?${query}` : ""}`));
 }
