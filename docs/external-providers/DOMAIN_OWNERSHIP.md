@@ -19,3 +19,11 @@
 | Notifications/jobs | `notifications/service.py`, `jobs/portal_scheduler_main.py` | No parallel infrastructure |
 
 Further provider reviews remain QMS-owned; metadata versions and immutable source events are not approval state.
+
+
+## Phase 9 ownership update
+
+- Read-only management-review 360: `apps/quality/provider_oversight_router.py`, never the lifecycle authority.
+- Controlled evidence-backed critical/sole-source classification: appointed Quality Manager with immutable change evidence in `external_provider_special_classifications` and snapshots.
+- Provider policy audit: original Quality category settings and shared notifications policy; both have attributed historical events.
+- Real implementation/source gaps and remaining owners are in [PHASE9_REQUIREMENT_MATRIX.md](PHASE9_REQUIREMENT_MATRIX.md) and [PHASE9_RISK_REGISTER.md](PHASE9_RISK_REGISTER.md).

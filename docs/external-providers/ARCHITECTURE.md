@@ -26,3 +26,8 @@ Exact vendor and contracts tracker workbooks were not found in available reposit
 
 ## Phase 2 identity and access boundary
 Phase 2 extends (but never replaces) the Procurement supplier master with a global external-person and organization registry, tenant/supplier links, tenant Quality-approved grants, per-person Argon2id/TOTP/WebAuthn factors and short-lived revocable cookie sessions. The `external_provider_account_links` from Phase 1 remain descriptive/staged internal-user associations, **not** vendor login authority. Global credentials are kept out of staff `users`; external sessions cannot authenticate any staff-only QMS or Procurement routes. Provider Quality supplier approval, commercial activation and external portal account activation are separate decisions. Read `PHASE2_IDENTITY_ACCESS.md` for concrete routes, operational configuration and Phase 3 obligations.
+
+
+### Phase 9 consolidated architecture
+
+Read [PHASE9_ARCHITECTURE.md](PHASE9_ARCHITECTURE.md), the [complete implementation matrix](PHASE9_REQUIREMENT_MATRIX.md), and the [migration/API/UI/security inventories](PHASE9_INVENTORIES.md). Source-linked oversight remains read-only and human-controlled Quality classification does **not** replace canonical approval or technical release. All Phase10 runtime and human regulatory acceptance still pending.
