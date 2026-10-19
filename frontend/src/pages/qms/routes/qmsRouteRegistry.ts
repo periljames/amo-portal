@@ -180,7 +180,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.supplier.view",
     section: "control",
     defaultView: "register",
-    validViews: ["register", "approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
+    validViews: ["register", "agreements", "approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
     componentType: "specialist",
     allowRecordDetails: true,
     recordRoutes: [{ allowBare: true, allowedTails: PROVIDER_WORKSPACE_TAILS }],

@@ -45,6 +45,8 @@ import {
 import "../../styles/qms-external-providers.css";
 import ProviderQualificationWorkspace from "./ProviderQualificationWorkspace";
 import ProviderAgreementControls from "./ProviderAgreementControls";
+import ProviderAgreementsWorkspace from "./ProviderAgreementsWorkspace";
+import { hasQmsRolePermission } from "../../app/routeGuards";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 import ProviderOversight, { ProviderPortfolio } from "./ProviderOversight";
 
@@ -204,6 +206,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
   provider: ProviderDetail;
   onChanged: () => Promise<void>;
 }): React.ReactElement {
+  const canManage = hasQmsRolePermission("qms.supplier.manage");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -211,6 +214,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
+    if (!canManage) return;
     setBusy("create");
     setError(null);
     try {
@@ -235,6 +239,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
   };
 
   const transition = async (contract: ProviderContract, target: ContractStatus) => {
+    if (!canManage) return;
     const reason = window.prompt(`Reason for changing ${contract.contract_number} to ${titleCase(target)}:`)?.trim();
     if (!reason || reason.length < 8) return;
     setBusy(contract.id);
@@ -253,10 +258,10 @@ function ContractPanel({ amoCode, provider, onChanged }: {
     <div className="qms-provider-detail-section">
       <div className="qms-provider-section-heading">
         <div><span className="qms-provider-eyebrow">Agreement control</span><h3>Contracts</h3></div>
-        <button type="button" className="qms-provider-button is-secondary" onClick={() => setOpen((value) => !value)}><Plus size={16} />Add contract</button>
+        {canManage && <button type="button" className="qms-provider-button is-secondary" onClick={() => setOpen((value) => !value)}><Plus size={16} />Add contract</button>}
       </div>
       {error && <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error}</div>}
-      {open && (
+      {open && canManage && (
         <form className="qms-provider-form qms-provider-inline-form" onSubmit={create}>
           <label>Contract number<input required value={form.contract_number} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
           <label>Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
@@ -287,13 +292,13 @@ function ContractPanel({ amoCode, provider, onChanged }: {
               {contract.supersedes_contract_id && <p>Supersedes prior agreement: {provider.contracts.find(item => item.id === contract.supersedes_contract_id)?.contract_number || contract.supersedes_contract_id}</p>}
               {contract.change_reason && <p>Amendment / renewal reason: {contract.change_reason}</p>}
             </div>
-            <div className="qms-provider-record__actions">
+            {canManage && <div className="qms-provider-record__actions">
               {contract.status === "DRAFT" && <button disabled={busy === contract.id} onClick={() => transition(contract, "ACTIVE")}>Activate</button>}
               {contract.status === "ACTIVE" && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUSPENDED")}>Suspend</button>}
               {["ACTIVE", "SUSPENDED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "TERMINATED")}>Terminate</button>}
               {["ACTIVE", "SUSPENDED", "EXPIRED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUPERSEDED")}>Supersede with active renewal</button>}
-            </div>
-            <ProviderAgreementControls amoCode={amoCode} contract={contract} onChanged={onChanged} />
+            </div>}
+            {canManage && <ProviderAgreementControls amoCode={amoCode} contract={contract} onChanged={onChanged} />}
           </article>
         ))}
       </div>
@@ -521,6 +526,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const agreementWorkspace = /\/suppliers\/agreements\/?$/i.test(location.pathname);
   const detailMatch = location.pathname.match(/\/suppliers\/(\d+)(?:\/(overview|approval|contracts|evidence|monitoring|qualification))?\/?$/i);
   const detailId = detailMatch ? Number(detailMatch[1]) : null;
   const detailTab = (detailMatch?.[2]?.toLowerCase() || "overview") as DetailTab;
@@ -542,7 +548,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
 
   const load = useCallback(async () => {
     const requestId = ++latestListRequest.current;
-    if (!amoCode || detailId) return;
+    if (!amoCode || detailId || agreementWorkspace) return;
     setLoading(true);
     setError(null);
     try {
@@ -559,7 +565,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
     } finally {
       if (requestId === latestListRequest.current) setLoading(false);
     }
-  }, [amoCode, detailId, kindFilter, riskFilter, search, statusFilter, page]);
+  }, [amoCode, detailId, agreementWorkspace, kindFilter, riskFilter, search, statusFilter, page]);
 
   useEffect(() => {
     const requestSequence = latestListRequest;
@@ -571,6 +577,12 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   }, [load, search]);
 
   const basePath = useMemo(() => `/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers`, [amoCode]);
+
+  if (agreementWorkspace) {
+    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+      <ProviderAgreementsWorkspace amoCode={amoCode} onBack={() => navigate(`${basePath}/register`)} />
+    </DepartmentLayout>;
+  }
 
   if (detailId) {
     return (
@@ -590,6 +602,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
           <p>One governed register for suppliers, contractors, subcontractors and specialist service providers. Procurement owns the provider master; Quality owns approval, oversight, contracts and evidence.</p>
         </div>
         <div className="qms-provider-page__actions">
+          <button className="qms-provider-button is-secondary" onClick={() => navigate(`${basePath}/agreements`)}><FileText size={16} />Agreements & renewals</button>
           <button className="qms-provider-button is-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} />Refresh</button>
           {getCachedUser()?.role === "QUALITY_MANAGER" && <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>}
         </div>

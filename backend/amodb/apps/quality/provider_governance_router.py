@@ -901,6 +901,111 @@ def transition_external_provider(
     return _provider_detail(db, ctx=ctx, provider_id=provider_id)
 
 
+
+@provider_governance_router.get("/suppliers/contracts/register")
+def provider_agreement_register(
+    search: str = Query(default="", max_length=100),
+    status_filter: Literal["ALL", "DRAFT", "ACTIVE", "SUSPENDED", "EXPIRED", "TERMINATED", "SUPERSEDED"] = Query(default="ALL", alias="status"),
+    attention_only: bool = Query(default=False),
+    due_within_days: int = Query(default=30, ge=0, le=365),
+    limit: int = Query(default=40, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100000),
+    ctx: TenantContext = Depends(require_quality_permission("qms.supplier.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    """One QMS-owned, tenant-scoped agreement register for every provider.
+
+    Procurement remains supplier-master owner and DMS remains original owner.
+    This projection grants no signature, renewal or Quality decision rights.
+    """
+    _require_tables(db)
+    today = _today()
+    through = today + timedelta(days=due_within_days)
+    args = {
+        "amo": ctx.amo_id,
+        "needle": f"%{search.strip().lower()}%",
+        "status": status_filter,
+        "attention": attention_only,
+        "today": today,
+        "through": through,
+        "limit": limit,
+        "offset": offset,
+    }
+    conditions = """
+        c.amo_id = :amo AND s.amo_id = c.amo_id
+        AND (:needle = '%%' OR lower(c.contract_number) LIKE :needle
+          OR lower(c.title) LIKE :needle OR lower(s.legal_name) LIKE :needle
+          OR lower(s.supplier_code) LIKE :needle)
+        AND (:status = 'ALL' OR c.status = :status
+          OR (:status = 'EXPIRED' AND c.status = 'ACTIVE'
+              AND c.expires_on < :today))
+        AND (NOT :attention
+          OR c.status = 'DRAFT'
+          OR c.status = 'SUSPENDED'
+          OR (c.status = 'ACTIVE' AND c.expires_on IS NOT NULL
+              AND (c.expires_on <= :through
+                OR c.expires_on - COALESCE(c.termination_notice_days, 0) <= :today)))
+    """
+    source = """
+        FROM quality_external_provider_contracts c
+        JOIN procurement_suppliers s ON s.id = c.supplier_id AND s.amo_id = c.amo_id
+        LEFT JOIN quality_external_provider_profiles p
+          ON p.supplier_id = c.supplier_id AND p.amo_id = c.amo_id
+    """
+    total = db.execute(text("SELECT COUNT(*) " + source + " WHERE " + conditions), args).scalar_one()
+    rows = db.execute(text("""
+        SELECT c.id, c.supplier_id, c.contract_number, c.title, c.status,
+          c.scope_text, c.effective_on, c.expires_on, c.termination_notice_days,
+          c.renewal_terms, c.controlled_document_id, c.controlled_document_revision,
+          c.signed_evidence_submission_id, c.supersedes_contract_id,
+          c.change_reason, c.owner_user_id, c.approved_by_user_id,
+          c.approved_at, c.transition_reason, c.version,
+          s.supplier_code, s.legal_name, CAST(s.status AS TEXT) AS provider_status,
+          p.provider_kind
+        """ + source + " WHERE " + conditions + """
+        ORDER BY c.expires_on NULLS LAST, c.contract_number, c.id
+        LIMIT :limit OFFSET :offset
+    """), args).mappings().all()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["effective_status"] = _effective_contract_status(item)
+        expiry = item.get("expires_on")
+        notice_days = int(item.get("termination_notice_days") or 0)
+        notice_on = expiry - timedelta(days=notice_days) if expiry else None
+        item["renewal_notice_on"] = notice_on
+        item["days_until_expiry"] = (expiry - today).days if expiry else None
+        item["controlled_original_linked"] = bool(
+            item.get("controlled_document_id")
+            and item.get("controlled_document_revision")
+            and item.get("signed_evidence_submission_id")
+        )
+        # Linked records are NOT proof of legally verified signatures.
+        state = item["effective_status"]
+        if state == "DRAFT":
+            attention = "EXECUTED_EVIDENCE_REQUIRED" if not item["controlled_original_linked"] else "QUALITY_REVIEW_REQUIRED"
+        elif state == "EXPIRED":
+            attention = "EXPIRED"
+        elif state == "SUSPENDED":
+            attention = "SUSPENDED"
+        elif state == "ACTIVE" and expiry and (
+            expiry <= through or (notice_on is not None and notice_on <= today)
+        ):
+            attention = "RENEWAL_DUE"
+        else:
+            attention = "NONE"
+        item["attention"] = attention
+        items.append(item)
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(items) < total,
+        "as_of": today,
+    }
+
+
 @provider_governance_router.get("/suppliers/providers/{provider_id}/contracts")
 def list_provider_contracts(
     provider_id: int,

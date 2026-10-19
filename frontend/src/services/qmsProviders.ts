@@ -153,6 +153,49 @@ function write<T>(amoCode: string, suffix: string, method: "POST" | "PATCH", bod
   });
 }
 
+/** Governed QMS contracts, shared by provider, Procurement and DMS workflows. */
+export type ProviderAgreementRegisterItem = ProviderContract & {
+  supplier_code: string;
+  legal_name: string;
+  provider_status: string;
+  provider_kind: string | null;
+  renewal_notice_on: string | null;
+  days_until_expiry: number | null;
+  controlled_original_linked: boolean;
+  attention: "NONE" | "EXECUTED_EVIDENCE_REQUIRED" | "QUALITY_REVIEW_REQUIRED" | "EXPIRED" | "SUSPENDED" | "RENEWAL_DUE";
+};
+export type ProviderAgreementRegister = {
+  items: ProviderAgreementRegisterItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  as_of: string;
+};
+export function getProviderAgreementRegister(
+  amoCode: string,
+  filters: {
+    search?: string;
+    status?: string;
+    attentionOnly?: boolean;
+    days?: number;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ProviderAgreementRegister> {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.attentionOnly) params.set("attention_only", "true");
+  if (filters.days !== undefined) params.set("due_within_days", String(filters.days));
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined) params.set("offset", String(filters.offset));
+  return apiRequest<ProviderAgreementRegister>(
+    qmsPath(amoCode, `/suppliers/contracts/register?${params.toString()}`),
+    { cacheTtlMs: 0 },
+  );
+}
+
 export function getProviderGovernanceSummary(amoCode: string): Promise<ProviderGovernanceSummary> {
   return apiRequest<ProviderGovernanceSummary>(qmsPath(amoCode, "/suppliers/governance"));
 }
