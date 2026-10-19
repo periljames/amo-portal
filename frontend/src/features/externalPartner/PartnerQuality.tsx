@@ -10,8 +10,10 @@ const empty:Draft={containment_action:"",root_cause:"",corrective_action:"",prev
 export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
   const [searchParams,setSearchParams]=useSearchParams();
   const assignedAudit=searchParams.get("audit")||"";
-  const [offset,setOffset]=useState(0);
-  useEffect(()=>setOffset(0),[assignedAudit,tenant]);
+  const scopeKey=`${tenant}:${assignedAudit}`;
+  const [paging,setPaging]=useState({scopeKey,offset:0});
+  const offset=paging.scopeKey===scopeKey?paging.offset:0;
+  const updateOffset=(next:number)=>setPaging({scopeKey,offset:Math.max(0,next)});
   const data=usePartnerLoad((signal)=>partnerRequest<QualityPage>(tenant,
     `quality?limit=15&offset=${offset}${assignedAudit?`&audit_id=${encodeURIComponent(assignedAudit)}`:""}`,{signal}),
     `${tenant}:${offset}:${assignedAudit}`);
@@ -171,8 +173,8 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
         <ActionNotice value={error} error/><ActionNotice value={notice}/>
       </Section>}
       {!activeCar&&<ActionNotice value={notice}/>}
-      <div className="partner-pager"><button disabled={offset===0} onClick={()=>setOffset(v=>Math.max(0,v-15))}>Previous</button>
-        <button disabled={!data.value.cars.items.length&&!data.value.findings.items.length&&!data.value.notices.items.length} onClick={()=>setOffset(v=>v+15)}>Next</button></div>
+      <div className="partner-pager"><button disabled={offset===0} onClick={()=>updateOffset(offset-15)}>Previous</button>
+        <button disabled={!data.value.cars.items.length&&!data.value.findings.items.length&&!data.value.notices.items.length} onClick={()=>updateOffset(offset+15)}>Next</button></div>
     </>}
   </div>;
 }

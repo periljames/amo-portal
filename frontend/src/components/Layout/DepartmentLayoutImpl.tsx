@@ -304,30 +304,24 @@ function NavigationGroups({
   onFavourite: (item: PortalNavItem) => void;
   onNavigate: (path: string) => void;
 }): React.ReactElement {
-  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set(
-    groups.filter((group) => group.id.startsWith("admin-")).map((group) => group.id),
-  ));
-  useEffect(() => {
-    setCollapsedGroups((previous) => {
-      const next = new Set(previous);
-      for (const group of groups) {
-        if (group.items.some((item) => isPortalPathActive(pathname, item, search)
-          || portalNavItemHasActiveDescendant(item, pathname, search))) next.delete(group.id);
-      }
-      return next;
-    });
-  }, [groups, pathname, search]);
+  const [collapsedOverrides, setCollapsedOverrides] = useState<Record<string, boolean>>({});
+  const collapsedGroups = useMemo(() => new Set(groups
+    .filter((group) => collapsedOverrides[group.id] ?? (
+      group.id.startsWith("admin-")
+      && !group.items.some((item) => isPortalPathActive(pathname, item, search)
+        || portalNavItemHasActiveDescendant(item, pathname, search))
+    ))
+    .map((group) => group.id)), [collapsedOverrides, groups, pathname, search]);
   return (
     <nav id="tenant-navigation" className="tenant-nav" aria-label="Portal navigation">
       {groups.map((group) => (
         <section key={group.id} className="tenant-nav__group" aria-labelledby={`tenant-nav-${group.id}`}>
           <h2 id={`tenant-nav-${group.id}`}><button type="button"
             aria-expanded={!collapsedGroups.has(group.id)} aria-controls={`tenant-nav-items-${group.id}`}
-            onClick={() => setCollapsedGroups((previous) => {
-              const next = new Set(previous);
-              if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
-              return next;
-            })}>{group.label}<ChevronDown size={14} aria-hidden /></button></h2>
+            onClick={() => setCollapsedOverrides((previous) => ({
+              ...previous,
+              [group.id]: !collapsedGroups.has(group.id),
+            }))}>{group.label}<ChevronDown size={14} aria-hidden /></button></h2>
           <div id={`tenant-nav-items-${group.id}`} className="tenant-nav__items" hidden={collapsedGroups.has(group.id)}>
             {group.id === "search-results" && !group.items.length ? <p className="tenant-nav__empty" role="status">No pages match your search. Try another name.</p> : null}
             {group.items.map((item) => (

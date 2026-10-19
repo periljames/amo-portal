@@ -1,6 +1,6 @@
 import React,{useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
-import {partnerRequest,type Page} from "./partnerApi";
+import {partnerRequest} from "./partnerApi";
 import {Section,State,Status,ActionNotice,usePartnerLoad} from "./PartnerPrimitives";
 
 type Qualification={
