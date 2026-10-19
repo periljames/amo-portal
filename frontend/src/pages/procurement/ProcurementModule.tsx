@@ -36,6 +36,9 @@ export default function ProcurementModule() {
 
   const rawSection = location.pathname.split("/").filter(Boolean)[3] as Section | undefined;
   const section: Section = NAV.some((item) => item.id === rawSection) ? rawSection! : "command";
+  const linkedParams = new URLSearchParams(location.search);
+  const linkedRecordKind = linkedParams.get("recordKind") || "";
+  const linkedRecordId = linkedParams.get("recordId") || "";
   const [data, setData] = useState<WorkspaceData>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -122,7 +125,15 @@ export default function ProcurementModule() {
     }
   };
 
-  const filtered = <T,>(items: T[], text: (item: T) => string): T[] => {
+  const filtered = <T extends { id?: number | string }>(
+    items: T[], text: (item: T) => string, recordKind?: string,
+  ): T[] => {
+    // Record identifiers come from the URL, not a permission grant. All
+    // records have already been obtained through tenant-authorized APIs.
+    if (linkedRecordId && linkedRecordKind && recordKind) {
+      if (recordKind !== linkedRecordKind) return [];
+      return items.filter((item) => String(item.id) === linkedRecordId);
+    }
     const needle = query.trim().toLowerCase();
     return needle ? items.filter((item) => text(item).toLowerCase().includes(needle)) : items;
   };
@@ -196,6 +207,12 @@ export default function ProcurementModule() {
           ))}
         </nav>
 
+        {linkedRecordId && linkedRecordKind ? (
+          <p className="proc-message" role="status">
+            Showing the linked {linkedRecordKind.replaceAll("Procurement", "").toLowerCase()} record if you have access. Select a work-area tab to return to the full register.
+          </p>
+        ) : null}
+
         {partialErrors.length ? <div className="proc-message proc-message--warning" role="alert"><AlertTriangle size={18} /><span>Some Procurement data could not be loaded. Available work remains usable: {partialErrors.join(" · ")}</span><button type="button" onClick={() => void load(true)}>Retry</button></div> : null}
 
         {alertCards.length ? (
@@ -214,11 +231,13 @@ export default function ProcurementModule() {
           {section === "collaboration" ? <ProviderAlertSettingsPanel amoCode={amoCode} department="PROCUREMENT" /> : null}
           {section === "collaboration" ? <ProviderProcurementInbox amoCode={amoCode} /> : null}
           {section === "sourcing" && ["PLANNING_ENGINEER","PRODUCTION_ENGINEER","CERTIFYING_ENGINEER"].includes(role) ? <ProviderAlternateTechnicalReview amoCode={amoCode} /> : null}
-          {section === "sourcing" ? <Sourcing rfqs={filtered(data.rfqs, (item) => `${item.rfq_number} ${item.title} ${item.status}`)} quotes={filtered(data.quotes, (item) => `${item.quote_reference} ${item.status}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} /> : null}
-          {section === "orders" ? <Orders items={filtered(data.orders, (item) => `${item.po_number} ${item.status} ${item.supplier_id}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} act={act} /> : null}
-          {section === "receiving" ? <Receiving items={filtered(data.receipts, (item) => `${item.receipt_number} ${item.status} ${item.delivery_note_number || ""}`)} loading={loading} search={searchBox} canQuality={canQuality} openModal={openModal} linkDocument={linkDocument} /> : null}
+          {section === "sourcing" ? <Sourcing rfqs={filtered(data.rfqs, (item) => `${item.rfq_number} ${item.title} ${item.status}`, "ProcurementRFQ")} quotes={filtered(data.quotes, (item) => `${item.quote_reference} ${item.status}`, "ProcurementQuote")} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} /> : null}
+          {section === "orders" ? <Orders items={filtered(data.orders, (item) => `${item.po_number} ${item.status} ${item.supplier_id}`, "ProcurementPurchaseOrder")} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} act={act} /> : null}
+          {section === "receiving" ? <Receiving items={filtered(data.receipts, (item) => `${item.receipt_number} ${item.status} ${item.delivery_note_number || ""}`, "ProcurementReceipt")} loading={loading} search={searchBox} canQuality={canQuality} openModal={openModal} linkDocument={linkDocument} /> : null}
           {section === "suppliers" ? <Suppliers items={filtered(data.suppliers, (item) => `${item.supplier_code} ${item.legal_name} ${item.status} ${item.country || ""}`)} loading={loading} search={searchBox} openModal={openModal} linkDocument={linkDocument} canQuality={canQuality} currentUserId={user?.id || null} onChanged={async () => { await load(); }} /> : null}
-          {section === "control" ? <Control holds={data.holds} orders={data.orders} receipts={quarantine} canQuality={canQuality} canFinance={canFinance} openModal={openModal} linkDocument={linkDocument} /> : null}
+          {section === "control" ? <Control holds={linkedRecordKind === "ProcurementQualityHold" && linkedRecordId
+            ? data.holds.filter((item) => String(item.id) === linkedRecordId) : data.holds}
+            orders={data.orders} receipts={quarantine} canQuality={canQuality} canFinance={canFinance} openModal={openModal} linkDocument={linkDocument} /> : null}
           {section === "documents" ? <ProcurementDocumentCenter amoCode={amoCode} records={{ requisitions: data.requisitions, rfqs: data.rfqs, quotes: data.quotes, orders: data.orders, receipts: data.receipts, suppliers: data.suppliers, holds: data.holds }} initialEntity={documentTarget} canQuality={canQuality} canControl={canDocumentControl} currentUserId={user?.id || null} /> : null}
         </main>
 
