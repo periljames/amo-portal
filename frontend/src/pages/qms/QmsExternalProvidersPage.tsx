@@ -562,10 +562,11 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   }, [amoCode, detailId, kindFilter, riskFilter, search, statusFilter, page]);
 
   useEffect(() => {
+    const requestSequence = latestListRequest;
     const timer = window.setTimeout(() => { void load(); }, search ? 220 : 0);
     return () => {
       window.clearTimeout(timer);
-      ++latestListRequest.current;
+      ++requestSequence.current;
     };
   }, [load, search]);
 
