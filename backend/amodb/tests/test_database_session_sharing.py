@@ -15,12 +15,13 @@ def test_shared_engine_aliases_read_dependency_to_write() -> None:
     # A shared URL must share the engine/dependency. Configured read replicas
     # must retain an independent engine rather than invalidating this contract.
     if database_module.READ_DB_URL == database_module.WRITE_DB_URL:
-        assert database_module.read_engine is database_module.write_engine
         assert database_module.get_read_db is database_module.get_write_db
     else:
-        assert database_module.read_engine is not database_module.write_engine
         assert database_module.get_read_db is database_module._get_read_db_separate
         assert database_module.get_read_db is not database_module.get_write_db
+    # Other integration tests may replace the module's engine attribute with
+    # isolated SQLite test engines. FastAPI caches by dependency callable
+    # identity, not the current identity of a mutable engine attribute.
     assert database_module.get_db is database_module.get_write_db
 
 
