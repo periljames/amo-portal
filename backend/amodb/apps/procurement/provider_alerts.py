@@ -467,6 +467,19 @@ def _qms_grant_allows(grant, audit_id: str, capability: str) -> bool:
     )
 
 
+def _qms_grants_by_assignment(grants):
+    """Index exact audit grants once instead of scanning every member per QMS row."""
+    index = {}
+    for grant in grants:
+        scopes = grant.get("object_scope_json") or {}
+        assignments = scopes.get("assignments") if isinstance(scopes, dict) else None
+        if not isinstance(assignments, (list, tuple, set)):
+            continue
+        for audit_id in assignments:
+            index.setdefault(str(audit_id), []).append(grant)
+    return index
+
+
 def _scan_qms_provider_collaboration(db, amo):
     """Project canonical QMS notices and released CAR obligations to *assigned*
     provider members only. Staff continue using the existing QMS alerts.
@@ -488,6 +501,7 @@ def _scan_qms_provider_collaboration(db, amo):
         ORDER BY g.id LIMIT 1000""", amo=amo)
     if not grants:
         return 0
+    grants_by_audit = _qms_grants_by_assignment(grants)
 
     # DELIVERED is a canonical QMS notice transition, not proof of email
     # delivery. Its database revision and status are rechecked at dispatch.
@@ -496,7 +510,7 @@ def _scan_qms_provider_collaboration(db, amo):
           AND n.status='DELIVERED'
         ORDER BY n.notice_date DESC,n.id LIMIT 150""", amo=amo)
     for row in notices:
-        for grant in grants:
+        for grant in grants_by_audit.get(str(row["audit_id"]), []):
             if grant["portal_state"] != "ACTIVE":
                 continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
@@ -515,7 +529,7 @@ def _scan_qms_provider_collaboration(db, amo):
         WHERE amo_id=:amo AND status='REQUESTED'
         ORDER BY due_date NULLS LAST,id LIMIT 150""", amo=amo)
     for row in requests:
-        for grant in grants:
+        for grant in grants_by_audit.get(str(row["audit_id"]), []):
             if grant["portal_state"] != "ACTIVE":
                 continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
@@ -539,7 +553,7 @@ def _scan_qms_provider_collaboration(db, amo):
             ORDER BY e2.created_at DESC,e2.id DESC LIMIT 1)
         ORDER BY e.created_at DESC,e.id DESC LIMIT 150""", amo=amo)
     for row in findings:
-        for grant in grants:
+        for grant in grants_by_audit.get(str(row["audit_id"]), []):
             if grant["portal_state"] != "ACTIVE":
                 continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
@@ -566,7 +580,7 @@ def _scan_qms_provider_collaboration(db, amo):
         ORDER BY c.due_date,c.id LIMIT 150""", amo=amo)
     for row in cars:
         event = "quality.capa_overdue" if row["due_date"] < date.today() else "quality.car_due"
-        for grant in grants:
+        for grant in grants_by_audit.get(str(row["audit_id"]), []):
             if not _qms_grant_allows(grant, str(row["audit_id"]), "capa.respond"):
                 continue
             count += _queue(

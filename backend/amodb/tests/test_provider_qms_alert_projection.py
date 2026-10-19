@@ -68,3 +68,20 @@ def test_suspended_provider_alerts_preserve_only_existing_capa_obligations():
     assert 'if grant["portal_state"] != "ACTIVE":' in source
     assert 'car_remediation=job["source_kind"]=="qms_car"' in source
     assert "p.portal_state='SUSPENDED' AND :car_remediation=true" in source
+
+
+def test_assigned_audit_grants_are_indexed_without_cross_provider_leakage():
+    from amodb.apps.procurement.provider_alerts import _qms_grants_by_assignment
+    grants = [
+        {"object_scope_json": {"assignments": ["audit-one", "audit-shared"]},
+         "tenant_provider_id": "provider-one"},
+        {"object_scope_json": {"assignments": ["audit-two", "audit-shared"]},
+         "tenant_provider_id": "provider-two"},
+        {"object_scope_json": {"assignments": "audit-one"},
+         "tenant_provider_id": "malformed"},
+    ]
+    result = _qms_grants_by_assignment(grants)
+    assert [g["tenant_provider_id"] for g in result["audit-one"]] == ["provider-one"]
+    assert [g["tenant_provider_id"] for g in result["audit-two"]] == ["provider-two"]
+    assert {g["tenant_provider_id"] for g in result["audit-shared"]} == {"provider-one", "provider-two"}
+    assert "unassigned" not in result

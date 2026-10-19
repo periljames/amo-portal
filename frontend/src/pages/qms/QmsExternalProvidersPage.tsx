@@ -296,7 +296,7 @@ function ContractPanel({ amoCode, provider, onChanged }: {
               {contract.change_reason && <p>Amendment / renewal reason: {contract.change_reason}</p>}
             </div>
             {canManage && <div className="qms-provider-record__actions">
-              {contract.status === "DRAFT" && <button disabled={busy === contract.id || !contract.controlled_document_id || !contract.controlled_document_revision || !contract.signed_evidence_submission_id} title="Link an executed published DMS revision with signed QMS evidence before requesting Quality activation" onClick={() => transition(contract, "ACTIVE")}>Submit for activation</button>}
+              {contract.status === "DRAFT" && <button disabled={busy === contract.id || !contract.controlled_document_id || !contract.controlled_document_revision || !contract.signed_evidence_submission_id} title="Link an executed published DMS revision with signed QMS evidence before requesting Quality activation" onClick={() => transition(contract, "ACTIVE")}>Activate with Quality approval</button>}
               {contract.status === "ACTIVE" && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUSPENDED")}>Suspend</button>}
               {["ACTIVE", "SUSPENDED"].includes(contract.status) && <button disabled={busy === contract.id} onClick={() => transition(contract, "TERMINATED")}>Terminate</button>}
               {["ACTIVE", "SUSPENDED", "EXPIRED"].includes(contract.status) && provider.contracts.some((successor) => successor.supersedes_contract_id === contract.id && successor.effective_status === "ACTIVE") && <button disabled={busy === contract.id} onClick={() => transition(contract, "SUPERSEDED")}>Supersede with active renewal</button>}
