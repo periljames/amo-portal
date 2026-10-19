@@ -50,8 +50,11 @@ CATALOG = {
     "provider.approval_expiry": "QUALITY",
     "provider.certificate_expiry": "QUALITY",
     "provider.site_capability_change": "QUALITY",
+    "provider.site_capability_proposed": "QUALITY",
     "contract.review_pending": "QUALITY",
     "contract.ack_pending": "QUALITY",
+    "contract.acknowledged": "QUALITY",
+    "contract.clarification_requested": "QUALITY",
     "contract.expiry": "QUALITY",
     "contract.renewal_notice": "QUALITY",
     "contract.suspended_terminated": "QUALITY",
@@ -63,6 +66,7 @@ CATALOG = {
     "quality.document_requested": "QUALITY",
     "quality.evidence_received": "QUALITY",
     "quality.evidence_rejected": "QUALITY",
+    "quality.evidence_reviewed": "QUALITY",
     "quality.finding_issued": "QUALITY",
     "quality.car_due": "QUALITY",
     "quality.capa_overdue": "QUALITY",
@@ -81,6 +85,8 @@ CATALOG = {
     "procurement.material_received": "STORES",
     "procurement.inspection_discrepancy": "STORES",
     "procurement.quality_hold": "QUALITY",
+    "procurement.quality_released": "QUALITY",
+    "procurement.inspection_completed": "STORES",
     "procurement.return_rma": "PROCUREMENT",
     "maintenance.assigned": "MAINTENANCE",
     "maintenance.acknowledged": "MAINTENANCE",
@@ -431,6 +437,80 @@ def _scan_transitions(db, amo):
                       supplier=row["supplier_id"])
     return count
 
+
+def _scan_partner_records(db, amo):
+    """Project provider-owned evidence/proposals/contract acknowledgements.
+
+    These are authoritative committed partner rows. A proposal or receipt
+    never grants scope, signs a contract, or marks evidence Quality-verified.
+    """
+    count=0
+    for item in _rows(db, """SELECT x.id,x.category,x.status,x.version,p.supplier_id
+        FROM external_partner_change_requests x
+        JOIN external_tenant_providers p
+          ON p.id=x.tenant_provider_id AND p.amo_id=x.amo_id
+        WHERE x.amo_id=:amo AND x.category IN ('SITE','CAPABILITY')
+          AND x.status IN ('PENDING','UNDER_REVIEW')
+        ORDER BY x.created_at DESC LIMIT 300""",amo=amo):
+        count+=_queue(db,amo=amo,event="provider.site_capability_proposed",
+                      source="partner_change",source_id=item["id"],
+                      stamp=f"{item['status']}:{item['version']}",
+                      supplier=item["supplier_id"],cancel_older=True)
+    for item in _rows(db, """SELECT x.id,x.status,p.supplier_id
+        FROM external_partner_evidence_submissions x
+        JOIN external_tenant_providers p
+          ON p.id=x.tenant_provider_id AND p.amo_id=x.amo_id
+        WHERE x.amo_id=:amo AND x.status IN
+          ('PENDING_REVIEW','ACCEPTED','REJECTED')
+        ORDER BY x.created_at DESC LIMIT 350""",amo=amo):
+        event={"PENDING_REVIEW":"quality.evidence_received",
+               "ACCEPTED":"quality.evidence_reviewed",
+               "REJECTED":"quality.evidence_rejected"}[item["status"]]
+        count+=_queue(db,amo=amo,event=event,source="partner_evidence",
+                      source_id=item["id"],stamp=item["status"],
+                      supplier=item["supplier_id"],cancel_older=True)
+    for item in _rows(db, """SELECT x.id,x.contract_id,x.supplier_id,
+             x.acknowledgement
+        FROM external_partner_contract_receipts x
+        WHERE x.amo_id=:amo ORDER BY x.created_at DESC LIMIT 200""",amo=amo):
+        event=("contract.acknowledged" if item["acknowledgement"]=="RECEIVED"
+               else "contract.clarification_requested")
+        count+=_queue(db,amo=amo,event=event,source="partner_contract",
+                      source_id=item["contract_id"],stamp=item["id"],
+                      supplier=item["supplier_id"])
+    return count
+
+
+def _scan_canonical_procurement(db, amo):
+    """Map canonical Procurement transactions to alerts without inventing stock events."""
+    count=0
+    event_map={
+        ("ProcurementRFQ","issue"):"procurement.rfq_invited",
+        ("ProcurementQuote","receive"):"procurement.quote_received",
+        ("ProcurementPurchaseOrder","send"):"procurement.po_issued",
+        ("ProcurementPurchaseOrder","acknowledge"):"procurement.po_acknowledged",
+        ("ProcurementReceipt","receive_to_quarantine"):"procurement.material_received",
+        ("ProcurementReceipt","quality_release"):"procurement.quality_released",
+        ("ProcurementQualityHold","place"):"procurement.quality_hold",
+        ("ProcurementQualityHold","release"):"procurement.quality_released",
+    }
+    for item in _rows(db, """SELECT id,entity_type,entity_id,action,detail
+        FROM procurement_events WHERE amo_id=:amo
+        ORDER BY occurred_at DESC,id DESC LIMIT 450""",amo=amo):
+        kind=item["entity_type"]
+        action=item["action"]
+        event=event_map.get((kind,action))
+        if kind=="ProcurementReceipt" and action=="inspect":
+            disposition=(item["detail"] or {}).get("disposition")
+            event=("procurement.inspection_discrepancy" if disposition in
+                   ("REJECTED","RETURN_TO_SUPPLIER","ESCALATED_TO_QUALITY","ON_HOLD")
+                   else "procurement.inspection_completed")
+        if not event:
+            continue
+        count+=_queue(db,amo=amo,event=event,source="procurement_canonical",
+                      source_id=f"{kind}:{item['entity_id']}",stamp=item["id"])
+    return count
+
 def _scan_contracted_work_deadlines(db,amo,local_now,zone,policy):
     """Optional manager-controlled dates in Phase 7 written requirements."""
     count=0
@@ -477,6 +557,16 @@ def _allowed_link(amo_code, row):
         tab=("contracts" if source in ("agreement","agreement_state") else "qualification"
              if source in ("qualification","qualification_state","quality_governance","surveillance") else "evidence")
         return "/maintenance/"+code+"/quality/suppliers/"+str(int(supplier))+"/"+tab
+    if source in ("partner_change","partner_evidence","partner_contract") and supplier:
+        tab="contracts" if source=="partner_contract" else "evidence"
+        return "/maintenance/"+code+"/quality/suppliers/"+str(int(supplier))+"/"+tab
+    if source=="procurement_canonical":
+        entity, _, record_id=str(row["source_id"]).partition(":")
+        section=({"ProcurementRFQ":"sourcing","ProcurementQuote":"sourcing",
+                  "ProcurementPurchaseOrder":"orders","ProcurementReceipt":"receiving",
+                  "ProcurementQualityHold":"control"}.get(entity,"command"))
+        return ("/maintenance/"+code+"/procurement/"+section+"?recordKind="+
+                quote(entity,safe="")+"&recordId="+quote(record_id,safe=""))
     if source in ("maintenance_event","maintenance_due"):
         return "/maintenance/"+code+"/contracted-work?work="+quote(source_id,safe="")
     if source in ("procurement_event","rfq","po_delivery","po_ack"):
@@ -741,6 +831,8 @@ def scan_provider_alerts():
                     zone = ZoneInfo("UTC")
                 policy = _policy(db, str(amo))
                 report["enqueued"] += _scan_transitions(db,str(amo))
+                report["enqueued"] += _scan_partner_records(db,str(amo))
+                report["enqueued"] += _scan_canonical_procurement(db,str(amo))
                 report["enqueued"] += _schedule_expiries(db,str(amo),now,zone,policy)
                 report["enqueued"] += _scan_contracted_work_deadlines(db,str(amo),now,zone,policy)
                 report["dispatched"] += _dispatch(db,str(amo),code,zone,policy,now)
