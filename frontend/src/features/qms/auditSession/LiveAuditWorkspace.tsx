@@ -733,7 +733,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setFindingDraft(current => current?.item.checklist_item_id === draft.item.checklist_item_id ? null : current);
       setParkedFindings((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setLocalError(null);
-      setSyncNotice("Finding saved and linked to this question.");
+      setSyncNotice("Finding, checklist response and governed CAR/task consequences committed as one authoritative transaction.");
       setPendingChoices((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setNoteDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setSampleDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
