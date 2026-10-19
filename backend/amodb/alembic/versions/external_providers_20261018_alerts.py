@@ -94,9 +94,19 @@ def upgrade():
         for table in TABLES:
             op.execute(sa.text('ALTER TABLE "' + table + '" ENABLE ROW LEVEL SECURITY'))
             op.execute(sa.text('ALTER TABLE "' + table + '" FORCE ROW LEVEL SECURITY'))
-            guard = (" AND (tenant_provider_id = NULLIF(current_setting('app.external_provider_id', true), '') "
-                     "OR current_setting('app.external_provider_id', true) = '__INTERNAL_QUALITY_REVIEW__')"
-                     if table == "external_provider_alert_preferences" else "")
+            provider_context = "NULLIF(current_setting('app.external_provider_id', true), '')"
+            identity_context = "NULLIF(current_setting('app.external_identity_id', true), '')"
+            if table == "external_provider_alert_preferences":
+                guard = (" AND (" + provider_context + " = '__INTERNAL_QUALITY_REVIEW__' "
+                         "OR (tenant_provider_id = " + provider_context
+                         + " AND identity_id = " + identity_context + "))")
+            elif table == "external_provider_alert_jobs":
+                guard = (" AND (" + provider_context + " IS NULL OR "
+                         + provider_context + " = '__INTERNAL_QUALITY_REVIEW__' "
+                         "OR (recipient_provider_id = " + provider_context
+                         + " AND recipient_identity_id = " + identity_context + "))")
+            else:
+                guard = ""
             condition = "amo_id = NULLIF(current_setting('app.tenant_id', true), '')" + guard
             op.execute(sa.text('CREATE POLICY "' + table + '_tenant" ON "' + table + '" '
                                'USING (' + condition + ') WITH CHECK (' + condition + ')'))
