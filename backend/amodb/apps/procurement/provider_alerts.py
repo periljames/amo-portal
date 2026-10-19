@@ -43,6 +43,9 @@ CATALOG = {
     "provider.rejected": "QUALITY",
     "provider.scope_restricted": "QUALITY",
     "provider.suspended": "QUALITY",
+    "provider.overdue_escalation": "QUALITY",
+    "provider.documentation_updated": "QUALITY",
+    "provider.review_updated": "QUALITY",
     "provider.reinstated": "QUALITY",
     "provider.approval_expiry": "QUALITY",
     "provider.certificate_expiry": "QUALITY",
@@ -71,6 +74,8 @@ CATALOG = {
     "procurement.quote_received": "PROCUREMENT",
     "procurement.po_issued": "PROCUREMENT",
     "procurement.po_ack_due": "PROCUREMENT",
+    "procurement.po_acknowledged": "PROCUREMENT",
+    "procurement.delivery_due": "PROCUREMENT",
     "procurement.delivery_changed": "PROCUREMENT",
     "procurement.shipment_submitted": "PROCUREMENT",
     "procurement.material_received": "STORES",
@@ -78,6 +83,11 @@ CATALOG = {
     "procurement.quality_hold": "QUALITY",
     "procurement.return_rma": "PROCUREMENT",
     "maintenance.assigned": "MAINTENANCE",
+    "maintenance.acknowledged": "MAINTENANCE",
+    "maintenance.progress_updated": "MAINTENANCE",
+    "maintenance.finding_reported": "MAINTENANCE",
+    "maintenance.date_change_requested": "MAINTENANCE",
+    "maintenance.schedule_changed": "MAINTENANCE",
     "maintenance.ack_overdue": "MAINTENANCE",
     "maintenance.additional_pending": "MAINTENANCE",
     "maintenance.progress_overdue": "MAINTENANCE",
@@ -90,11 +100,12 @@ CATALOG = {
 
 MAINTENANCE_ACTIONS = {
     "DISPATCH": "maintenance.assigned",
-    "PROVIDER_ACCEPT": "maintenance.assigned",
+    "PROVIDER_ACCEPT": "maintenance.acknowledged",
     "ADDITIONAL_WORK_REQUESTED": "maintenance.additional_pending",
-    "PROGRESS": "maintenance.progress_overdue",
-    "ETA_CHANGE": "maintenance.completion_missed",
-    "FINDING": "maintenance.progress_overdue",
+    "EXPECTED_DATES_CHANGED": "maintenance.schedule_changed",
+    "PROGRESS": "maintenance.progress_updated",
+    "ETA_CHANGE": "maintenance.date_change_requested",
+    "FINDING": "maintenance.finding_reported",
     "SUBMIT_RELEASE": "maintenance.release_submitted",
     "RETURN": "maintenance.inspection_pending",
     "RECEIVE": "maintenance.closure_pending",
@@ -106,7 +117,7 @@ PROCUREMENT_ACTIONS = {
     "QUOTE_RECEIVED": "procurement.quote_received",
     "SUBMITTED": "procurement.quote_received",
     "PO_ISSUED": "procurement.po_issued",
-    "ACKNOWLEDGED": "procurement.po_ack_due",
+    "ACKNOWLEDGED": "procurement.po_acknowledged",
     "SHIPMENT_SUBMITTED": "procurement.shipment_submitted",
     "SHIPMENT_ADVISED": "procurement.shipment_submitted",
     "DELIVERY_CHANGE": "procurement.delivery_changed",
@@ -227,7 +238,7 @@ SOURCE_EVENT = {
     "qualification": "provider.approval_expiry",
     "surveillance": "quality.audit_due",
     "rfq": "procurement.quote_due",
-    "po_delivery": "procurement.delivery_changed",
+    "po_delivery": "procurement.delivery_due",
 }
 
 def _active_source(db, tenant, source, source_id):
@@ -363,14 +374,14 @@ def _scan_transitions(db, amo):
                           source_id=row["entity_id"],stamp=row["id"],supplier=row["supplier_id"])
     governance={
         "QUALIFICATION_OPENED":"provider.approval_requested",
-        "QUALIFICATION_UPDATED":"provider.missing_evidence",
-        "DEPARTMENT_REVIEW":"provider.quality_review_pending",
+        "QUALIFICATION_UPDATED":"provider.documentation_updated",
+        "DEPARTMENT_REVIEW":"provider.review_updated",
         "QUALIFICATION_APPROVED":"provider.approved",
         "QUALIFICATION_CONDITIONALLY_APPROVED":"provider.approved",
         "QUALIFICATION_REJECTED":"provider.rejected",
         "RESTRICTION_IMPOSED":"provider.scope_restricted",
         "RESTRICTION_LIFTED":"provider.reinstated",
-        "OVERDUE_PROVIDER_ESCALATED":"provider.suspended",
+        "OVERDUE_PROVIDER_ESCALATED":"provider.overdue_escalation",
     }
     for row in _rows(db, """SELECT id,supplier_id,case_id,action
            FROM quality_provider_qualification_events WHERE amo_id=:amo
