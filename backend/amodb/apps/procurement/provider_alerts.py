@@ -122,7 +122,8 @@ PROCUREMENT_ACTIONS = {
     "CLARIFICATION": "procurement.clarification",
     "QUOTE_RECEIVED": "procurement.quote_received",
     "SUBMITTED": "procurement.quote_received",
-    "PO_ISSUED": "procurement.po_issued",
+    # Canonical ProcurementPurchaseOrder/send already covers this same PO
+    # transition; do not also project the partner PO_ISSUED mirror.
     "ACKNOWLEDGED": "procurement.po_acknowledged",
     "SHIPMENT_SUBMITTED": "procurement.shipment_submitted",
     "SHIPMENT_ADVISED": "procurement.shipment_submitted",
