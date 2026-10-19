@@ -106,15 +106,43 @@ def _caps(role,proposed=None,bound=None):
         raise HTTPException(403,"External capability exceeds authorized profile")
     return sorted(requested)
 
+DELEGABLE_OBJECT_SCOPES=frozenset({"contracts","documents","assignments","rfqs","purchase_orders"})
+MANAGER_CONTROLLED_SCOPES=frozenset({"contracted_work"})
+ALL_OBJECT_SCOPES=DELEGABLE_OBJECT_SCOPES|MANAGER_CONTROLLED_SCOPES
+
 def _scope(value):
-    if set(value)-{"contracts","documents","assignments","rfqs","purchase_orders"}:
+    if not isinstance(value,dict) or set(value)-ALL_OBJECT_SCOPES:
         raise HTTPException(422,"Unknown object scope type")
-    if sum(len(v) for v in value.values())>500 or any(
-        not isinstance(v,list) or any(not isinstance(x,str) or len(x)>128 for x in v)
-        for v in value.values()
-    ):
+    if any(not isinstance(v,list) or any(
+        not isinstance(x,str) or not x.strip() or len(x)>128 for x in v
+    ) for v in value.values()):
         raise HTTPException(422,"Invalid provider object scope")
+    if sum(len(v) for v in value.values())>500:
+        raise HTTPException(422,"Provider object scope exceeds record limit")
     return value
+
+
+def _check_provider_delegation(scopes, parent_scope):
+    # All delegable categories must be subsets of the current membership's
+    # grant. Contracted maintenance is assigned ONLY by a Maintenance Manager.
+    if scopes.get("contracted_work"):
+        raise HTTPException(403,"Only the responsible Maintenance Manager may assign contracted work")
+    for key in DELEGABLE_OBJECT_SCOPES:
+        if set(scopes.get(key,[]))-set(parent_scope.get(key,[])):
+            raise HTTPException(403,"Cannot delegate an object outside the administrator's assigned scope")
+
+
+def _merge_manager_scopes(proposed, existing):
+    # Full-object Quality UI submissions must preserve separately authorized
+    # maintenance work IDs, including across unrelated role/capability edits.
+    merged=dict(_scope(proposed))
+    existing=_scope(existing)
+    for key in MANAGER_CONTROLLED_SCOPES:
+        if key in merged and set(merged[key])!=set(existing.get(key,[])):
+            raise HTTPException(403,"Contracted-work assignments are controlled by the responsible Maintenance Manager")
+        if key in existing:
+            merged[key]=existing[key]
+    return merged
 
 def _send(db,amo,email,code,kind):
     # Invitation issuance commits before delivery; restore SET LOCAL tenant
@@ -194,9 +222,7 @@ def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=No
         # A Provider Administrator can delegate only the exact records granted
         # to their own tenant/provider membership, never new contract or DMS IDs.
         parent_scope=_scope(caller_scope or {})
-        for key in ("contracts","documents","assignments"):
-            if set(scopes.get(key,[]))-set(parent_scope.get(key,[])):
-                raise HTTPException(403,"Cannot delegate an object outside the administrator's assigned scope")
+        _check_provider_delegation(scopes,parent_scope)
     existing=core.one("""SELECT id FROM external_tenant_grants WHERE amo_id=:amo
                          AND tenant_provider_id=:provider AND identity_id=:identity""",
                       db,amo=amo,provider=tenant_provider_id,identity=identity_id)
@@ -590,9 +616,10 @@ def quality_grant_update(amo_code:str,grant_id:str,payload:GrantUpdate,db:Sessio
     if not row:raise HTTPException(404,"Grant not found")
     if row["version"]!=payload.version:raise HTTPException(409,"Grant was modified; reload before saving")
     caps=_caps(payload.role_code,payload.capabilities)
+    scopes=_merge_manager_scopes(payload.object_scope,row["object_scope_json"] or {})
     core.run("""UPDATE external_tenant_grants SET role_code=:role,capabilities_json=CAST(:caps AS JSON),
       object_scope_json=CAST(:scope AS JSON),version=version+1 WHERE amo_id=:amo AND id=:id""",
-      db,amo=amo,id=grant_id,role=payload.role_code,caps=json.dumps(caps),scope=json.dumps(_scope(payload.object_scope)))
+      db,amo=amo,id=grant_id,role=payload.role_code,caps=json.dumps(caps),scope=json.dumps(scopes))
     core.run("UPDATE external_sessions SET revoked_at=:at WHERE amo_id=:amo AND grant_id=:id AND revoked_at IS NULL",
              db,at=core.now(),amo=amo,id=grant_id)
     core.event(db,amo=amo,identity=row["identity_id"],grant=grant_id,action="GRANT_RESTRICTED",

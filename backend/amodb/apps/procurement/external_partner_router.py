@@ -208,13 +208,21 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
        and str(user["supplier_lifecycle"]).split(".")[-1] in {"APPROVED","CONDITIONALLY_APPROVED"})
     counts={"rfqs":0,"purchase_orders":0,"audit_requests":0,"cars":0}
     if can_view_tasks:
-        counts["rfqs"]=int(_row("""SELECT count(*) n FROM procurement_rfq_suppliers t
-            JOIN procurement_rfqs r ON r.id=t.rfq_id AND r.amo_id=:amo
-            WHERE t.supplier_id=:supplier AND r.status NOT IN ('DRAFT','CANCELLED')
-            AND t.responded_at IS NULL AND t.declined_at IS NULL""",db,**ctx)["n"])
-        counts["purchase_orders"]=int(_row("""SELECT count(*) n FROM procurement_purchase_orders
-            WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
-            AND acknowledged_at IS NULL""",db,**ctx)["n"])
+        assigned_rfqs=sorted(_allowed(user,"rfqs"))
+        assigned_pos=sorted(_allowed(user,"purchase_orders"))
+        if assigned_rfqs:
+            counts["rfqs"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM procurement_rfq_suppliers t
+                JOIN procurement_rfqs r ON r.id=t.rfq_id AND r.amo_id=:amo
+                WHERE t.supplier_id=:supplier AND r.issued_at IS NOT NULL
+                AND r.status NOT IN ('DRAFT','CANCELLED')
+                AND t.responded_at IS NULL AND t.declined_at IS NULL
+                AND CAST(r.id AS TEXT) IN :scoped""").bindparams(bindparam("scoped",expanding=True)),
+                {**ctx,"scoped":assigned_rfqs})[0]["n"])
+        if assigned_pos:
+            counts["purchase_orders"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM procurement_purchase_orders
+                WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
+                AND acknowledged_at IS NULL AND CAST(id AS TEXT) IN :scoped""").bindparams(
+                bindparam("scoped",expanding=True)),{**ctx,"scoped":assigned_pos})[0]["n"])
         assigned=sorted(_allowed(user,"assignments"))
         if assigned:
             counts["audit_requests"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM
@@ -224,7 +232,6 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
             counts["cars"]=int(_rows_compiled(db,text("""SELECT count(*) n FROM quality_cars c
                 JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
                 WHERE c.amo_id=:amo AND CAST(f.audit_id AS TEXT) IN :assigned
-        AND (:focus IS NULL OR CAST(f.audit_id AS TEXT)=:focus)
                 AND c.closed_at IS NULL
                 AND (SELECT release.action FROM quality_audit_finding_release_events release
                      WHERE release.amo_id=f.amo_id AND release.finding_id=f.id
@@ -235,20 +242,25 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     # hidden draft items or unpublished CARs are surfaced to partners.
     urgent_tasks=[]
     if can_view_tasks:
-        urgent_tasks.extend([{"kind":"RFQ","title":f"Quotation: {x['rfq_number']}",
-            "due":x["response_due_at"],"to":"procurement"} for x in _rows("""
-            SELECT r.rfq_number,r.response_due_at FROM procurement_rfqs r
-            JOIN procurement_rfq_suppliers t ON t.rfq_id=r.id
-            WHERE r.amo_id=:amo AND t.supplier_id=:supplier
-            AND r.status NOT IN ('DRAFT','CANCELLED')
-            AND t.responded_at IS NULL AND t.declined_at IS NULL
-            ORDER BY r.response_due_at NULLS LAST,r.id LIMIT 5""",db,**ctx)])
-        urgent_tasks.extend([{"kind":"PURCHASE_ORDER","title":f"Acknowledge PO {x['po_number']}",
-            "due":x["promised_delivery_date"],"to":"procurement"} for x in _rows("""
-            SELECT po_number,promised_delivery_date FROM procurement_purchase_orders
-            WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
-            AND acknowledged_at IS NULL
-            ORDER BY promised_delivery_date NULLS LAST,id LIMIT 5""",db,**ctx)])
+        if assigned_rfqs:
+            urgent_tasks.extend([{"kind":"RFQ","title":f"Quotation: {x['rfq_number']}",
+                "due":x["response_due_at"],"to":"procurement"} for x in _rows_compiled(db,text("""
+                SELECT r.rfq_number,r.response_due_at FROM procurement_rfqs r
+                JOIN procurement_rfq_suppliers t ON t.rfq_id=r.id
+                WHERE r.amo_id=:amo AND t.supplier_id=:supplier
+                AND r.issued_at IS NOT NULL AND r.status NOT IN ('DRAFT','CANCELLED')
+                AND t.responded_at IS NULL AND t.declined_at IS NULL
+                AND CAST(r.id AS TEXT) IN :scoped
+                ORDER BY r.response_due_at NULLS LAST,r.id LIMIT 5""").bindparams(
+                bindparam("scoped",expanding=True)),{**ctx,"scoped":assigned_rfqs})])
+        if assigned_pos:
+            urgent_tasks.extend([{"kind":"PURCHASE_ORDER","title":f"Acknowledge PO {x['po_number']}",
+                "due":x["promised_delivery_date"],"to":"procurement"} for x in _rows_compiled(db,text("""
+                SELECT po_number,promised_delivery_date FROM procurement_purchase_orders
+                WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
+                AND acknowledged_at IS NULL AND CAST(id AS TEXT) IN :scoped
+                ORDER BY promised_delivery_date NULLS LAST,id LIMIT 5""").bindparams(
+                bindparam("scoped",expanding=True)),{**ctx,"scoped":assigned_pos})])
     assigned=sorted(_allowed(user,"assignments"))
     if assigned and can_view_tasks:
         args={**ctx,"assigned":assigned}
@@ -257,7 +269,6 @@ def home(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
             SELECT r.title,r.due_date,a.audit_ref,CAST(r.audit_id AS TEXT) assignment_id FROM quality_audit_document_requests r
             JOIN qms_audits a ON a.id=r.audit_id AND a.amo_id=r.amo_id
             WHERE r.amo_id=:amo AND CAST(r.audit_id AS TEXT) IN :assigned
-        AND (:focus IS NULL OR CAST(r.audit_id AS TEXT)=:focus)
             AND r.status='REQUESTED'
             ORDER BY r.due_date NULLS LAST,r.id LIMIT 5""").bindparams(
             bindparam("assigned",expanding=True)),args)])
@@ -782,15 +793,23 @@ def procurement(tenant_slug:str,request:Request,db:Session=Depends(get_db),
                 limit:int=Query(20,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
     user=_ctx(db,request,tenant_slug,cap="task.read")
     ctx=_context(user);args={**ctx,**_page(limit,offset)}
-    rfqs=_rows("""SELECT r.id,r.rfq_number,r.title,r.status,r.response_due_at
+    # Legacy read projection must be subject to the same individual grants as
+    # the dedicated /commerce APIs; supplier membership is not record access.
+    rfq_scopes=sorted(_allowed(user,"rfqs"))
+    po_scopes=sorted(_allowed(user,"purchase_orders"))
+    rfqs=_rows_compiled(db,text("""SELECT r.id,r.rfq_number,r.title,r.status,r.response_due_at
        FROM procurement_rfqs r JOIN procurement_rfq_suppliers t ON t.rfq_id=r.id
        WHERE r.amo_id=:amo AND t.supplier_id=:supplier
-       AND r.status NOT IN ('DRAFT','CANCELLED')
-       ORDER BY r.response_due_at NULLS LAST,r.id LIMIT :limit OFFSET :offset""",db,**args)
-    pos=_rows("""SELECT po.id,po.po_number,po.status,po.promised_delivery_date,
+       AND r.issued_at IS NOT NULL AND r.status NOT IN ('DRAFT','CANCELLED')
+       AND CAST(r.id AS TEXT) IN :scoped
+       ORDER BY r.response_due_at NULLS LAST,r.id LIMIT :limit OFFSET :offset""").bindparams(
+       bindparam("scoped",expanding=True)),{**args,"scoped":rfq_scopes}) if rfq_scopes else []
+    pos=_rows_compiled(db,text("""SELECT po.id,po.po_number,po.status,po.promised_delivery_date,
        po.acknowledged_at,po.sent_at FROM procurement_purchase_orders po
        WHERE po.amo_id=:amo AND po.supplier_id=:supplier AND po.sent_at IS NOT NULL
-       ORDER BY po.created_at DESC,po.id LIMIT :limit OFFSET :offset""",db,**args)
+       AND CAST(po.id AS TEXT) IN :scoped
+       ORDER BY po.created_at DESC,po.id LIMIT :limit OFFSET :offset""").bindparams(
+       bindparam("scoped",expanding=True)),{**args,"scoped":po_scopes}) if po_scopes else []
     return {"rfqs":{"items":rfqs,"limit":limit,"offset":offset},
             "purchase_orders":{"items":pos,"limit":limit,"offset":offset},
             "transaction_state":"READ_PROJECTION_ONLY",

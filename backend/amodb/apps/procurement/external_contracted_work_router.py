@@ -1114,14 +1114,15 @@ def assign_partner_member(amo_code:str,work_id:str,grant_id:str,db:Session=Depen
         JOIN external_organization_memberships m ON m.id=g.membership_id AND m.status='ACTIVE'
         JOIN external_identities i ON i.id=m.identity_id AND i.status='ACTIVE'
         WHERE g.amo_id=:amo AND g.id=:id AND g.status='ACTIVE'
-          AND g.tenant_provider_id=:provider AND p.supplier_id=:supplier""",
+          AND g.tenant_provider_id=:provider AND p.supplier_id=:supplier
+        FOR UPDATE OF g""",
         amo=amo,id=grant_id,provider=work["provider_id"],supplier=work["supplier_id"])
     if not grant or "task.read" not in (grant["capabilities_json"] or []):
         raise HTTPException(403,"Selected active grant lacks assigned provider access")
-    current=grant["object_scope_json"] or {}
+    current=dict(grant["object_scope_json"] or {})
     current["contracted_work"]=sorted(set(str(x) for x in current.get("contracted_work",[]))|{str(work_id)})
     db.execute(text("""UPDATE external_tenant_grants SET object_scope_json=CAST(:scopes AS JSON)
-        WHERE amo_id=:amo AND id=:id"""),dict(scopes=json.dumps(current),amo=amo,id=grant_id))
+        ,version=version+1 WHERE amo_id=:amo AND id=:id"""),dict(scopes=json.dumps(current),amo=amo,id=grant_id))
     _event(db,work,"MEMBER_ASSIGNED","Responsible manager assigned member to contracted work",
        staff=str(user.id),details={"grant_id":grant_id})
     _notify_assigned_members(db,work,"Maintenance work assigned",

@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db
@@ -31,16 +31,29 @@ def _row(db, query, **params):
     return dict(v) if v else None
 
 def _rows(db, query, **params):
-    return [dict(r) for r in db.execute(text(query),params).mappings()]
+    statement=text(query)
+    if "scoped" in params:
+        statement=statement.bindparams(bindparam("scoped", expanding=True))
+    return [dict(r) for r in db.execute(statement,params).mappings()]
 
 def _session(db,request,tenant_slug,write=False):
     # A revoked tenant, membership, grant or provider remains blocked by active_session.
     user=partner._ctx(db,request,tenant_slug,cap="procurement.respond" if write else "procurement.read",write=write)
     if write:
         partner._cap(user,"procurement.respond")
-    return user,partner._context(user)
+    ctx=partner._context(user)
+    # Member grants must be applied in addition to the tenant and supplier
+    # identity checks for every direct record, mutation, and paginated list.
+    ctx["rfqs"]=partner._allowed(user,"rfqs")
+    ctx["purchase_orders"]=partner._allowed(user,"purchase_orders")
+    return user,ctx
+
+def _require_scoped(ctx,kind,record_id):
+    if str(record_id) not in ctx.get(kind,set()):
+        raise HTTPException(404,"Transaction not assigned to this provider member")
 
 def _rfq(db,ctx,rfq_id,for_write=False):
+    _require_scoped(ctx,"rfqs",rfq_id)
     row=_row(db,"""SELECT r.id,r.rfq_number,r.title,r.status,r.response_due_at,
        r.terms,r.quality_clauses,r.requisition_id,i.responded_at,i.declined_at,i.invited_at
        FROM procurement_rfqs r
@@ -58,6 +71,7 @@ def _rfq(db,ctx,rfq_id,for_write=False):
     return row
 
 def _po(db,ctx,po_id,for_write=False):
+    _require_scoped(ctx,"purchase_orders",po_id)
     row=_row(db,"""SELECT id,po_number,status,currency,delivery_terms,quality_clauses,
        promised_delivery_date,supplier_ack_reference,acknowledged_at,sent_at
        FROM procurement_purchase_orders
@@ -179,13 +193,16 @@ class Shipment(BaseModel):
 def rfqs(tenant_slug:str,request:Request,db:Session=Depends(get_db),
          limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
     user,ctx=_session(db,request,tenant_slug)
+    if not ctx["rfqs"]:
+        return {"items":[],"limit":limit,"offset":offset}
     return {"items":_rows(db,"""SELECT r.id,r.rfq_number,r.title,r.status,r.response_due_at,
         i.invited_at,i.responded_at
       FROM procurement_rfqs r JOIN procurement_rfq_suppliers i
       ON i.rfq_id=r.id AND i.supplier_id=:supplier WHERE r.amo_id=:amo
       AND r.issued_at IS NOT NULL AND r.status NOT IN ('DRAFT','CANCELLED')
+      AND CAST(r.id AS TEXT) IN :scoped
       ORDER BY r.issued_at DESC,r.id DESC LIMIT :limit OFFSET :offset""",
-      amo=ctx["amo"],supplier=ctx["supplier"],limit=limit,offset=offset),
+      amo=ctx["amo"],supplier=ctx["supplier"],scoped=sorted(ctx["rfqs"]),limit=limit,offset=offset),
       "limit":limit,"offset":offset}
 
 @partner_router.get("/rfqs/{rfq_id}")
@@ -314,6 +331,7 @@ def withdraw_quote(tenant_slug:str,quote_id:str,payload:Ack,request:Request,db:S
        WHERE e.amo_id=:amo AND e.supplier_id=:supplier AND e.id=:id FOR UPDATE""",
        amo=ctx["amo"],supplier=ctx["supplier"],id=quote_id)
     if not row:raise HTTPException(404,"Quotation unavailable")
+    _require_scoped(ctx,"rfqs",row["rfq_id"])
     if row["status"]!="SUBMITTED" or row["quote_state"]!="RECEIVED":
         raise HTTPException(409,"Only an unevaluated current quotation may be withdrawn")
     if len(payload.note.strip())<8:raise HTTPException(422,"Withdrawal requires a reason")
@@ -328,25 +346,31 @@ def withdraw_quote(tenant_slug:str,quote_id:str,payload:Ack,request:Request,db:S
 def purchase_orders(tenant_slug:str,request:Request,db:Session=Depends(get_db),
        limit:int=Query(25,ge=1,le=50),offset:int=Query(0,ge=0,le=10000)):
     user,ctx=_session(db,request,tenant_slug)
+    if not ctx["purchase_orders"]:
+        return {"items":[],"limit":limit,"offset":offset}
     return {"items":_rows(db,"""SELECT id,po_number,status,currency,promised_delivery_date,
        acknowledged_at,sent_at FROM procurement_purchase_orders
        WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL
+         AND CAST(id AS TEXT) IN :scoped
        ORDER BY sent_at DESC,id DESC LIMIT :limit OFFSET :offset""",
-       amo=ctx["amo"],supplier=ctx["supplier"],limit=limit,offset=offset),
+       amo=ctx["amo"],supplier=ctx["supplier"],scoped=sorted(ctx["purchase_orders"]),limit=limit,offset=offset),
        "limit":limit,"offset":offset}
 
 @partner_router.get("/shipments")
 def shipment_scopes(tenant_slug:str,request:Request,db:Session=Depends(get_db)):
     user,ctx=_session(db,request,tenant_slug)
-    # The member must also have received explicit scope for the underlying PO.
-    allowed=partner._allowed(user,"purchase_orders")
+    allowed=ctx["purchase_orders"]
     if not allowed:return {"items":[]}
-    candidates=_rows(db,"""SELECT sh.id,sh.po_id,sh.shipment_reference,sh.status
+    # Filter before LIMIT; unassigned shipments must not displace a member's
+    # legitimate results or leak via per-supplier pagination.
+    items=_rows(db,"""SELECT sh.id,sh.po_id,sh.shipment_reference,sh.status
        FROM external_procurement_shipments sh JOIN procurement_purchase_orders p
        ON p.id=sh.po_id AND p.amo_id=sh.amo_id AND p.supplier_id=sh.supplier_id
        WHERE sh.amo_id=:amo AND sh.supplier_id=:supplier AND p.sent_at IS NOT NULL
-       ORDER BY sh.created_at DESC LIMIT 250""",amo=ctx["amo"],supplier=ctx["supplier"])
-    return {"items":[item for item in candidates if str(item["po_id"]) in allowed][:100]}
+       AND CAST(sh.po_id AS TEXT) IN :scoped
+       ORDER BY sh.created_at DESC,sh.id DESC LIMIT 100""",
+       amo=ctx["amo"],supplier=ctx["supplier"],scoped=sorted(allowed))
+    return {"items":items}
 
 
 @partner_router.get("/purchase-orders/{po_id}")
@@ -549,13 +573,17 @@ def history(tenant_slug:str,kind:str,entity_id:str,request:Request,db:Session=De
     if kind=="RFQ":_rfq(db,ctx,int(entity_id))
     elif kind=="PO":_po(db,ctx,int(entity_id))
     elif kind=="SHIPMENT":
-        if not _row(db,"""SELECT id FROM external_procurement_shipments WHERE amo_id=:amo
-           AND supplier_id=:supplier AND id=:id""",amo=ctx["amo"],supplier=ctx["supplier"],id=entity_id):
-            raise HTTPException(404,"Shipment not assigned")
+        sh=_row(db,"""SELECT po_id FROM external_procurement_shipments WHERE amo_id=:amo
+           AND supplier_id=:supplier AND id=:id""",
+           amo=ctx["amo"],supplier=ctx["supplier"],id=entity_id)
+        if not sh:raise HTTPException(404,"Shipment not assigned")
+        _po(db,ctx,sh["po_id"])
     elif kind=="QUOTE":
-        if not _row(db,"""SELECT id FROM external_procurement_quotes WHERE amo_id=:amo
-           AND supplier_id=:supplier AND id=:id""",amo=ctx["amo"],supplier=ctx["supplier"],id=entity_id):
-            raise HTTPException(404,"Quote not assigned")
+        q=_row(db,"""SELECT rfq_id FROM external_procurement_quotes WHERE amo_id=:amo
+           AND supplier_id=:supplier AND id=:id""",
+           amo=ctx["amo"],supplier=ctx["supplier"],id=entity_id)
+        if not q:raise HTTPException(404,"Quote not assigned")
+        _rfq(db,ctx,q["rfq_id"])
     else:raise HTTPException(422,"Unsupported transaction")
     return {"items":_history(db,ctx,kind,entity_id)}
 

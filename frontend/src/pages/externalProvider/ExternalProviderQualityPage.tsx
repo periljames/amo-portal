@@ -90,7 +90,9 @@ export default function ExternalProviderQualityPage() {
   const selectGrant = (item: Grant) => {
     setEditing(item);setNewRole(item.role_code);
     setCapabilities(item.capabilities_json || []);
-    setScopes(JSON.stringify(item.object_scope_json || {},null,2));
+    setScopes(JSON.stringify(Object.fromEntries(
+      Object.entries(item.object_scope_json || {}).filter(([key])=>key!=="contracted_work")
+    ),null,2));
   };
   const filtered=items.filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
     .toLowerCase().includes(search.toLowerCase()));
@@ -196,7 +198,11 @@ export default function ExternalProviderQualityPage() {
           {CAPS.map((cap)=><label key={cap}><input type="checkbox" checked={capabilities.includes(cap)}
             onChange={(e)=>setCapabilities((values)=>e.target.checked?[...values,cap]:values.filter(v=>v!==cap))}/>{cap}</label>)}
         </div></fieldset>
-        <label className="vendor-field"><span>Exact object scope JSON (contracts, documents, assignments)</span>
+        <p>Maintenance work assignments are issued by the responsible Maintenance Manager, not this Quality privilege editor.</p>
+        {Boolean(editing.object_scope_json?.contracted_work?.length) && <p role="status">
+          Assigned contracted work (read-only): {editing.object_scope_json.contracted_work.join(", ")}
+        </p>}
+        <label className="vendor-field"><span>Exact object scope JSON (contracts, documents, assignments, RFQs, purchase_orders; contracted_work is Maintenance-managed and read-only here)</span>
           <textarea rows={5} value={scopes} onChange={(e)=>setScopes(e.target.value)} /></label>
         <div className="vendor-actions">
           <button type="button" disabled={busy} onClick={()=>{
