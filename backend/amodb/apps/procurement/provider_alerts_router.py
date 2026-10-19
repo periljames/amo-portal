@@ -300,14 +300,24 @@ def partner_alert_action(tenant_slug:str,job_id:str,request:Request,
     if not job:
         raise HTTPException(404,"Assigned alert action unavailable")
     scope=user["object_scope_json"] or {}
-    if job["source_kind"]=="maintenance_event":
-        target="contracted_work"
-        link="work"
+    source_kind = job["source_kind"]
+    if source_kind == "maintenance_event":
+        target = "contracted_work"
+        link = "work"
+        assigned_id = str(job["source_id"])
+    elif source_kind in {"qms_notice","qms_document_request","qms_finding","qms_car"}:
+        target = "assignments"
+        link = "quality"
+        assigned_id = str(job["source_id"]).partition(":")[0]
+        capability = "capa.respond" if source_kind == "qms_car" else "task.read"
+        if capability not in (user.get("capabilities_json") or []):
+            raise HTTPException(404,"No actionable provider record")
     else:
         raise HTTPException(404,"No actionable provider record")
-    if str(job["source_id"]) not in {str(item) for item in scope.get(target,[])}:
+    if assigned_id not in {str(item) for item in scope.get(target,[])}:
         raise HTTPException(404,"Work item is not in the current member grant")
     from urllib.parse import quote
+    query = ("?work="+quote(str(job["source_id"]),safe="")
+             if link=="work" else "?audit="+quote(assigned_id,safe=""))
     return {"event_key":job["event_key"],"acknowledged_at":job["acknowledged_at"],
-            "link":"/partner/"+quote(tenant_slug,safe="")+"/"+link+
-                   "?work="+quote(str(job["source_id"]),safe="")}
+            "link":"/partner/"+quote(tenant_slug,safe="")+"/"+link+query}

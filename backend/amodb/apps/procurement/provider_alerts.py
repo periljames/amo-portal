@@ -457,6 +457,123 @@ def _scan_transitions(db, amo):
     return count
 
 
+def _qms_grant_allows(grant, audit_id: str, capability: str) -> bool:
+    """Recheck the exact assigned audit and operation on an active member grant."""
+    scopes = grant.get("object_scope_json") or {}
+    capabilities = set(grant.get("capabilities_json") or [])
+    return (
+        capability in capabilities
+        and str(audit_id) in {str(item) for item in scopes.get("assignments", [])}
+    )
+
+
+def _scan_qms_provider_collaboration(db, amo):
+    """Project canonical QMS notices and released CAR obligations to *assigned*
+    provider members only. Staff continue using the existing QMS alerts.
+
+    This creates no new audits, findings, CARs or approval decisions. All items
+    are rechecked against their current canonical source before dispatch.
+    """
+    count = 0
+    grants = _rows(db, """SELECT g.tenant_provider_id, g.object_scope_json,
+        g.capabilities_json, m.identity_id, p.supplier_id
+        FROM external_tenant_grants g
+        JOIN external_organization_memberships m ON m.id=g.membership_id
+        JOIN external_identities i ON i.id=m.identity_id
+        JOIN external_tenant_providers p ON p.id=g.tenant_provider_id
+          AND p.amo_id=g.amo_id
+        WHERE g.amo_id=:amo AND g.status='ACTIVE'
+          AND m.status='ACTIVE' AND i.status='ACTIVE'
+          AND p.portal_state='ACTIVE'
+        ORDER BY g.id LIMIT 1000""", amo=amo)
+    if not grants:
+        return 0
+
+    # DELIVERED is a canonical QMS notice transition, not proof of email
+    # delivery. Its database revision and status are rechecked at dispatch.
+    notices = _rows(db, """SELECT n.id,n.audit_id,n.status,n.revision_no
+        FROM quality_audit_notices n WHERE n.amo_id=:amo
+          AND n.status='DELIVERED'
+        ORDER BY n.notice_date DESC,n.id LIMIT 150""", amo=amo)
+    for row in notices:
+        for grant in grants:
+            if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
+                continue
+            count += _queue(
+                db, amo=amo, event="quality.audit_notice",
+                source="qms_notice", source_id=f"{row['audit_id']}:{row['id']}",
+                stamp=f"{row['status']}:{row['revision_no']}",
+                supplier=grant["supplier_id"], recipient_kind="provider",
+                provider=grant["tenant_provider_id"], recipient_id=grant["identity_id"],
+                cancel_older=True,
+            )
+
+    requests = _rows(db, """SELECT id,audit_id,status,due_date
+        FROM quality_audit_document_requests
+        WHERE amo_id=:amo AND status='REQUESTED'
+        ORDER BY due_date NULLS LAST,id LIMIT 150""", amo=amo)
+    for row in requests:
+        for grant in grants:
+            if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
+                continue
+            count += _queue(
+                db, amo=amo, event="quality.document_requested",
+                source="qms_document_request", source_id=f"{row['audit_id']}:{row['id']}",
+                stamp=f"{row['status']}:{row['due_date']}",
+                supplier=grant["supplier_id"], recipient_kind="provider",
+                provider=grant["tenant_provider_id"], recipient_id=grant["identity_id"],
+                cancel_older=True,
+            )
+
+    # Only an expressly RELEASED finding enters the partner work queue.
+    # A newer release/withdrawal event invalidates a previously queued alert.
+    findings = _rows(db, """SELECT e.id,e.audit_id,e.finding_id
+        FROM quality_audit_finding_release_events e
+        WHERE e.amo_id=:amo AND e.action='RELEASED'
+          AND e.id=(SELECT e2.id FROM quality_audit_finding_release_events e2
+            WHERE e2.amo_id=e.amo_id AND e2.finding_id=e.finding_id
+            ORDER BY e2.created_at DESC,e2.id DESC LIMIT 1)
+        ORDER BY e.created_at DESC,e.id DESC LIMIT 150""", amo=amo)
+    for row in findings:
+        for grant in grants:
+            if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
+                continue
+            count += _queue(
+                db, amo=amo, event="quality.finding_issued",
+                source="qms_finding", source_id=f"{row['audit_id']}:{row['finding_id']}",
+                stamp=row["id"], supplier=grant["supplier_id"],
+                recipient_kind="provider", provider=grant["tenant_provider_id"],
+                recipient_id=grant["identity_id"], cancel_older=True,
+            )
+
+    # CAR duty is derived from QMS's original released finding, not a new
+    # external CAR table. Retain access to existing CARs during restrictions
+    # where the member's corrective-action grant is still in force.
+    cars = _rows(db, """SELECT c.id,c.status,c.due_date,f.audit_id
+        FROM quality_cars c
+        JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
+        WHERE c.amo_id=:amo AND c.status NOT IN ('CLOSED','CANCELLED')
+          AND c.due_date IS NOT NULL AND c.due_date <= CURRENT_DATE + 30
+          AND (SELECT e.action FROM quality_audit_finding_release_events e
+               WHERE e.amo_id=c.amo_id AND e.finding_id=f.id
+               ORDER BY e.created_at DESC,e.id DESC LIMIT 1)='RELEASED'
+        ORDER BY c.due_date,c.id LIMIT 150""", amo=amo)
+    for row in cars:
+        event = "quality.capa_overdue" if row["due_date"] < date.today() else "quality.car_due"
+        for grant in grants:
+            if not _qms_grant_allows(grant, str(row["audit_id"]), "capa.respond"):
+                continue
+            count += _queue(
+                db, amo=amo, event=event,
+                source="qms_car", source_id=f"{row['audit_id']}:{row['id']}",
+                stamp=f"{row['status']}:{row['due_date']}",
+                supplier=grant["supplier_id"], recipient_kind="provider",
+                provider=grant["tenant_provider_id"], recipient_id=grant["identity_id"],
+                cancel_older=True,
+            )
+    return count
+
+
 def _scan_partner_records(db, amo):
     """Project provider-owned evidence/proposals/contract acknowledgements.
 
@@ -589,6 +706,10 @@ def _allowed_link(amo_code, row):
     if source in ("partner_change","partner_evidence","partner_contract") and supplier:
         tab="contracts" if source=="partner_contract" else "evidence"
         return "/maintenance/"+code+"/quality/suppliers/"+str(int(supplier))+"/"+tab
+    if source in ("qms_notice", "qms_document_request", "qms_finding"):
+        return "/maintenance/"+code+"/quality/audits/"+quote(source_id,safe="")
+    if source=="qms_car":
+        return "/maintenance/"+code+"/quality/cars/"+quote(str(row["source_id"]).partition(":")[2],safe="")
     if source=="procurement_canonical":
         entity, _, record_id=str(row["source_id"]).partition(":")
         section=({"ProcurementRFQ":"sourcing","ProcurementQuote":"sourcing",
@@ -608,6 +729,39 @@ def _still_current(db, amo, row, zone, policy):
     source=row["source_kind"]
     # Action-needed projections must not survive source closure or review.
     # Historical immutable transition events are retained separately.
+    if source in {"qms_notice", "qms_document_request", "qms_finding", "qms_car"}:
+        audit_id, separator, object_id = str(row["source_id"]).partition(":")
+        if not separator or not audit_id or not object_id:
+            return False
+        if source == "qms_notice":
+            found = db.execute(text("""SELECT status,revision_no FROM quality_audit_notices
+                WHERE amo_id=:amo AND audit_id=:audit AND id=:id"""),
+                {"amo": amo, "audit": audit_id, "id": object_id}).mappings().first()
+            return bool(found and found["status"] == "DELIVERED"
+                        and row["source_stamp"] == f"{found['status']}:{found['revision_no']}")
+        if source == "qms_document_request":
+            found = db.execute(text("""SELECT status,due_date FROM quality_audit_document_requests
+                WHERE amo_id=:amo AND audit_id=:audit AND id=:id"""),
+                {"amo": amo, "audit": audit_id, "id": object_id}).mappings().first()
+            return bool(found and found["status"] == "REQUESTED"
+                        and row["source_stamp"] == f"{found['status']}:{found['due_date']}")
+        if source == "qms_finding":
+            found = db.execute(text("""SELECT id,action FROM quality_audit_finding_release_events
+                WHERE amo_id=:amo AND audit_id=:audit AND finding_id=:id
+                ORDER BY created_at DESC,id DESC LIMIT 1"""),
+                {"amo": amo, "audit": audit_id, "id": object_id}).mappings().first()
+            return bool(found and found["action"] == "RELEASED"
+                        and str(row["source_stamp"]) == str(found["id"]))
+        found = db.execute(text("""SELECT c.status,c.due_date FROM quality_cars c
+            JOIN qms_audit_findings f ON f.id=c.finding_id AND f.amo_id=c.amo_id
+            WHERE c.amo_id=:amo AND f.audit_id=:audit AND c.id=:id
+              AND (SELECT e.action FROM quality_audit_finding_release_events e
+                   WHERE e.amo_id=c.amo_id AND e.finding_id=f.id
+                   ORDER BY e.created_at DESC,e.id DESC LIMIT 1)='RELEASED'"""),
+            {"amo": amo, "audit": audit_id, "id": object_id}).mappings().first()
+        return bool(found and found["status"] not in {"CLOSED","CANCELLED"}
+                    and found["due_date"] is not None
+                    and row["source_stamp"] == f"{found['status']}:{found['due_date']}")
     if source=="partner_change":
         current=db.execute(text("""SELECT status,version FROM external_partner_change_requests
             WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
@@ -723,7 +877,7 @@ def _dispatch(db, amo, code, zone, policy, now):
             elif job["recipient_identity_id"]:
                 # Never deliver to revoked identities or grants. A vendor may
                 # only receive a scoped record; no generic supplier-wide broadcast.
-                grant = _rows(db, """SELECT g.object_scope_json,i.email,i.verified_at
+                grant = _rows(db, """SELECT g.object_scope_json,g.capabilities_json,i.email,i.verified_at
                    FROM external_tenant_grants g
                    JOIN external_organization_memberships m ON m.id=g.membership_id
                    JOIN external_identities i ON i.id=m.identity_id
@@ -734,9 +888,20 @@ def _dispatch(db, amo, code, zone, policy, now):
                    AND i.status='ACTIVE' AND p.portal_state='ACTIVE'""", amo=amo,
                    provider=job["recipient_provider_id"],
                    identity=job["recipient_identity_id"])
-                scope_kind = "contracted_work" if job["source_kind"]=="maintenance_event" else "procurement"
-                assigned = any(str(job["source_id"]) in [str(v) for v in
-                    (g["object_scope_json"] or {}).get(scope_kind, [])] for g in grant)
+                source_kind = job["source_kind"]
+                scope_kind = ("contracted_work" if source_kind == "maintenance_event"
+                              else "assignments" if source_kind.startswith("qms_")
+                              else "procurement")
+                scoped_id = (str(job["source_id"]).partition(":")[0]
+                             if source_kind.startswith("qms_") else str(job["source_id"]))
+                required_capability = ("capa.respond" if source_kind == "qms_car"
+                    else "task.read" if source_kind.startswith("qms_") else None)
+                assigned = any(
+                    scoped_id in {str(v) for v in (g["object_scope_json"] or {}).get(scope_kind, [])}
+                    and (not required_capability
+                        or required_capability in (g.get("capabilities_json") or []))
+                    for g in grant
+                )
                 if not assigned:
                     db.execute(text("""UPDATE external_provider_alert_jobs
                          SET status='CANCELLED',cancelled_at=NOW() WHERE id=:id"""), {"id":job["id"]})
@@ -918,6 +1083,7 @@ def scan_provider_alerts():
                 policy = _policy(db, str(amo))
                 report["enqueued"] += _scan_transitions(db,str(amo))
                 report["enqueued"] += _scan_partner_records(db,str(amo))
+                report["enqueued"] += _scan_qms_provider_collaboration(db,str(amo))
                 report["enqueued"] += _scan_canonical_procurement(db,str(amo))
                 report["enqueued"] += _schedule_expiries(db,str(amo),now,zone,policy)
                 report["enqueued"] += _scan_contracted_work_deadlines(db,str(amo),now,zone,policy)
