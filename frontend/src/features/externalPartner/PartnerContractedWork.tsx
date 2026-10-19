@@ -2,7 +2,8 @@ import React,{useEffect,useState} from "react";
 import {Link,useLocation} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUrl} from "./partnerApi";
-import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type WorkRow={id:string;work_number:string;work_title:string;site_code:string;status:string;work_type:string;updated_at:string};
 type Work={id:string;version:number;status:string;work_number:string;work_title:string;scope_text:string;function:string;defect:string;

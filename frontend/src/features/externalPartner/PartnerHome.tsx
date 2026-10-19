@@ -2,7 +2,8 @@ import React from "react";
 import {Link} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {partnerRequest,friendlyDate,label,type Summary} from "./partnerApi";
-import {Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 export default function PartnerHome({tenant,capabilities}:PartnerProps){
   const query=usePartnerLoad((signal)=>partnerRequest<Summary>(tenant,"home",{signal}),tenant);

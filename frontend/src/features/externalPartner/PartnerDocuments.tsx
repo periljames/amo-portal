@@ -2,7 +2,8 @@ import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import PublicationDocxLayoutViewer from "../../pages/manuals/PublicationDocxLayoutViewer";
 import {friendlyDate,label,partnerRequest,partnerUrl,type Contract,type Page} from "./partnerApi";
-import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type Requirement={id:string;code:string;title:string;description:string;mandatory:boolean;
   expiry_required:boolean;acknowledgement_required:boolean;acknowledged_by_me:boolean;

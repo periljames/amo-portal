@@ -1,7 +1,8 @@
 import React,{useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,label,partnerRequest,type Change,type Organization,type Page} from "./partnerApi";
-import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Pager,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type Kind="sites"|"contacts"|"capabilities";
 type Category="IDENTITY"|"CONTACT"|"SITE"|"CAPABILITY"|"BANKING"|"RENEWAL";

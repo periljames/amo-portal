@@ -2,7 +2,8 @@ import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import PartnerContractedWork from "./PartnerContractedWork";
 import {friendlyDate,partnerRequest,partnerUrl,type Contract,type Page} from "./partnerApi";
-import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Pager,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 import PartnerProcurementWorkspace from "./PartnerProcurementWorkspace";
 
 function Contracts({tenant,csrf,capabilities}:PartnerProps){

@@ -2,7 +2,8 @@ import React,{useState} from "react";
 import {Link} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,label,partnerRequest,type Evidence,type Page} from "./partnerApi";
-import {ActionNotice,Pager,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Pager,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type Certificate={id:string;certificate_type:string;certificate_number:string;approval_rating:string|null;verification_state:string;valid_until:string|null};
 type Scope={category:string;site_code:string;status:string;expires_on:string|null;restrictions:string|null;approval_number:string|null};

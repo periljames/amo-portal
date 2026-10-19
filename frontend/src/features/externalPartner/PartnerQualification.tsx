@@ -1,7 +1,8 @@
 import React,{useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {partnerRequest} from "./partnerApi";
-import {Section,State,Status,ActionNotice,usePartnerLoad} from "./PartnerPrimitives";
+import {Section,State,Status,ActionNotice} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type Qualification={
   id:string;category:string;case_kind:string;status:string;version:number;

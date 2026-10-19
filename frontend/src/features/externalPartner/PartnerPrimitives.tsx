@@ -1,27 +1,8 @@
-import React,{useCallback,useEffect,useState} from "react";
+import type { ReactNode } from "react";
 import type { Page } from "./partnerApi";
 
-export function usePartnerLoad<T>(loader:(signal:AbortSignal)=>Promise<T>,key:string){
-  const [value,setValue]=useState<T|null>(null);
-  const [error,setError]=useState("");
-  const [pending,setPending]=useState(true);
-  const [sequence,setSequence]=useState(0);
-  const reload=useCallback(()=>setSequence((old)=>old+1),[]);
-  useEffect(()=>{
-    const controller=new AbortController();
-    setPending(true);setError("");
-    void loader(controller.signal).then((result)=>{
-      if(!controller.signal.aborted)setValue(result);
-    }).catch((failure)=>{
-      if(!controller.signal.aborted)setError(failure instanceof Error?failure.message:"Unable to load portal records");
-    }).finally(()=>{if(!controller.signal.aborted)setPending(false);});
-    return()=>controller.abort();
-  // The caller supplies a stable loader key; cancellation prevents stale-tenant writes.
-  },[key,sequence]);
-  return {value,pending,error,reload};
-}
 export function Section({title,description,children,action}:{
-  title:string;description?:string;children:React.ReactNode;action?:React.ReactNode;
+  title:string;description?:string;children:ReactNode;action?:ReactNode;
 }){
   return <section className="partner-panel">
     <header className="partner-panel__head"><div><h2>{title}</h2>{description&&<p>{description}</p>}</div>{action}</header>

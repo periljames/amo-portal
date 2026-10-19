@@ -2,7 +2,8 @@ import React, {useEffect,useState} from "react";
 import {Link} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUrl} from "./partnerApi";
-import {ActionNotice,Section,State,Status,usePartnerLoad} from "./PartnerPrimitives";
+import {ActionNotice,Section,State,Status} from "./PartnerPrimitives";
+import { usePartnerLoad } from "./usePartnerLoad";
 
 type RFQ={id:number;rfq_number:string;title:string;status:string;response_due_at:string|null};
 type Item={id:number;line_number:number;part_number:string|null;description:string;quantity:number;uom:string;
