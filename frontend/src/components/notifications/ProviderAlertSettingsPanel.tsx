@@ -15,6 +15,7 @@ type Policy = {
 };
 type Job = { id: string; event_key: string; due_at: string; status: string;
   attempts: number; last_error: string | null; email_log_id: string | null;
+  email_processing_status: string | null; email_delivery_status: string | null;
   acknowledged_at: string | null };
 const departmentRoles: Record<Dept, string[]> = {
   QUALITY: ["QUALITY_MANAGER", "QUALITY_OFFICER"],
@@ -152,7 +153,7 @@ export default function ProviderAlertSettingsPanel({ amoCode, department }:
             <tbody>{rows.map((row) => <tr key={row.id}>
               <td>{row.event_key}</td><td>{new Date(row.due_at).toLocaleString()}</td>
               <td>{row.status}{row.acknowledged_at ? " · acknowledged" : ""}{row.last_error ? " · " + row.last_error : ""}</td>
-              <td>{row.email_log_id ? "Check provider delivery log" : "—"}</td>
+              <td>{row.email_log_id ? (row.email_delivery_status || row.email_processing_status || "Pending provider evidence") : "Not attempted"}</td>
               <td>{["FAILED", "RETRY"].includes(row.status) ?
                 <button disabled={busy} onClick={() => void retry(row.id)}>Retry</button> : "—"}</td>
             </tr>)}
