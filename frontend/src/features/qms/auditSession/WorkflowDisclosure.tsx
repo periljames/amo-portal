@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 
-export default function WorkflowDisclosure({ title, description, icon: Icon, children, className = "", id }: {
-  title: string; description: string; icon: LucideIcon; children: ReactNode; className?: string; id?: string;
+export default function WorkflowDisclosure({ title, description, icon: Icon, children, className = "", id, defaultOpen = false }: {
+  title: string; description: string; icon: LucideIcon; children: ReactNode; className?: string; id?: string; defaultOpen?: boolean;
 }) {
   const element = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -11,7 +11,7 @@ export default function WorkflowDisclosure({ title, description, icon: Icon, chi
     reveal(); window.addEventListener("hashchange", reveal);
     return () => window.removeEventListener("hashchange", reveal);
   }, [id]);
-  return <details ref={element} id={id} className={`audit-workflow-disclosure ${className}`}>
+  return <details ref={element} id={id} defaultOpen={defaultOpen} className={`audit-workflow-disclosure ${className}`}>
     <summary><span className="audit-workflow-section-icon"><Icon size={19} aria-hidden /></span>
       <span><span className="audit-workflow-disclosure__title">{title}</span><small>{description}</small></span>
       <ChevronDown className="audit-workflow-disclosure__chevron" size={17} aria-hidden />
