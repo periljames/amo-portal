@@ -709,6 +709,7 @@ def _dispatch(db, amo, code, zone, policy, now):
             recipient = None
             vendor_email = None
             vendor_email_enabled = False
+            vendor_digest_enabled = False
             if job["recipient_user_id"]:
                 recipient = db.query(accounts.User).filter(
                     accounts.User.amo_id==amo,
@@ -759,13 +760,14 @@ def _dispatch(db, amo, code, zone, policy, now):
             channels = policy["channels_json"].get(CATALOG[job["event_key"]], {"in_app":True,"email":False})
             partner_in_app = True
             if job["recipient_identity_id"]:
-                preference = db.execute(text("""SELECT in_app_enabled,email_enabled
+                preference = db.execute(text("""SELECT in_app_enabled,email_enabled,digest_enabled
                     FROM external_provider_alert_preferences
                     WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
                     {"amo":amo,"provider":job["recipient_provider_id"],
                      "identity":job["recipient_identity_id"]}).mappings().first()
                 partner_in_app = not preference or preference["in_app_enabled"] is not False
                 vendor_email_enabled = bool(preference and preference["email_enabled"])
+                vendor_digest_enabled = bool(preference and preference["digest_enabled"])
             if not channels.get("in_app",True) and not channels.get("email",False):
                 db.execute(text("""UPDATE external_provider_alert_jobs
                     SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
@@ -807,8 +809,12 @@ def _dispatch(db, amo, code, zone, policy, now):
             if email_on:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
+                # A partner's saved digest preference is an actual delivery rule:
+                # batch email into its tenant-local daily window. Without this,
+                # the external settings toggle has no effect on delivery.
+                digest_applies = bool(digest.get("enabled") or vendor_digest_enabled)
                 blocked = (_restricted_now(local,policy["quiet_hours_json"])
-                           or (digest.get("enabled") and local.hour != digest.get("hour",8)))
+                           or (digest_applies and local.hour != digest.get("hour",8)))
                 if blocked:
                     retry = now+timedelta(hours=1)
                     db.execute(text("""UPDATE external_provider_alert_jobs SET
