@@ -180,6 +180,11 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     if not row:
         raise HTTPException(401,"Provider session invalid")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
+    # An existing vendor cookie must lose all authority immediately if its
+    # parent AMO tenant is suspended, including historical document reads,
+    # profile changes, and previously delegated corrective-action access.
+    if row["tenant_active"] is not True:
+        raise HTTPException(403,"Parent AMO tenant is suspended")
     if row["revoked_at"] or aware(row["expires_at"])<=now() or row["identity_state"]!="ACTIVE" or not row["verified_at"] or row["grant_state"]!="ACTIVE" or row["membership_state"]!="ACTIVE" or (row["locked_until"] and aware(row["locked_until"])>now()):
         raise HTTPException(401,"Provider account or session revoked")
     if row["portal_state"]!="ACTIVE":

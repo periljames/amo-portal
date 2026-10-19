@@ -115,3 +115,26 @@ def test_expired_active_contract_is_ineligible_and_readable_as_history(monkeypat
     assert item["effective_status"] == "EXPIRED"
     assert item["attention"] == "EXPIRED"
     assert item["days_until_expiry"] == -2
+
+def test_active_filter_does_not_expose_expired_active_rows(monkeypatch):
+    db = _DB([])
+    monkeypatch.setattr(gov, "_require_tables", lambda _: None)
+    gov.provider_agreement_register(
+        ctx=_ctx(), db=db, search="", status_filter="ACTIVE",
+        attention_only=False, due_within_days=30, limit=40, offset=0,
+    )
+    condition = db.queries[0][0]
+    assert "c.expires_on IS NULL OR c.expires_on >= :today" in condition
+    assert db.queries[0][1]["status"] == "ACTIVE"
+
+
+def test_expired_filter_includes_stored_and_effectively_expired_rows(monkeypatch):
+    db = _DB([])
+    monkeypatch.setattr(gov, "_require_tables", lambda _: None)
+    gov.provider_agreement_register(
+        ctx=_ctx(), db=db, search="", status_filter="EXPIRED",
+        attention_only=False, due_within_days=30, limit=40, offset=0,
+    )
+    condition = db.queries[0][0]
+    assert "c.status = 'EXPIRED'" in condition
+    assert "c.expires_on < :today" in condition

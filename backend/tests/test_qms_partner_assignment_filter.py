@@ -1,16 +1,42 @@
-"""Partner audit deep links must not broaden their original assignment grant."""
-from __future__ import annotations
+"""Partner QMS deep-link filtering is an authenticated, assigned-only API."""
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-import inspect
-
+import pytest
+from fastapi import HTTPException
 from amodb.apps.procurement import external_partner_router
 
 
-def test_quality_projection_rechecks_audit_filter_against_member_grant():
-    source = inspect.getsource(external_partner_router.quality)
-    assert 'audit_id not in {str(value) for value in assignments}' in source
-    assert 'raise HTTPException(404,"Assigned Quality audit not found")' in source
-    assert source.count(":focus") >= 5
-    assert 'CAST(n.audit_id AS TEXT) IN :assigned' in source
-    assert 'CAST(f.audit_id AS TEXT) IN :assigned' in source
-    assert "AND related_id IN :assigned" in source
+def test_unassigned_audit_is_denied_before_any_quality_record_query(monkeypatch):
+    user = {
+        "capabilities_json": ["task.read"],
+        "object_scope_json": {"assignments": ["assigned-audit"]},
+        "portal_state": "ACTIVE",
+    }
+    monkeypatch.setattr(external_partner_router, "_ctx", lambda *a, **k: user)
+    monkeypatch.setattr(external_partner_router, "_allowed",
+                        lambda u, scope: ["assigned-audit"] if scope == "assignments" else [])
+    monkeypatch.setattr(external_partner_router, "_context",
+                        lambda u: {"amo": "tenant-a", "provider": "provider-a", "person": "person-a"})
+    db = MagicMock()
+    with pytest.raises(HTTPException) as denied:
+        external_partner_router.quality(
+            tenant_slug="tenant-a", request=SimpleNamespace(),
+            db=db, limit=20, offset=0, audit_id="another-provider-audit",
+        )
+    assert denied.value.status_code == 404
+    db.execute.assert_not_called()
+
+
+def test_no_assignment_returns_empty_qms_records(monkeypatch):
+    user = {"capabilities_json": ["task.read"], "portal_state": "ACTIVE"}
+    monkeypatch.setattr(external_partner_router, "_ctx", lambda *a, **k: user)
+    monkeypatch.setattr(external_partner_router, "_allowed", lambda *a: [])
+    db = MagicMock()
+    result = external_partner_router.quality(
+        tenant_slug="tenant-a", request=SimpleNamespace(),
+        db=db, limit=20, offset=0, audit_id=None,
+    )
+    assert result["cars"]["items"] == []
+    assert result["notices"]["items"] == []
+    db.execute.assert_not_called()

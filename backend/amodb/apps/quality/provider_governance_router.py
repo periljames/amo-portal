@@ -938,9 +938,13 @@ def provider_agreement_register(
         AND (:needle = '%%' OR lower(c.contract_number) LIKE :needle
           OR lower(c.title) LIKE :needle OR lower(s.legal_name) LIKE :needle
           OR lower(s.supplier_code) LIKE :needle)
-        AND (:status = 'ALL' OR c.status = :status
-          OR (:status = 'EXPIRED' AND c.status = 'ACTIVE'
-              AND c.expires_on < :today))
+        AND (:status = 'ALL'
+          OR (:status = 'EXPIRED' AND
+              (c.status = 'EXPIRED'
+               OR (c.status = 'ACTIVE' AND c.expires_on < :today)))
+          OR (:status = 'ACTIVE' AND c.status = 'ACTIVE'
+              AND (c.expires_on IS NULL OR c.expires_on >= :today))
+          OR (:status NOT IN ('ACTIVE', 'EXPIRED') AND c.status = :status))
         AND (NOT :attention
           OR c.status = 'DRAFT'
           OR c.status = 'SUSPENDED'
