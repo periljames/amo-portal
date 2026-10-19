@@ -65,8 +65,9 @@ def provider_360(amo_code: str,supplier_id: int,
         WHERE amo_id=:amo AND supplier_id=:supplier
         ORDER BY valid_until NULLS LAST LIMIT 100""",**key)
     evidence=_one(db,"""SELECT COUNT(*) total,
-        COUNT(*) FILTER (WHERE status='VERIFIED' AND
-        (valid_until IS NULL OR valid_until>=:today)) current_verified,
+        COUNT(*) FILTER (WHERE status='VERIFIED'
+        AND (valid_from IS NULL OR valid_from<=:today)
+        AND (valid_until IS NULL OR valid_until>=:today)) current_verified,
         COUNT(*) FILTER (WHERE status='VERIFIED' AND valid_until<:today) expired,
         COUNT(*) FILTER (WHERE status='PENDING') pending
         FROM quality_external_provider_evidence
@@ -196,9 +197,14 @@ def classify_provider(amo_code:str,supplier_id:int,payload:SpecialClassification
     if payload.critical_service or payload.sole_source:
         if not payload.evidence_id:
             raise HTTPException(422,"Current independently verified Quality evidence is required")
+    # Validate even evidence supplied while clearing a classification, avoiding
+    # cross-tenant ID existence or FK detail leakage.
+    if payload.evidence_id:
         evidence=db.execute(text("""SELECT id FROM quality_external_provider_evidence
           WHERE amo_id=:amo AND supplier_id=:supplier AND id=:id
-          AND status='VERIFIED' AND (valid_until IS NULL OR valid_until>=:today)"""),
+          AND status='VERIFIED'
+          AND (valid_from IS NULL OR valid_from<=:today)
+          AND (valid_until IS NULL OR valid_until>=:today)"""),
           {"amo":ctx.amo_id,"supplier":supplier_id,"id":payload.evidence_id,
            "today":_tenant_today(db,ctx.amo_id)}).first()
         if not evidence:
@@ -242,7 +248,7 @@ def portfolio(amo_code: str,
     today=_tenant_today(db,ctx.amo_id)
     states=_all(db,"""SELECT CAST(status AS TEXT) status,
         CAST(risk_level AS TEXT) risk_level,COUNT(*) total
-        FROM procurement_suppliers WHERE amo_id=:amo AND is_active=TRUE
+        FROM procurement_suppliers WHERE amo_id=:amo
         GROUP BY status,risk_level ORDER BY status,risk_level""",amo=ctx.amo_id)
     queue=_one(db,"""SELECT COUNT(*) FILTER
           (WHERE status IN ('SUBMITTED','IN_REVIEW','READY')) qualification_pending,
@@ -295,10 +301,10 @@ def export_register(amo_code: str,
     _context(db,ctx)
     data=_all(db,"""SELECT s.supplier_code,s.legal_name,
        CAST(s.status AS TEXT) status,CAST(s.risk_level AS TEXT) risk_level,
-       COALESCE(p.provider_kind,s.supplier_type,'SUPPLIER') provider_kind,p.next_review_due_on
+       s.is_active,COALESCE(p.provider_kind,s.supplier_type,'SUPPLIER') provider_kind,p.next_review_due_on
        FROM procurement_suppliers s LEFT JOIN quality_external_provider_profiles p
           ON p.amo_id=s.amo_id AND p.supplier_id=s.id
-       WHERE s.amo_id=:amo AND s.is_active=TRUE
+       WHERE s.amo_id=:amo
        ORDER BY s.legal_name,s.id LIMIT 10001""",amo=ctx.amo_id)
     if len(data)>10000: raise HTTPException(409,"Register too large for synchronous export")
     def safe(value):
@@ -306,10 +312,10 @@ def export_register(amo_code: str,
         return "'"+v if v.lstrip().startswith(("=","+","-","@","\t","\r")) else v
     stream=io.StringIO()
     writer=csv.writer(stream)
-    writer.writerow(["Supplier code","Legal name","Status","Risk","Kind","Next review"])
+    writer.writerow(["Supplier code","Legal name","Status","Risk","Active","Kind","Next review"])
     for row in data:
         writer.writerow([safe(row.get(k)) for k in
-           ("supplier_code","legal_name","status","risk_level","provider_kind","next_review_due_on")])
+           ("supplier_code","legal_name","status","risk_level","is_active","provider_kind","next_review_due_on")])
     audit_services.log_event(db,amo_id=ctx.amo_id,actor_user_id=ctx.user_id,
         entity_type="external_provider_register",entity_id=ctx.amo_id,
         action="controlled_export",after={"records":len(data)},
