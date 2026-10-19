@@ -12,7 +12,7 @@ def test_expired_mandatory_contract_cannot_be_used_after_prior_approval() -> Non
     gate = GATE.read_text(encoding="utf-8")
     router = ROUTER.read_text(encoding="utf-8")
 
-    assert "expires_on IS NULL OR expires_on >= :today" in gate
+    assert "(c.expires_on IS NULL OR c.expires_on >= :today)" in gate
     assert "status = 'ACTIVE'" in gate
     assert "QMS requires a current active contract before this external provider may be used." in gate
     assert "purchase_order_send" in router
