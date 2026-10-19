@@ -106,7 +106,10 @@ def upgrade():
                          "OR (recipient_provider_id = " + provider_context
                          + " AND recipient_identity_id = " + identity_context + "))")
             else:
-                guard = ""
+                # Provider sessions must never read or mutate tenant-wide
+                # policy settings, even if a future API omits a route guard.
+                guard = (" AND (" + provider_context + " IS NULL OR "
+                         + provider_context + " = '__INTERNAL_QUALITY_REVIEW__')")
             condition = "amo_id = NULLIF(current_setting('app.tenant_id', true), '')" + guard
             op.execute(sa.text('CREATE POLICY "' + table + '_tenant" ON "' + table + '" '
                                'USING (' + condition + ') WITH CHECK (' + condition + ')'))
