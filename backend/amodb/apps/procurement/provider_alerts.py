@@ -502,10 +502,21 @@ def _scan_canonical_procurement(db, amo):
         action=item["action"]
         event=event_map.get((kind,action))
         if kind=="ProcurementReceipt" and action=="inspect":
-            disposition=(item["detail"] or {}).get("disposition")
-            event=("procurement.inspection_discrepancy" if disposition in
-                   ("REJECTED","RETURN_TO_SUPPLIER","ESCALATED_TO_QUALITY","ON_HOLD")
-                   else "procurement.inspection_completed")
+            detail=item["detail"]
+            if isinstance(detail,str):
+                try:
+                    detail=json.loads(detail)
+                except (ValueError,TypeError):
+                    detail={}
+            disposition=detail.get("disposition") if isinstance(detail,dict) else None
+            if disposition in ("REJECTED","RETURN_TO_SUPPLIER","ESCALATED_TO_QUALITY","ON_HOLD"):
+                event="procurement.inspection_discrepancy"
+            elif disposition in ("ACCEPTED","CONDITIONALLY_ACCEPTED"):
+                event="procurement.inspection_completed"
+            else:
+                # Unknown or newly introduced outcomes are not proof of
+                # completed inspection or release.
+                event=None
         if not event:
             continue
         count+=_queue(db,amo=amo,event=event,source="procurement_canonical",
@@ -702,8 +713,7 @@ def _dispatch(db, amo, code, zone, policy, now):
                       AND p.amo_id=g.amo_id
                    WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider
                    AND i.id=:identity AND g.status='ACTIVE' AND m.status='ACTIVE'
-                   AND i.status='ACTIVE' AND p.portal_state='ACTIVE'
-                   AND p.restrict_new_work=FALSE""", amo=amo,
+                   AND i.status='ACTIVE' AND p.portal_state='ACTIVE'""", amo=amo,
                    provider=job["recipient_provider_id"],
                    identity=job["recipient_identity_id"])
                 scope_kind = "contracted_work" if job["source_kind"]=="maintenance_event" else "procurement"
