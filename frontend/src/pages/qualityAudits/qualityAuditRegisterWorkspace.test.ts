@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { isEffectivenessResponseRoute } from "../../components/QMS/qmsEffectivenessRoute";
 
 const register = readFileSync(fileURLToPath(new URL("./QualityAuditRegisterPage.tsx", import.meta.url)), "utf8");
 const enhancements = readFileSync(fileURLToPath(new URL("../../components/QMS/QualityEffectivenessResponseHost.tsx", import.meta.url)), "utf8");
@@ -31,8 +32,11 @@ describe("findings and corrective-action workspace", () => {
 
   it("does not float effectiveness controls over register or programme pages", () => {
     expect(enhancements).toContain("isEffectivenessResponseRoute");
-    expect(enhancements).toContain("(?:findings|cars)\\/[^/]+");
-    expect(enhancements).not.toContain("audits\\/register|findings|cars");
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/audits/register", "")).toBe(false);
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/findings/abc", "")).toBe(false);
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/cars/abc", "")).toBe(false);
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/assurance/cases", "")).toBe(true);
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/audits/register", "?workspace=assurance")).toBe(true);
   });
 
   it("keeps Assurance pages full-height with efficient main scrolling", () => {

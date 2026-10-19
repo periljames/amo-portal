@@ -32,6 +32,9 @@ def test_no_assignment_returns_empty_qms_records(monkeypatch):
     user = {"capabilities_json": ["task.read"], "portal_state": "ACTIVE"}
     monkeypatch.setattr(external_partner_router, "_ctx", lambda *a, **k: user)
     monkeypatch.setattr(external_partner_router, "_allowed", lambda *a: [])
+    monkeypatch.setattr(external_partner_router, "_context",
+                        lambda u: {"amo": "tenant-a", "supplier": 7,
+                                   "provider": "provider-a", "person": "person-a"})
     db = MagicMock()
     result = external_partner_router.quality(
         tenant_slug="tenant-a", request=SimpleNamespace(),

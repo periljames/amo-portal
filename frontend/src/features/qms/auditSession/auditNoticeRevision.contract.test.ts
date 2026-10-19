@@ -33,7 +33,7 @@ describe("audit notice revision governance", () => {
   it("exposes retained notice and reschedule history with stable notice identifiers", () => {
     expect(service).toContain("notice_reference?: string | null");
     expect(service).toContain("reschedule_history: AuditRescheduleHistoryItem[]");
-    expect(workspace).toContain("Full notice & reschedule history");
+    expect(workspace).toContain("Full notice &amp; reschedule history");
     expect(workspace).toContain("Controlled notice history");
     expect(workspace).toContain("Audit reschedule history");
     expect(workspace).toContain("auditHistoryWindow(entry.before)");

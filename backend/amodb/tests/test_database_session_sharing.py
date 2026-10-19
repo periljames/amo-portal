@@ -12,8 +12,15 @@ def test_shared_engine_aliases_read_dependency_to_write() -> None:
     get_write_db generators previously checked out two pooled connections per
     authenticated request and exhausted the pool under QMS page fan-out.
     """
-    assert database_module.read_engine is database_module.write_engine
-    assert database_module.get_read_db is database_module.get_write_db
+    # A shared URL must share the engine/dependency. Configured read replicas
+    # must retain an independent engine rather than invalidating this contract.
+    if database_module.READ_DB_URL == database_module.WRITE_DB_URL:
+        assert database_module.read_engine is database_module.write_engine
+        assert database_module.get_read_db is database_module.get_write_db
+    else:
+        assert database_module.read_engine is not database_module.write_engine
+        assert database_module.get_read_db is database_module._get_read_db_separate
+        assert database_module.get_read_db is not database_module.get_write_db
     assert database_module.get_db is database_module.get_write_db
 
 

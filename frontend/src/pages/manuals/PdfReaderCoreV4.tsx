@@ -513,6 +513,7 @@ export default function PdfReaderCoreV4({
   const dirtyRef = useRef(false);
   const editedPagesRef = useRef<number[]>([]);
   const currentPageRef = useRef(Math.max(1, initialPage));
+  const appliedExternalNavigationRef = useRef("");
   const documentLoadedRef = useRef(false);
   const pendingPageRef = useRef<number | null>(null);
   const navigationTimerRef = useRef<number | null>(null);
@@ -694,6 +695,13 @@ export default function PdfReaderCoreV4({
   }, [synchronizePhysicalPage]);
 
   const handleViewportScroll = useCallback(() => {
+    // A programmatic deep jump generates scroll events while virtual row
+    // measurements settle. Unlike a user fling it MUST continue rendering
+    // its requested PDF page instead of entering fast-scroll defer mode.
+    if (pendingPageRef.current !== null) {
+      schedulePhysicalSync();
+      return;
+    }
     if (!fastScrollingRef.current) {
       fastScrollingRef.current = true;
       setFastScrolling(true);
@@ -980,10 +988,14 @@ export default function PdfReaderCoreV4({
   }, []);
 
   useEffect(() => {
-    if (navigationRequest?.page && pageCount) {
-      jump(navigationRequest.page, "auto");
-    }
-  }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
+    if (!navigationRequest?.page || !pageCount) return;
+    const commandKey = `${fileUrl}:${navigationRequest.token}:${navigationRequest.page}`;
+    // A changing PDF measurement/virtualizer callback must not replay the
+    // same external navigation and restart an otherwise successful jump.
+    if (appliedExternalNavigationRef.current === commandKey) return;
+    appliedExternalNavigationRef.current = commandKey;
+    jump(navigationRequest.page, "auto");
+  }, [fileUrl, jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
 
   useEffect(() => {
     if (!pageCount) return;
@@ -1727,12 +1739,21 @@ export default function PdfReaderCoreV4({
                     onEdited={markEdited}
                     onPageReady={(pageNumber) => {
                       if (navigationTarget !== pageNumber) return;
-                      // Page rendering can change measured row heights. Correct
-                      // the physical scroll position once that page is ready.
+                      // Keep the destination pinned in the bounded virtual
+                      // range until the physical viewport reaches its reading
+                      // line. PDF.js raster completion alone does not establish
+                      // a stable scroll index in a 2,000-page document.
                       window.requestAnimationFrame(() => {
                         virtualizer.scrollToIndex(pageNumber - 1, { align: "start", behavior: "auto" });
-                        schedulePhysicalSync();
-                        setNavigationTarget((target) => target === pageNumber ? null : target);
+                        window.requestAnimationFrame(() => {
+                          if (pendingPageRef.current !== pageNumber) return;
+                          if (!pageIsAtReadingLine(pageNumber)) {
+                            virtualizer.scrollToIndex(pageNumber - 1, { align: "start", behavior: "auto" });
+                            return;
+                          }
+                          settleNavigation(pageNumber);
+                          setNavigationTarget((target) => target === pageNumber ? null : target);
+                        });
                       });
                     }}
                     onTextReady={(pageNumber) => {
