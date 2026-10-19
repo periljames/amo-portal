@@ -266,11 +266,14 @@ const LoginPage: React.FC = () => {
         redirectedRef.current = true;
       }
       // Start Control Room data the instant the JWT exists — before chunk fan-out.
-      const controlRoomWarm = beginControlRoomPrefetch({
+      // The Control Room prefetch is optional. An authenticated user must
+      // reach their authorized landing page even if this request stalls.
+      // runLoginDepartureWarmup already applies a bounded warmup budget.
+      void beginControlRoomPrefetch({
         user: auth.user,
         amoSlug: slugToUse,
         homePath: landing.path,
-      });
+      }).catch(() => undefined);
       await runLoginDepartureWarmup({
         user: auth.user,
         amoSlug: slugToUse,
@@ -278,7 +281,6 @@ const LoginPage: React.FC = () => {
         onProgress: setDeparture,
         takeoffStartedAt,
       });
-      await controlRoomWarm;
 
       rememberLoginHome(slugToUse, landing.path);
       navigate(landing.path, { replace: true });
