@@ -606,6 +606,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
       )}
 
       <ProviderPortfolio amoCode={amoCode} />
+      <ProviderAlertSettingsPanel amoCode={amoCode} department="QUALITY" />
       {creating && <ProviderCreatePanel amoCode={amoCode} onClose={() => setCreating(false)} onCreated={(provider) => navigate(`${basePath}/${provider.id}/overview`)} />}
       {error && <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error}</div>}
 
