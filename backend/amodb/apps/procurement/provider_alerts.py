@@ -576,7 +576,7 @@ def _allowed_link(amo_code, row):
                 "?providerRecord="+quote(source_id,safe=""))
     return "/maintenance/"+code+"/quality/suppliers"
 
-def _still_current(db, amo, row, zone):
+def _still_current(db, amo, row, zone, policy):
     source=row["source_kind"]
     if source in DATE_SOURCES:
         current=_active_source(db,amo,source,row["source_id"])
@@ -584,7 +584,26 @@ def _still_current(db, amo, row, zone):
             return False
         actual=_date_in_tenant_zone(current["due"],zone)
         # Stamp starts with a fixed YYYY-MM-DD date from authoritative data.
-        return bool(actual and str(row["source_stamp"]).startswith(actual.isoformat()+":"))
+        stamp=str(row["source_stamp"])
+        if not actual or not stamp.startswith(actual.isoformat()+":"):
+            return False
+        parts=stamp.split(":")
+        milestone=parts[1] if len(parts)>1 else ""
+        if milestone in ("lead","overdue"):
+            try:
+                offset=int(parts[2])
+            except (ValueError,IndexError):
+                return False
+            department=CATALOG[row["event_key"]]
+            group="lead_days_json" if milestone=="lead" else "escalation_days_json"
+            return offset in policy[group].get(department,[])
+        if source=="agreement" and milestone=="notice":
+            days=db.execute(text("""SELECT termination_notice_days
+                FROM quality_external_provider_contracts
+                WHERE amo_id=:amo AND id=:id"""),
+                {"amo":amo,"id":str(row["source_id"]).split(":")[0]}).scalar()
+            return days is not None and len(parts)>2 and str(days)==parts[2]
+        return False
     if source=="po_ack":
         found=db.execute(text("""SELECT id FROM procurement_purchase_orders
              WHERE amo_id=:amo AND id=:id AND sent_at IS NOT NULL
@@ -634,7 +653,7 @@ def _dispatch(db, amo, code, zone, policy, now):
     for job in jobs:
         savepoint = db.begin_nested()
         try:
-            if not _still_current(db,amo,job,zone):
+            if not _still_current(db,amo,job,zone,policy):
                 db.execute(text("""UPDATE external_provider_alert_jobs
                     SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
                     WHERE id=:id"""),{"id":job["id"]})
