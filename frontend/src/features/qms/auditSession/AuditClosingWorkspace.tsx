@@ -414,7 +414,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {activeRevision?.status === "APPROVED" && !currentSignature ? <div className="qms-audit-closing__passkey-sign"><label><span>Approval reason</span><textarea rows={3} value={signReason} onChange={(event) => setSignReason(event.target.value)} /></label><button type="button" className="is-primary" disabled={!canSign || !stepAllowsActions(4) || !passkeys.length || ceremonyBusy !== null || signReason.trim().length < 8} onClick={() => void signWithPasskey()}><Fingerprint size={15} /> {ceremonyBusy === "sign" ? "Verifying passkey…" : "Approve exact report with passkey"}</button></div> : null}
           {currentSignature ? <dl className="qms-audit-closing__artifact"><div><dt>Method</dt><dd>Signature: {currentSignature.method}</dd></div><div><dt>Signed</dt><dd>{currentSignature.signed_at ? new Date(currentSignature.signed_at).toLocaleString() : "—"}</dd></div></dl> : null}
         </details>
-        <details open={activeClosingStep === 5} className={closingCardClass(5)} aria-current={activeClosingStep === 5 ? "step" : undefined}>
+        <details open={activeClosingStep === 4 || activeClosingStep === 5} className={closingCardClass(5)} aria-current={activeClosingStep === 5 ? "step" : undefined}>
           <summary><FileCheck2 size={19} /><div><h3>5 · Issue immutable report</h3><small>The server refuses ISSUE unless current passkey evidence matches the exact approved revision and is newer than the approval state.</small></div></summary>
           {lockedReason(5) ? <div className="qms-audit-closing__locked">{lockedReason(5)}</div> : null}
           {activeRevision?.status === "APPROVED" ? (
