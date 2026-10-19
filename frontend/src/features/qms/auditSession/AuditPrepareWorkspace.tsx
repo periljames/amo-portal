@@ -1301,7 +1301,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {controlledReferences.recordCount > 0 ? <p className="qms-audit-prepare__empty">{controlledReferences.recordCount} audit, checklist and request references are retained in the preparation history.</p> : null}
         </WorkflowDisclosure>
 
-        <WorkflowDisclosure title="Audit basis" description="Scope, objectives and criteria" icon={Compass} className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
+        <WorkflowDisclosure defaultOpen title="Audit basis" description="Scope, objectives and criteria" icon={Compass} className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
           <dl>
             <div><dt>Scope</dt><dd>{context.regulatory_and_manual_basis?.audit_scope || auditQuery.data.scope || "—"}</dd></div>
             <div><dt>Objectives</dt><dd>{auditQuery.data.objectives || "—"}</dd></div>
