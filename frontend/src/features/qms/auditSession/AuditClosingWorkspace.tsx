@@ -359,6 +359,13 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
       {localError ? <div className="qms-audit-closing__error" role="alert"><ShieldAlert size={16} /> {localError}</div> : null}
       {notice ? <div className="qms-audit-closing__success" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
+      {currentAcknowledgement?.acknowledgement_status === "ACKNOWLEDGED" && currentRevision ? (
+        <div className="qms-audit-closing__success" role="note" aria-label="Current report closing-meeting receipt">
+          <CheckCircle2 size={16} />
+          <strong>ACKNOWLEDGED</strong>
+          <span>Auditee response to report R{currentRevision.revision_no} is recorded against the exact governed revision.</span>
+        </div>
+      ) : null}
       <div className="qms-audit-closing__body"><main>
         <details open={activeClosingStep === 1} className={closingCardClass(1)} aria-current={activeClosingStep === 1 ? "step" : undefined}>
           <summary><FileCheck2 size={19} /><div><h3>1 · Freeze fieldwork and generate the closing report</h3><small>The report is built from the authoritative audit, checklist, finding, CAR and preparation state.</small></div></summary>
@@ -372,7 +379,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <details open={activeClosingStep === 2} className={closingCardClass(2)} aria-current={activeClosingStep === 2 ? "step" : undefined}>
           <summary><FileSignature size={19} /><div><h3>2 · Auditee closing-meeting acknowledgement</h3><small>Ask the auditee to review this draft before approval.</small></div></summary>
           {lockedReason(2) ? <div className="qms-audit-closing__locked">{lockedReason(2)}</div> : null}
-          {!currentRevision ? <p className="qms-audit-closing__empty">Adopt a governed draft before requesting acknowledgement.</p> : <><dl className="qms-audit-closing__artifact"><div><dt>Revision</dt><dd>R{currentRevision.revision_no} · {currentRevision.status.replaceAll("_", " ")}</dd></div></dl>{currentAcknowledgement ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /><span><strong>{currentAcknowledgement.acknowledgement_status.replaceAll("_", " ")}</strong>{currentAcknowledgement.comments ? ` · ${currentAcknowledgement.comments}` : ""}</span></div> : currentRevision.status === "DRAFT" ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> The auditee workspace must record acknowledgement, comments, or declined acknowledgement against this exact draft before it can enter review when an auditee participant is assigned.</div> : <p className="qms-audit-closing__empty">No closing acknowledgement is attached to this revision.</p>}</>}
+          {!currentRevision ? <p className="qms-audit-closing__empty">Adopt a governed draft before requesting acknowledgement.</p> : <><dl className="qms-audit-closing__artifact"><div><dt>Revision</dt><dd>R{currentRevision.revision_no} · {currentRevision.status.replaceAll("_", " ")}</dd></div></dl>{currentAcknowledgement ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /><span><strong>Closing meeting response: {currentAcknowledgement.acknowledgement_status.replaceAll("_", " ")}</strong>{currentAcknowledgement.comments ? ` · ${currentAcknowledgement.comments}` : ""}</span></div> : currentRevision.status === "DRAFT" ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> The auditee workspace must record acknowledgement, comments, or declined acknowledgement against this exact draft before it can enter review when an auditee participant is assigned.</div> : <p className="qms-audit-closing__empty">No closing acknowledgement is attached to this revision.</p>}</>}
         </details>
         <details open={activeClosingStep === 3} className={closingCardClass(3)} aria-current={activeClosingStep === 3 ? "step" : undefined}>
           <summary><Stamp size={19} /><div><h3>3 · Review and Quality approval</h3><small>Approval does not issue the report. It creates the exact approved state that must then be authorized with a passkey.</small></div></summary>
