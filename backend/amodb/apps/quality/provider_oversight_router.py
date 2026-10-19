@@ -131,6 +131,27 @@ def provider_360(amo_code: str,supplier_id: int,
         LEFT JOIN quality_cars c ON c.amo_id=f.amo_id AND c.finding_id=f.id
         LEFT JOIN qms_corrective_actions cap ON cap.amo_id=f.amo_id AND cap.finding_id=f.id
         WHERE sv.amo_id=:amo AND sv.supplier_id=:supplier""",**key,today=today)
+    # Review acceptance is owned by the original CAR milestone workflow.
+    # A CAP verified_at timestamp does not prove post-implementation
+    # effectiveness, so expose the independent canonical decision separately.
+    effectiveness=_one(db,"""SELECT
+      COUNT(DISTINCT c.id) FILTER (WHERE p.effectiveness_required) required,
+      COUNT(DISTINCT c.id) FILTER (WHERE p.effectiveness_required
+        AND m.status IN ('ACCEPTED','COMPLETED')) accepted,
+      COUNT(DISTINCT c.id) FILTER (WHERE p.effectiveness_required
+        AND m.status IN ('REJECTED','BLOCKED')) rejected_or_blocked,
+      COUNT(DISTINCT c.id) FILTER (WHERE p.effectiveness_required
+        AND m.current_due_date<:today
+        AND m.status NOT IN ('ACCEPTED','COMPLETED','WAIVED')) overdue,
+      COUNT(DISTINCT c.id) FILTER (WHERE p.id IS NULL) without_control_profile
+      FROM quality_provider_surveillance sv
+      JOIN qms_audit_findings f ON f.amo_id=sv.amo_id
+        AND CAST(f.audit_id AS TEXT)=sv.audit_id
+      JOIN quality_cars c ON c.amo_id=f.amo_id AND c.finding_id=f.id
+      LEFT JOIN quality_car_control_profiles p ON p.amo_id=c.amo_id AND p.car_id=c.id
+      LEFT JOIN quality_car_milestones m ON m.amo_id=p.amo_id
+        AND m.profile_id=p.id AND m.milestone_key='EFFECTIVENESS_REVIEW'
+      WHERE sv.amo_id=:amo AND sv.supplier_id=:supplier""",**key,today=today)
     finding_months=_all(db,"""SELECT CAST(DATE_TRUNC('month',f.created_at) AS DATE) month,
         COUNT(DISTINCT f.id) total
         FROM quality_provider_surveillance sv JOIN qms_audit_findings f
@@ -155,7 +176,8 @@ def provider_360(amo_code: str,supplier_id: int,
             "surveillance":surveillance,"restrictions":restrictions,"procurement":purchasing,
             "receiving":receiving,"contracted_maintenance":work,"returns":returns,
             "concentration":concentration,"special_classification":special,
-            "qms_assurance":qms_findings,"finding_months":finding_months,
+            "qms_assurance":qms_findings,"car_effectiveness":effectiveness,
+            "finding_months":finding_months,
             "qualification_history":history,
             "lifecycle_snapshots":snapshots,"as_of":today.isoformat(),
             "computed_not_approval":True,
@@ -165,6 +187,7 @@ def provider_360(amo_code: str,supplier_id: int,
               "Sole-source and critical supplier determinations require documented human review.",
               "Finding counts use linked surveillance audits; repeat-finding classification needs a verified common-cause record.",
               "Verified CAP evidence is not proof that the effectiveness review passed; QMS owns that decision.",
+              "Effectiveness counts use the latest canonical CAR control milestone and do not infer a pass where no review exists.",
               "Warranty outcomes remain with commercial source records.",
               "Snapshots begin with Phase 9 deployment; historic QMS events remain separately retained."]}
 
