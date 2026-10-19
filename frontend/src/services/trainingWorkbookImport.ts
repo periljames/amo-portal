@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import { apiDelete, apiGet, apiPost } from "./crs";
 import { authHeaders, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -142,7 +143,7 @@ export async function downloadTrainingWorkbookTemplate(): Promise<void> {
   const href = URL.createObjectURL(await response.blob());
   const anchor = document.createElement("a");
   anchor.href = href;
-  anchor.download = "amo-training-import-template-2026.08.xlsx";
+  anchor.download = sanitizeDownloadFilename("amo-training-import-template-2026.08.xlsx");
   anchor.click();
   URL.revokeObjectURL(href);
 }

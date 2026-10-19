@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename, resolveDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { ControlledCopy, DocumentLibraryItem } from "./documentControl";
@@ -366,7 +367,7 @@ export async function downloadPhysicalCopyLabel(tenant: string, copyId: string, 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -594,14 +595,7 @@ export async function downloadLibraryCirculationReceipt(tenant: string, holdingI
     { headers: authHeaders(), credentials: "same-origin" },
   );
   if (!response.ok) throw new Error(`Library receipt could not be generated (${response.status})`);
-  const url = URL.createObjectURL(await response.blob());
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `library-receipt-${transactionId}.pdf`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  saveDownloadedFile(await response.blob(), resolveDownloadFilename(response.headers.get("Content-Disposition"), "library-receipt.pdf", response.headers.get("Content-Type")));
 }
 
 export function placeLibraryHold(
@@ -637,7 +631,7 @@ export async function downloadLibraryHoldingLabel(
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -967,7 +961,7 @@ export async function downloadLibraryMarcXml(
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(link);
   link.click();
   link.remove();

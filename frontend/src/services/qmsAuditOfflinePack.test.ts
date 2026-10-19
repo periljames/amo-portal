@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { installOfflineBrowser } from "../test/offlineBrowser";
+import { apiRequest } from "./apiClient";
+import { cacheAuditFieldworkPack, readAuditOfflinePack, readAuditOfflinePackByKey, auditOfflinePackStatus } from "./qmsAuditOfflinePack";
+vi.mock("./auth", () => ({ getCachedUser: () => ({ id: "pack-auditor", amo_id: "amo" }), getContext: () => ({}), getToken: () => "test", authHeaders: (value: unknown) => value, handleAuthFailure: vi.fn() }));
+vi.mock("./apiClient", () => ({ apiRequest: vi.fn(), qmsPath: (_amo: string, path: string) => path }));
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   projectOfflineAuditSession,
@@ -200,4 +206,18 @@ describe("QMS downloaded audit work package projections", () => {
     expect(projected.preparation_issued).toBe(true);
     expect(projected.execution_status).toBe("IN_PROGRESS");
   });
+});
+
+
+it("automatically retains an expired package for local capture without claiming reference downloads", async () => {
+  installOfflineBrowser();
+  const value = pack();
+  value.work_package.offline_expires_at = "2020-01-01T00:00:00Z";
+  vi.mocked(apiRequest).mockResolvedValue(value);
+  await cacheAuditFieldworkPack("amo", value.audit_id);
+  expect(await readAuditOfflinePack("amo", value.audit_id)).toEqual(value);
+  expect(await readAuditOfflinePackByKey("amo", "QAR-MO-26-001")).toEqual(value);
+  const status = await auditOfflinePackStatus("amo", value.audit_id);
+  expect(status.ready).toBe(false); // refresh deadline still reported honestly
+  expect(status.offlineReferences).toBe(0);
 });

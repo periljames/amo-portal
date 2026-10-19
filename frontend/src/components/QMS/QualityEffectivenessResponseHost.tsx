@@ -1,3 +1,4 @@
+import { isEffectivenessResponseRoute } from "./qmsEffectivenessRoute";
 import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,12 +19,6 @@ type Props = { amoCode?: string };
 type ActionType = EffectivenessResponseAction["action_type"];
 const NON_EFFECTIVE = new Set(["INEFFECTIVE", "PARTIALLY_EFFECTIVE", "INCONCLUSIVE"]);
 
-function isEffectivenessResponseRoute(pathname: string, search: string): boolean {
-  const workspace = new URLSearchParams(search).get("workspace")?.toLowerCase();
-  if (workspace === "assurance") return true;
-  return /^\/maintenance\/[^/]+\/quality\/(?:findings|cars)\/[^/]+(?:\/|$)/i.test(pathname)
-    && !/\/quality\/cars\/new(?:\/|$)/i.test(pathname);
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Effectiveness response action could not be completed.";

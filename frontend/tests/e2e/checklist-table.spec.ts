@@ -18,13 +18,13 @@ test.beforeEach(async ({ page }) => {
 test("source columns, original order, inline remarks and pending answers work in the table", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const table = page.getByRole("table", { name: "Checklist assessment table" });
-  await expect(table.getByRole("columnheader")).toHaveText(["No.", "Checklist question", "S", "U", "N/C", "N/A", "Remarks / objective evidence", "Evidence"]);
+  await expect(table.getByRole("columnheader")).toHaveText(["No.", "Checklist question", "S", "U", "N/C", "N/A", "Remarks / evidence", "Context"]);
   await expect(table.getByRole("radio", { name: "S — question 1", exact: true })).toBeChecked();
   await expect(table.getByRole("radio", { name: "N/C — question 3", exact: true })).not.toBeChecked();
   const question2 = table.getByRole("radio", { name: "S — question 2", exact: true });
   await question2.check();
   await expect(question2).toBeChecked();
-  await expect(page.getByRole("progressbar", { name: "Server-confirmed checklist progress" })).toHaveAttribute("value", "1");
+  await expect(page.getByRole("progressbar", { name: "Checklist progress" })).toHaveAttribute("value", "1");
   await expect(table.getByText("Saved on device · awaiting sync")).toBeVisible();
   await table.getByRole("textbox", { name: "Remarks for question 2" }).fill("Reviewed training records.");
   await table.getByRole("button", { name: "Save remarks" }).click();
@@ -97,9 +97,42 @@ test("actual uploaded checklist remains readable with all 172 rows", async ({ pa
 test("offline and read-only states stay visible and prevent editing", async ({ page }, info) => {
   await page.evaluate(async () => { const fixture = await import(/* @vite-ignore */ "/tests/e2e/fixtures/checklistTableHarness.tsx"); fixture.mount(undefined, { readOnly: true, connectivity: "OFFLINE", pendingStatus: "conflict" }); });
   await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
-  await expect(page.getByText("Offline", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 awaiting sync", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio", { name: "S — question 1", exact: true })).toBeDisabled();
   await expect(page.getByRole("textbox", { name: "Remarks for question 1" })).toHaveAttribute("readonly", "");
   await expect(page.getByText("Sync needs review", { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("checklist-offline-readonly.png"), fullPage: true });
+});
+
+
+test("details open immediately beneath their question and answer labels stay visible", async ({ page }) => {
+  await page.getByRole("button", { name: "Evidence and details for question 2" }).click();
+  const detail = page.getByRole("region", { name: "Question context" });
+  await expect(detail).toBeVisible();
+  expect(await detail.evaluate((element) => element.closest("tr")?.previousElementSibling?.querySelector(".audit-checklist-table__question")?.textContent)).toContain("approved key post holders");
+  await expect(page.locator(".audit-checklist-table__mobile-choice").first()).toBeVisible();
+  const header = await page.locator(".audit-fieldwork-header").boundingBox();
+  expect(header!.height).toBeLessThan(110);
+});
+
+test("paperclip offers upload and camera and retains encrypted evidence offline", async ({ page, context }) => {
+  await page.evaluate(() => localStorage.setItem("amo_current_user", JSON.stringify({ id: "fixture-auditor", amo_id: "test-amo" })));
+  const attachment = page.locator(".audit-question-attachments").first();
+  await attachment.locator("summary").click();
+  await expect(attachment.getByRole("button", { name: "Upload files" })).toBeVisible();
+  await expect(attachment.getByRole("button", { name: "Take photo" })).toBeVisible();
+  await expect(attachment.locator('input[capture="environment"]')).toHaveAttribute("accept", "image/*");
+  await context.setOffline(true);
+  await attachment.locator('input[multiple]').setInputFiles({ name: "inspection.txt", mimeType: "text/plain", buffer: Buffer.from("Inspection evidence") });
+  await expect(attachment.getByRole("alert")).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => {
+    const module = await import(/* @vite-ignore */ "/src/services/qmsOfflineAuditEvidence.ts");
+    return (await module.listOfflineAuditEvidence("test-amo", "audit")).length;
+  })).toBe(1);
+  await context.setOffline(false);
+  await page.reload();
+  expect(await page.evaluate(async () => {
+    const module = await import(/* @vite-ignore */ "/src/services/qmsOfflineAuditEvidence.ts");
+    return (await module.listOfflineAuditEvidence("test-amo", "audit"))[0].filename;
+  })).toBe("inspection.txt");
 });

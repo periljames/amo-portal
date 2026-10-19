@@ -29,7 +29,7 @@ def _acquire_delivery_lock(db: Session) -> None:
     db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
-def _resolve_provider(*, db: Session, amo_id: str):
+def _resolve_provider(*, db: Session, amo_id: str, template_key: str | None = None):
     """Call the DB-aware resolver while retaining legacy zero-argument test fakes.
 
     Existing notification integrations monkeypatch this seam with a zero-argument
@@ -42,7 +42,10 @@ def _resolve_provider(*, db: Session, amo_id: str):
     accepts_keywords = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
     parameter_names = {parameter.name for parameter in parameters}
     if accepts_keywords or {"db", "amo_id"}.issubset(parameter_names):
-        return resolver(db=db, amo_id=amo_id)
+        kwargs = {"db": db, "amo_id": amo_id}
+        if accepts_keywords or "template_key" in parameter_names:
+            kwargs["template_key"] = template_key
+        return resolver(**kwargs)
     return resolver()
 
 
@@ -53,21 +56,47 @@ def _existing_delivery(
     recipient: str,
     template_key: str,
     correlation_id: str | None,
+    cooldown_seconds: int = 0,
 ) -> models.EmailLog | None:
     if not correlation_id:
         return None
-    return (
+    if template_key == "qms_mail_identity_test" and cooldown_seconds > 0:
+        # The QMS configuration self-test has a rolling 60-second limit even
+        # when requests straddle the wall-clock minute boundary. Under the
+        # advisory delivery lock this also prevents concurrent test duplicates.
+        recent_test = (
+            db.query(models.EmailLog)
+            .filter(
+                models.EmailLog.amo_id == amo_id,
+                models.EmailLog.recipient == recipient,
+                models.EmailLog.template_key == template_key,
+                models.EmailLog.created_at >= _utcnow() - timedelta(seconds=min(max(cooldown_seconds, 1), 3600)),
+            )
+            .order_by(models.EmailLog.created_at.desc())
+            .first()
+        )
+        if recent_test is not None:
+            return recent_test
+    query = (
         db.query(models.EmailLog)
         .filter(
             models.EmailLog.amo_id == amo_id,
             models.EmailLog.recipient == recipient,
             models.EmailLog.template_key == template_key,
             models.EmailLog.correlation_id == correlation_id,
-            models.EmailLog.status == models.EmailStatus.SENT,
         )
         .order_by(models.EmailLog.created_at.desc())
-        .first()
     )
+    successful = query.filter(models.EmailLog.status == models.EmailStatus.SENT).first()
+    if successful is not None:
+        return successful
+    if cooldown_seconds > 0:
+        recent = query.filter(
+            models.EmailLog.created_at >= _utcnow() - timedelta(seconds=min(max(cooldown_seconds, 1), 3600))
+        ).first()
+        if recent is not None:
+            return recent
+    return None
 
 
 def _enforce_rate_limits(db: Session, *, config: dict) -> None:
@@ -142,6 +171,7 @@ def send_email(
     recipient_user_id: Optional[str] = None,
     audit_context: Optional[dict] = None,
     attachments: list[dict[str, Any]] | None = None,
+    cooldown_seconds: int = 0,
 ) -> models.EmailLog:
     if not amo_id:
         raise ValueError("amo_id is required to create an email log entry")
@@ -160,6 +190,7 @@ def send_email(
             recipient=normalized_recipient,
             template_key=template_key,
             correlation_id=correlation_id,
+            cooldown_seconds=cooldown_seconds,
         )
         if existing is not None:
             return existing
@@ -220,7 +251,7 @@ def send_email(
             return log
 
         try:
-            provider, configured = _resolve_provider(db=db, amo_id=amo_id)
+            provider, configured = _resolve_provider(db=db, amo_id=amo_id, template_key=template_key)
         except Exception as exc:
             log.status = models.EmailStatus.FAILED
             log.error = str(exc)
@@ -262,6 +293,9 @@ def send_email(
                 "mode": result.get("mode"),
                 "effective_recipient": result.get("recipient") or cleaned_recipient,
                 "original_recipient": result.get("original_recipient") or cleaned_recipient,
+                "effective_cc": list(result.get("cc") or []),
+                "reply_to": list(result.get("reply_to") or []),
+                "effective_recipients": list(result.get("effective_recipients") or []),
                 "template_id": result.get("template_id"),
                 "accepted_at": _utcnow().isoformat(),
             }

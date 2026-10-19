@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name
+
 from amodb.apps.resilience.offline_commands import offline_create
 
 import hashlib
@@ -1334,7 +1336,7 @@ def download_report(
             detail="Generated report file is missing. Regenerate the report and retry.",
         )
 
-    return FileResponse(str(report_path), filename=f"reliability_report_{report.id}.pdf")
+    return FileResponse(str(report_path), filename=download_name("reliability-report", report.window_start, report.window_end, extension="pdf"))
 
 
 @router.post(

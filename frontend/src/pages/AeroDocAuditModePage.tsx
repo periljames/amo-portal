@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { fetchEntitlements } from "../services/billing";
@@ -26,7 +27,7 @@ export default function AeroDocAuditModePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "aerodoc-binder.zip";
+    a.download = sanitizeDownloadFilename("aerodoc-binder.zip");
     a.click();
     URL.revokeObjectURL(url);
   };

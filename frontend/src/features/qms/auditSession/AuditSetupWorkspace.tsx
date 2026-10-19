@@ -1,3 +1,4 @@
+import AuditStageLoading from "./AuditStageLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, Download, ExternalLink, Eye, FileUp, RefreshCw, Save, Send, Video, X } from "lucide-react";
@@ -246,6 +247,9 @@ function draftFromAudit(audit: QMSAuditOut): SetupDraft {
 
 function draftFromAuditReady(audit: QMSAuditOut, nowLocal?: string): SetupDraft {
   const base = draftFromAudit(audit);
+  // Opening an existing record must not silently reschedule it or make it dirty.
+  // The explicit date-adjustment action still proposes a future window.
+  if (base.plannedStart && base.plannedEnd) return base;
   const floor = nowLocal || localDateTime(new Date(Date.now() + 60_000).toISOString());
   const normalized = normalizePlannedAuditWindow(
     base.plannedStart ? `${base.plannedStart}T${base.plannedStartTime}` : "",
@@ -288,7 +292,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const [deliveryFeedback, setDeliveryFeedback] = useState<{ message: string; complete: boolean } | null>(null);
+  const [deliveryFeedback, setDeliveryFeedback] = useState<{ message: string; complete: boolean; recipients?: Array<{ email: string; role?: string | null; status: string }> } | null>(null);
   const canManage = hasQmsRolePermission("qms.audit.manage");
   const canManageNotice = canManage || hasQmsRolePermission("qms.audit.notice.manage");
   const [draft, setDraft] = useState<SetupDraft | null>(null);
@@ -728,7 +732,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             : `The exact previewed notice was sent as a PDF attachment to ${result.dispatch.sent} email${result.dispatch.sent === 1 ? "" : "s"}.`
           : `${result.dispatch.sent} of ${result.dispatch.attempted} emails sent; ${result.dispatch.failed} failed. Delivery is incomplete. Check recipients and email configuration before retrying.`;
       setNotice(message);
-      setDeliveryFeedback({ message, complete: result.delivery_complete });
+      setDeliveryFeedback({ message, complete: result.delivery_complete, recipients: result.dispatch.items });
       pushToast({ title: result.delivery_complete ? "Audit notice sent" : "Audit notice delivery incomplete", message, variant: result.delivery_complete ? "success" : "warning" });
       setNoticePreview((current) => current ? { ...current, notice: result.notice } : current);
       await refresh();
@@ -860,7 +864,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     Boolean(latestNotice?.exception_reason && latestNotice.exception_reason.trim().length >= 8);
 
   if (auditQuery.isLoading && !auditQuery.data) {
-    return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Loading audit setup…</section>;
+    return <AuditStageLoading label="audit setup" />;
   }
   if (!auditQuery.data) {
     return (
@@ -874,7 +878,7 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     );
   }
   if (!draft) {
-    return <section className="qms-occurrence-stage qms-occurrence-stage--loading">Preparing audit setup…</section>;
+    return <AuditStageLoading label="audit setup" />;
   }
 
   const persistedDraft = draftFromAudit(auditQuery.data);
@@ -1305,9 +1309,9 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       {auditQuery.isError ? <div className="qms-audit-setup-stage__supporting-warning" role="status">Showing the saved audit record. Live updates are unavailable; your edits are retained. <button type="button" onClick={() => void auditQuery.refetch()}>Retry</button></div> : null}
       <div className="qms-audit-setup-stage__toolbar">
         <div className="qms-audit-setup-stage__intro">
-          <h2 className="qms-audit-setup-stage__title">Setup</h2>
+          <h2 className="qms-audit-setup-stage__title">Define the audit</h2>
           <p className="qms-audit-setup-stage__helper">
-            Complete the required definition and lead-auditor steps first. Meetings and notice can then be prepared here.
+            Set the scope, assign your team and arrange the audit.
           </p>
           <div className="qms-audit-setup-stage__status" role="status" aria-label="Setup status">
             <span className={`qms-audit-setup-stage__chip${readiness.definitionReady ? "" : " is-warning"}`}>
@@ -1390,8 +1394,8 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </div>
       ) : null}
       {notice ? (
-        <div className="qms-occurrence-stage__message" role="status">
-          <CheckCircle2 size={15} /> {notice}
+        <div className={`qms-occurrence-stage__message${deliveryFeedback && !deliveryFeedback.complete ? " is-error" : ""}`} role={deliveryFeedback && !deliveryFeedback.complete ? "alert" : "status"}>
+          {deliveryFeedback && !deliveryFeedback.complete ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />} {notice}
         </div>
       ) : null}
 
@@ -2011,7 +2015,10 @@ const AuditSetupWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 title={`Final audit notice revision ${previewedNotice.revision_no}`}
               />
             </div>
-            {deliveryFeedback ? <div className={`qms-occurrence-stage__message ${deliveryFeedback.complete ? "is-success" : "is-error"}`} role={deliveryFeedback.complete ? "status" : "alert"}>{deliveryFeedback.message}</div> : null}
+            {deliveryFeedback ? <div className={`qms-occurrence-stage__message ${deliveryFeedback.complete ? "is-success" : "is-error"}`} role={deliveryFeedback.complete ? "status" : "alert"}>
+              <p>{deliveryFeedback.message}</p>
+              {deliveryFeedback.recipients?.length ? <ul aria-label="Email delivery by recipient">{deliveryFeedback.recipients.map((recipient, index) => <li key={`${recipient.email}-${index}`}>{recipient.email}{recipient.role ? ` · ${recipient.role.replaceAll("_", " ")}` : ""} · {recipient.status.replaceAll("_", " ")}</li>)}</ul> : null}
+            </div> : null}
             <footer>
               <div className="qms-audit-notice-modal__record">
                 <strong>

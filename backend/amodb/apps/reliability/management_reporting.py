@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
 import hashlib
 import html
 from collections import Counter, defaultdict
@@ -436,5 +438,5 @@ def register(router: APIRouter) -> None:
         row = _snapshot(db, _amo_id(current_user), report_id)
         layout = db.query(wp.ReliabilityReportLayout).filter(wp.ReliabilityReportLayout.id == row.layout_id).one()
         output = _pdf(row, layout)
-        filename = f"reliability-{layout.code.lower()}-{row.period_start}-{row.period_end}-snapshot-{row.id}.pdf"
-        return Response(content=output, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"', "ETag": row.sha256_hash, "Cache-Control": "private, no-store"})
+        filename = download_name("reliability", layout.code.lower(), row.period_start, row.period_end, "snapshot", row.id, extension="pdf")
+        return Response(content=output, media_type="application/pdf", headers={"Content-Disposition": attachment_header(filename), "ETag": row.sha256_hash, "Cache-Control": "private, no-store"})

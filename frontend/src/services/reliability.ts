@@ -125,7 +125,7 @@ export async function downloadReliabilityReport(
   return downloadWithXhr({
     url: `${API_BASE}/reliability/reports/${reportId}/download`,
     headers: buildAuthHeader(),
-    fallbackFilename: `reliability-report-${reportId}.pdf`,
+    fallbackFilename: "reliability-report.pdf",
     onProgress: onProgress
       ? (loaded, total) => {
           markSessionActivity("reliability-report-download-progress");
@@ -141,7 +141,7 @@ export async function downloadFracasEvidencePack(caseId: number): Promise<Downlo
   return downloadWithXhr({
     url: `${API_BASE}/reliability/fracas/cases/${caseId}/evidence-pack`,
     headers: buildAuthHeader(),
-    fallbackFilename: `fracas-${caseId}-evidence-pack.zip`,
+    fallbackFilename: "fracas-evidence-pack.zip",
     retries: 3,
   });
 }

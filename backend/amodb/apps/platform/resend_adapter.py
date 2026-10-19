@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
+from email.utils import getaddresses, formataddr
 from contextlib import contextmanager
 from threading import RLock
 from typing import Any, Iterator, Mapping
 
 import resend
+from pydantic import EmailStr, TypeAdapter
 from svix.webhooks import Webhook
 
 from amodb.observability import operation_span, record_provider_call
@@ -13,6 +15,25 @@ from amodb.observability import operation_span, record_provider_call
 
 _SDK_LOCK = RLock()
 _DEFAULT_API_URL = "https://api.resend.com"
+
+
+def email_recipients(value: str) -> list[str]:
+    """Normalize the configured comma/semicolon list into actual mailboxes."""
+    if "\r" in value or "\n" in value:
+        raise ValueError("Recipient addresses must not contain line breaks.")
+    parsed = getaddresses([value.replace(";", ",")])
+    result: list[str] = []
+    seen: set[str] = set()
+    for name, address in parsed:
+        if not address:
+            raise ValueError("Choose valid recipient email addresses, separated by commas or semicolons.")
+        normalized = str(TypeAdapter(EmailStr).validate_python(address))
+        if normalized.casefold() not in seen:
+            seen.add(normalized.casefold())
+            result.append(formataddr((name, normalized)) if name else normalized)
+    if not result:
+        raise ValueError("At least one recipient email address is required.")
+    return result
 
 
 def _clean_api_key(value: Any) -> str:
@@ -52,6 +73,22 @@ def configured_sdk(*, api_key: str, api_url: str | None = None) -> Iterator[None
             resend.api_url = previous_url
 
 
+def _mailbox_list(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return email_recipients(value) if value.strip() else []
+    rows: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        for mailbox in email_recipients(str(item)):
+            key = mailbox.casefold()
+            if key not in seen:
+                seen.add(key)
+                rows.append(mailbox)
+    return rows
+
+
 def send_email(
     *,
     api_key: str,
@@ -61,7 +98,9 @@ def send_email(
     subject: str,
     html: str | None = None,
     text: str | None = None,
-    reply_to: str | None = None,
+    cc: str | list[str] | tuple[str, ...] | None = None,
+    bcc: str | list[str] | tuple[str, ...] | None = None,
+    reply_to: str | list[str] | tuple[str, ...] | None = None,
     template_id: str | None = None,
     template_variables: dict[str, str | int] | None = None,
     idempotency_key: str | None = None,
@@ -72,11 +111,18 @@ def send_email(
         raise ValueError("Resend sender and recipient are required.")
     params: dict[str, Any] = {
         "from": from_value.strip(),
-        "to": to_email.strip(),
+        "to": email_recipients(to_email),
         "subject": subject.strip(),
     }
-    if reply_to and reply_to.strip():
-        params["reply_to"] = reply_to.strip()
+    cc_rows = _mailbox_list(cc)
+    bcc_rows = _mailbox_list(bcc)
+    reply_rows = _mailbox_list(reply_to)
+    if cc_rows:
+        params["cc"] = cc_rows
+    if bcc_rows:
+        params["bcc"] = bcc_rows
+    if reply_rows:
+        params["reply_to"] = reply_rows
     if template_id:
         params["template"] = {
             "id": template_id.strip(),
@@ -184,3 +230,34 @@ def verify_webhook(*, payload: bytes, headers: Mapping[str, str], signing_secret
     if not isinstance(verified, dict):
         raise ValueError("Resend webhook payload must be a JSON object.")
     return verified
+
+
+
+def retrieve_email(
+    *,
+    api_key: str,
+    email_id: str,
+    api_url: str | None = None,
+) -> dict[str, Any]:
+    """Retrieve Resend's current server-side state for a previously accepted email."""
+
+    clean_id = str(email_id or "").strip()
+    if not clean_id:
+        raise ValueError("Resend email_id is required.")
+    started = time.perf_counter()
+    outcome = "ERROR"
+    try:
+        with operation_span("provider.resend.retrieve", provider="RESEND", operation="RETRIEVE"):
+            with configured_sdk(api_key=api_key, api_url=api_url):
+                response = resend.Emails.get(clean_id)
+        if not isinstance(response, dict) or str(response.get("id") or "").strip() != clean_id:
+            raise RuntimeError("Resend returned an invalid email status response.")
+        outcome = "SUCCESS"
+        return dict(response)
+    finally:
+        record_provider_call(
+            provider="RESEND",
+            operation="RETRIEVE",
+            status=outcome,
+            duration_seconds=time.perf_counter() - started,
+        )

@@ -211,6 +211,13 @@ export function listAuditFindingReleases(amoCode: string, auditId: string, signa
   }).then((data) => requireAuditContract(data, "findingReleases"));
 }
 
+export function emailReleasedCarInvite(amoCode: string, auditId: string, findingId: string) {
+  return apiRequest<{ car_number: string; recipient: string; status: string; sent: boolean; message: string }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/findings/${encodeURIComponent(findingId)}/car-invite`),
+    { method: "POST", body: JSON.stringify({}), timeoutMs: 30_000 },
+  );
+}
+
 export function releaseAuditFinding(
   amoCode: string,
   auditId: string,

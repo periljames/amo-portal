@@ -18,6 +18,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
+from .utils.download_headers import DownloadFilenameMiddleware
+
 from .database import (
     Base,
     engine,
@@ -127,6 +129,8 @@ def _allowed_origins() -> List[str]:
 
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
+
+app.add_middleware(DownloadFilenameMiddleware)
 app.state.is_shutting_down = False
 cors_origins = _allowed_origins()
 cors_origin_regex = (os.getenv("CORS_ALLOWED_ORIGIN_REGEX") or "").strip()

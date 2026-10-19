@@ -23,6 +23,9 @@ test("production shell and all module assets remain available with the network d
   await context.setOffline(true);
   const navigation = await page.goto("/maintenance/test/training");
   expect(navigation?.status()).toBe(200);
+  // Fetching strings alone misses module/CSS requests, which carry Origin and
+  // must still match assets precached without it under Vary: Origin.
+  await expect(page.getByText("AMO Portal Login", { exact: true })).toBeVisible();
   const failed = await page.evaluate(async (urls) => {
     const results = await Promise.all(urls.map(async (url) => {
       try { return (await fetch(url)).ok ? null : url; } catch { return url; }

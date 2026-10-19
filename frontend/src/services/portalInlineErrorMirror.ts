@@ -50,6 +50,11 @@ function targetForError(errorElement: HTMLElement): PortalErrorTarget {
 
 function mirrorError(element: HTMLElement, forcedTarget?: HTMLElement): void {
   if (element.closest(MIRROR_EXCLUSIONS)) return;
+  // Native disclosures retain their content in the DOM. Background query errors
+  // inside a closed disclosure must not interrupt the active task with a toast.
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    if (parent instanceof HTMLDetailsElement && !parent.open && !parent.querySelector(":scope > summary")?.contains(element)) return;
+  }
   const message = normalizedText(element);
   if (!message || mirroredText.get(element) === message) return;
   if (isInsideViewport(element)) return;

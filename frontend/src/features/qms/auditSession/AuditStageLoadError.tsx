@@ -41,7 +41,7 @@ export function AuditStageLoadError({
       : portalErrorMessage(raw, "An application problem prevented this stage from loading. Retry to load your saved audit records, or return to the prior stage.");
 
   return (
-    <div className={className} role="alert">
+    <div className={`${className} audit-workflow-unavailable`} role="alert">
       <AlertTriangle size={22} aria-hidden />
       <div className="qms-audit-stage-load-error__copy">
         <strong>{title}</strong>

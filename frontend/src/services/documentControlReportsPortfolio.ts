@@ -1,3 +1,4 @@
+import { resolveDownloadFilename } from "../utils/downloads";
 import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
@@ -196,11 +197,10 @@ export async function exportReportsCsv(
   );
   if (!response.ok) throw await exportError(response);
   const disposition = response.headers.get("content-disposition") || "";
-  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
   const rowHeader = response.headers.get("x-document-control-export-rows");
   return {
     blob: await response.blob(),
-    filename: filenameMatch?.[1] || `document-control-${options.view}-export.csv`,
+    filename: resolveDownloadFilename(disposition, `document-control-${options.view}-export.csv`, response.headers.get("Content-Type")),
     rowCount: rowHeader && /^\d+$/.test(rowHeader) ? Number(rowHeader) : null,
   };
 }

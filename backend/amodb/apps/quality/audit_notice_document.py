@@ -340,10 +340,17 @@ def render_audit_notice_pdf(
                     Paragraph(f"Record ID: {escape(notice_id)} / notice revision {revision_no}", meta_style),
                     Paragraph("The stored document hash and issuance history are retained in the controlled digital record.", meta_style),
                 ],
-                [
-                    _qr_flowable(record_url),
-                    Paragraph("Scan to open the controlled digital notice.<br/>Login required.<br/>QR identifies the record only.", qr_caption),
-                ],
+                (
+                    [
+                        _qr_flowable(record_url),
+                        Paragraph("Scan to open the controlled digital notice.<br/>Login required.<br/>QR identifies the record only.", qr_caption),
+                    ]
+                    if record_url
+                    else [
+                        Paragraph("<b>Digital record link unavailable in this environment.</b>", qr_caption),
+                        Paragraph("Configure the public HTTPS portal base URL before external delivery.", qr_caption),
+                    ]
+                ),
             ]],
             colWidths=[134 * mm, 50 * mm],
             style=TableStyle([

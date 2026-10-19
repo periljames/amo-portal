@@ -58,21 +58,39 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
     paper_scheme = False
     if doc.tables:
         for table in doc.tables:
+            section = ""
+            subsection = ""
+            source_options: list[dict[str, str]] = []
             for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
+                # python-docx repeats a horizontally merged cell for each grid
+                # position. Use physical cells, as the Word table displays them.
+                physical_cells = []
+                for cell in row.cells:
+                    if not physical_cells or cell._tc is not physical_cells[-1]._tc:
+                        physical_cells.append(cell)
+                cells = [cell.text.strip() for cell in physical_cells]
                 if not cells:
+                    continue
+                compact = lambda text: re.sub(r"\s+", "", text).upper()
+                statuses = {"YES": "COMPLIANT", "Y": "COMPLIANT", "S": "COMPLIANT",
+                    "NO": "NONCOMPLIANT", "N": "NONCOMPLIANT", "U": "NONCOMPLIANT",
+                    "N/A": "NOT_APPLICABLE", "N/C": "NOT_VERIFIED"}
+                labels = [compact(value) for value in cells[2:] if value.strip()]
+                if len(cells) >= 4 and len(labels) >= 2 and all(label in statuses for label in labels):
+                    section = re.sub(r"\s+", " ", cells[1])[:128]
+                    subsection = ""
+                    source_options = [{"value": label, "label": label, "canonical_status": statuses[label]} for label in labels]
+                    paper_scheme = labels == ["S", "U", "N/C", "N/A"]
+                    continue
+                unique_cells = {id(cell._tc) for cell in row.cells}
+                if not section or len(unique_cells) < 3:
+                    continue
+                if cells[0] and not any(cells[1:]) and not is_checklist_form_metadata(cells[0]):
+                    subsection = cells[0]
                     continue
                 body = cells[1] if len(cells) > 1 else cells[0]
                 body = body.strip()
                 if not body:
-                    continue
-                # In tabular controlled checklists, heading rows carry the
-                # assessment-column titles. Autonumbered cells can be blank.
-                if len(cells) >= 4 and cells[2].strip().upper() in {"S", "YES", "Y"} and cells[3].strip().upper() in {"U", "NO", "N"}:
-                    section = re.sub(r"\s+", " ", body)[:128]
-                    paper_scheme = len(cells) >= 6 and [cell.strip().upper() for cell in cells[2:6]] == ["S", "U", "N/C", "N/A"]
-                    if not paper_scheme:
-                        warnings.append(f"Section {section}: assessment vocabulary needs explicit reviewer verification.")
                     continue
                 if is_checklist_form_metadata(body):
                     continue
@@ -88,11 +106,17 @@ def _word_items(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
                 # Headings without response columns and no question mark are
                 # ambiguous, so keep them for explicit reviewer correction.
                 explicit = _NUMBERED.match(body)
-                source_number = re.fullmatch(r"\s*(\d{1,4}(?:\.\d+)*)(?:[.)])?\s*", cells[0])
+                source_number = re.fullmatch(r"(\d{1,4}(?:\.\d+)*)(?:[.)])?", compact(cells[0]))
+                if not source_number and not explicit and (cells[0] or not paper_scheme):
+                    continue
                 number = source_number.group(1) if source_number else int(explicit.group(1)) if explicit else len(items) + 1
                 prompt = explicit.group(2) if explicit else body
                 if len(prompt) > 4:
-                    items.append(_draft_item(number, section, prompt, paper_scheme=paper_scheme))
+                    item = _draft_item(number, f"{section} / {subsection}" if subsection else section, prompt, paper_scheme=paper_scheme)
+                    if source_options:
+                        item["response_type"] = "CUSTOM"
+                        item["response_options"] = [dict(option) for option in source_options]
+                    items.append(item)
     else:
         warnings.append("No Word table was found; paragraph-number detection may need manual review.")
         section = ""

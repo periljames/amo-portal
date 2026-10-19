@@ -4,6 +4,14 @@ import { assertOfflineReplayAllowed, classifyOfflineMutation, offlineCommandRout
 import { OFFLINE_CREATE_ROUTES } from "./offlineCreateRoutes";
 
 describe("offline controlled-write policy", () => {
+  it("queues observations with approved source answers while nonconformities require a negative decision", () => {
+    const path = "/api/maintenance/amo/quality/audits/a/checklist-items/i/fieldwork-findings";
+    const payload = { client_mutation_id: "observation-device-1", device_id: "auditor-device-1", device_sequence: 1,
+      client_timestamp: new Date().toISOString(), base_version: 1, operation: "CREATE_FINDING", reason: "Synthetic offline observation",
+      canonical_response_status: "COMPLIANT", response_value: "YES", level: "LEVEL_4", severity: "MINOR", description: "Synthetic observation" };
+    expect(() => assertOfflineReplayAllowed(path, "POST", JSON.stringify(payload))).not.toThrow();
+    expect(() => assertOfflineReplayAllowed(path, "POST", JSON.stringify({ ...payload, level: "LEVEL_2" }))).toThrow();
+  });
   it.each(OFFLINE_CREATE_ROUTES)("automatically queues $id with its concrete server receipt key", (route) => {
     const path = route.path.replace(/\{[^}]+\}/g, "test-id");
     const rule = classifyOfflineMutation(path, "POST");

@@ -59,10 +59,11 @@ export async function emitProductEvent(input: {
   metadata?: Record<string, unknown>;
 }): Promise<boolean> {
   const token = getToken();
-  if (!token || !ALLOWED_EVENTS.has(input.event_type)) return false;
+  if (!token || !ALLOWED_EVENTS.has(input.event_type) || (typeof navigator !== "undefined" && !navigator.onLine)) return false;
 
   await acquireAnalyticsSlot();
   try {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return false;
     const response = await fetch("/platform/product-events", {
       method: "POST",
       credentials: "include",
@@ -70,6 +71,7 @@ export async function emitProductEvent(input: {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        "X-AMO-Silent-Error": "1",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({

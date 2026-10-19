@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 // src/pages/MyTrainingPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -996,7 +997,7 @@ function MyTrainingPage() {
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = "my_training_status.csv";
+    a.download = sanitizeDownloadFilename("my_training_status.csv");
     a.click();
     URL.revokeObjectURL(url);
   };

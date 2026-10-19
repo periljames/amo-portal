@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,7 +64,7 @@ const downloadBlob = ({ blob, filename }: { blob: Blob; filename: string }) => {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(a);
   a.click();
   a.remove();

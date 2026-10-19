@@ -1,3 +1,4 @@
+import { saveDownloadedFile } from "../../utils/downloads";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
@@ -257,14 +258,7 @@ export default function PublicationGovernancePanel({
     try {
       const value = await getEvidenceSnapshot(tenant, manualId, revisionId, snapshotId);
       const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `document-evidence-${manualId}-${revisionId}-${snapshotId}.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      saveDownloadedFile(blob, `document-evidence-${String(value.created_at || new Date().toISOString()).replace(/[:.]/g, "-")}.json`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Evidence snapshot could not be exported.");
     } finally {

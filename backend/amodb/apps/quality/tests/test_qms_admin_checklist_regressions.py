@@ -67,6 +67,7 @@ def test_quality_router_export_exposes_fieldwork_helper_contract() -> None:
         "_next_audit_finding_ref",
         "_date_to_datetime",
         "_ensure_car_for_finding",
+        "_serialize_finding",
         "task_services",
     ):
         assert hasattr(quality_package.router, helper_name), helper_name

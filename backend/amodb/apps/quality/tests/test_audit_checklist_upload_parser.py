@@ -29,6 +29,36 @@ def test_form_metadata_and_merged_footer_are_not_assessment_rows():
     assert draft["items"][0]["prompt"] == "Verify training records\nInclude recurrent training."
 
 
+def test_spaced_word_headers_preserve_yes_no_na_without_cover_questions():
+    document = Document()
+    cover = document.add_table(rows=0, cols=5)
+    for cell, value in zip(cover.add_row().cells, ("", "Post holders", "", "", "")):
+        cell.text = value
+    table = document.add_table(rows=0, cols=5)
+    for values in [("", "WORKSHOP", "Y E S", "N O", "N / A"),
+                   ("1 . 1", "Is the approval current?", "", "", ""),
+                   ("BATTERY WORKSHOP", "", "", "", ""),
+                   ("1.2", "Is the test equipment calibrated?", "", "", "")]:
+        for cell, value in zip(table.add_row().cells, values):
+            cell.text = value
+    output = BytesIO()
+    document.save(output)
+    draft = draft_from_upload(output.getvalue(), "approved.docx")
+    assert [item["checklist_ref"] for item in draft["items"]] == ["1.1", "1.2"]
+    assert draft["items"][1]["section"] == "WORKSHOP / BATTERY WORKSHOP"
+    assert [option["value"] for option in draft["items"][0]["response_options"]] == ["YES", "NO", "N/A"]
+
+
+def test_supplied_approved_maintenance_checklist_has_189_source_questions():
+    source = Path(r"C:\Users\Admin\Downloads\SL-QMS-29 Approved Maintenance Organization REV 01.docx")
+    if not source.exists():
+        pytest.skip("User-supplied validation document is local to the live runner")
+    draft = draft_from_upload(source.read_bytes(), source.name)
+    assert draft["question_count"] == 189
+    assert draft["section_count"] == 14
+    assert all([option["value"] for option in item["response_options"]] == ["YES", "NO", "N/A"] for item in draft["items"])
+
+
 def test_actual_contractors_upload_retains_only_source_assessment_rows():
     source = Path(__file__).resolve().parents[4] / "uploads/manuals/safarilink/SL_QMS_20/ID-8YK4VWD6/SL-QMS-20_Contractors_Audit_Checklist.docx"
     if not source.exists():

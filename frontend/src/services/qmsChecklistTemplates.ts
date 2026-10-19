@@ -231,7 +231,11 @@ export type UploadedChecklistDraft = {
 };
 
 /** Extract editable candidates; the upload itself never binds or issues a checklist. */
-export function parseUploadedAuditChecklist(amoCode: string, auditId: string, file: File) {
+export async function parseUploadedAuditChecklist(amoCode: string, auditId: string, file: File) {
+  if (/\.docx$/i.test(file.name)) {
+    const { importWordChecklist } = await import("./qmsWordChecklistImport");
+    return importWordChecklist(file);
+  }
   const body = new FormData();
   body.append("file", file);
   return apiRequest<UploadedChecklistDraft>(

@@ -23,7 +23,6 @@ const CANONICAL_CHECKLIST_RESPONSES = new Set([
   "NOT_APPLICABLE",
   "NOT_VERIFIED",
 ]);
-const FIELDWORK_FINDING_RESPONSES = new Set(["NONCOMPLIANT", "OBSERVATION"]);
 const FIELDWORK_FINDING_LEVELS = new Set(["LEVEL_1", "LEVEL_2", "LEVEL_3", "LEVEL_4"]);
 const FIELDWORK_FINDING_SEVERITIES = new Set(["MINOR", "MAJOR", "CRITICAL"]);
 
@@ -52,9 +51,10 @@ function validChecklistFieldwork(body: Record<string, unknown>): boolean {
 function validChecklistFinding(body: Record<string, unknown>): boolean {
   return validFieldworkEnvelope(body, "CREATE_FINDING")
     && typeof body.canonical_response_status === "string"
-    && FIELDWORK_FINDING_RESPONSES.has(body.canonical_response_status)
+    && CANONICAL_CHECKLIST_RESPONSES.has(body.canonical_response_status)
     && typeof body.level === "string"
     && FIELDWORK_FINDING_LEVELS.has(body.level)
+    && (body.level === "LEVEL_4" || body.canonical_response_status === "NONCOMPLIANT")
     && typeof body.severity === "string"
     && FIELDWORK_FINDING_SEVERITIES.has(body.severity)
     && typeof body.description === "string"

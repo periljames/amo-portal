@@ -406,3 +406,47 @@ def test_critical_email_cannot_be_disabled(db_session, monkeypatch):
         db=db_session,
     )
     assert log.status == notification_models.EmailStatus.SKIPPED_NO_PROVIDER
+
+
+
+def test_send_email_cooldown_reuses_recent_failed_attempt(db_session, monkeypatch):
+    amo = _create_amo(db_session)
+    _create_user(db_session, amo.id)
+    calls = 0
+
+    class FailingProvider(notification_providers.EmailProvider):
+        config = {}
+
+        def send(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("temporary provider failure")
+
+    monkeypatch.setattr(notification_providers, "get_email_provider", lambda **_: (FailingProvider(), True))
+    first = notification_service.send_email(
+        "qms_audit_notice_memo",
+        "auditee@example.com",
+        "Audit notice",
+        {},
+        correlation_id="audit-notice:cooldown",
+        email_class="CRITICAL",
+        amo_id=amo.id,
+        db=db_session,
+        cooldown_seconds=60,
+    )
+    db_session.commit()
+    second = notification_service.send_email(
+        "qms_audit_notice_memo",
+        "auditee@example.com",
+        "Audit notice",
+        {},
+        correlation_id="audit-notice:cooldown",
+        email_class="CRITICAL",
+        amo_id=amo.id,
+        db=db_session,
+        cooldown_seconds=60,
+    )
+
+    assert first.id == second.id
+    assert first.status == notification_models.EmailStatus.FAILED
+    assert calls == 1

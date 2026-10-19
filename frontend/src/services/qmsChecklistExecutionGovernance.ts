@@ -4,7 +4,7 @@ import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { pendingFieldworkPlan } from "./qmsOfflineFieldworkProjection";
 
 export type CanonicalChecklistResponse = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
-export type FieldworkFindingResponse = "NONCOMPLIANT" | "OBSERVATION";
+export type FieldworkFindingResponse = CanonicalChecklistResponse;
 export type FieldworkFindingLevel = "LEVEL_1" | "LEVEL_2" | "LEVEL_3" | "LEVEL_4";
 export type FieldworkFindingSeverity = "MINOR" | "MAJOR" | "CRITICAL";
 

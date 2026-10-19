@@ -680,7 +680,8 @@ def qms_calendar_view(
 
 def _has_column_safe(db: Session, table: str, column: str) -> bool:
     try:
-        return column in _table_columns(db, table)
+        with db.begin_nested():
+            return column in _table_columns(db, table)
     except Exception:
         return False
 
@@ -689,38 +690,41 @@ def _table_exists_safe(db: Session, table: str) -> bool:
     try:
         if not _is_postgres(db):
             return True
-        value = db.execute(
-            text("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables
-                    WHERE table_schema = current_schema() AND table_name = :table
-                )
-            """),
-            {"table": table},
-        ).scalar()
-        return bool(value)
+        with db.begin_nested():
+            value = db.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = current_schema() AND table_name = :table
+                    )
+                """),
+                {"table": table},
+            ).scalar()
+            return bool(value)
     except Exception:
         return False
 
 
 def _tenant_has_module(db: Session, *, amo_id: str, module_key: str) -> bool:
     try:
-        subscription = (
-            db.query(account_models.ModuleSubscription)
-            .filter(
-                account_models.ModuleSubscription.amo_id == amo_id,
-                account_models.ModuleSubscription.module_code == module_key,
+        with db.begin_nested():
+            subscription = (
+                db.query(account_models.ModuleSubscription)
+                .filter(
+                    account_models.ModuleSubscription.amo_id == amo_id,
+                    account_models.ModuleSubscription.module_code == module_key,
+                )
+                .order_by(account_models.ModuleSubscription.updated_at.desc())
+                .first()
             )
-            .order_by(account_models.ModuleSubscription.updated_at.desc())
-            .first()
-        )
         if subscription is not None:
             status_value = getattr(subscription.status, "value", str(subscription.status))
             return status_value in {"ENABLED", "TRIAL"}
     except Exception:
         pass
     try:
-        entitlement = account_services.resolve_entitlements(db, amo_id=amo_id).get(module_key)
+        with db.begin_nested():
+            entitlement = account_services.resolve_entitlements(db, amo_id=amo_id).get(module_key)
         if entitlement is None:
             return False
         return bool(entitlement.is_unlimited or (entitlement.limit is not None and entitlement.limit > 0))

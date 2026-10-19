@@ -133,22 +133,32 @@ function clampSidebarWidth(value: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(value)));
 }
 
+function readPreference(key: string): string | null {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
+function writePreference(key: string, value: string): void {
+  try { window.localStorage.setItem(key, value); } catch { /* Current navigation stays usable when preference storage is unavailable. */ }
+}
+
 function readBoolean(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
-  const value = window.localStorage.getItem(key);
+  const value = readPreference(key);
   return value === null ? fallback : value === "1";
 }
 
 function readWidth(key: string): number {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT;
-  const value = Number(window.localStorage.getItem(key));
+  const saved = readPreference(key);
+  if (saved === null) return SIDEBAR_DEFAULT;
+  const value = Number(saved);
   return Number.isFinite(value) ? clampSidebarWidth(value) : SIDEBAR_DEFAULT;
 }
 
 function readStringArray(key: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "[]") as unknown;
+    const parsed = JSON.parse(readPreference(key) || "[]") as unknown;
     return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
   } catch {
     return [];
@@ -247,13 +257,14 @@ function NavBranch({
             onClick={() => onToggle(item.id)}
             aria-label={`${open ? "Collapse" : "Expand"} ${item.label}`}
             aria-expanded={open}
+            aria-controls={`tenant-nav-children-${item.id}`}
           >
             {open ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
           </button>
         )}
       </div>
       {open && item.children?.length ? (
-        <div className="tenant-nav__children">
+        <div id={`tenant-nav-children-${item.id}`} className="tenant-nav__children">
           {item.children.map((child) => (
             <NavBranch
               key={child.id}
@@ -293,12 +304,32 @@ function NavigationGroups({
   onFavourite: (item: PortalNavItem) => void;
   onNavigate: (path: string) => void;
 }): React.ReactElement {
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set(
+    groups.filter((group) => group.id.startsWith("admin-")).map((group) => group.id),
+  ));
+  useEffect(() => {
+    setCollapsedGroups((previous) => {
+      const next = new Set(previous);
+      for (const group of groups) {
+        if (group.items.some((item) => isPortalPathActive(pathname, item, search)
+          || portalNavItemHasActiveDescendant(item, pathname, search))) next.delete(group.id);
+      }
+      return next;
+    });
+  }, [groups, pathname, search]);
   return (
     <nav id="tenant-navigation" className="tenant-nav" aria-label="Portal navigation">
       {groups.map((group) => (
         <section key={group.id} className="tenant-nav__group" aria-labelledby={`tenant-nav-${group.id}`}>
-          <h2 id={`tenant-nav-${group.id}`}>{group.label}</h2>
-          <div className="tenant-nav__items">
+          <h2 id={`tenant-nav-${group.id}`}><button type="button"
+            aria-expanded={!collapsedGroups.has(group.id)} aria-controls={`tenant-nav-items-${group.id}`}
+            onClick={() => setCollapsedGroups((previous) => {
+              const next = new Set(previous);
+              if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
+              return next;
+            })}>{group.label}<ChevronDown size={14} aria-hidden /></button></h2>
+          <div id={`tenant-nav-items-${group.id}`} className="tenant-nav__items" hidden={collapsedGroups.has(group.id)}>
+            {group.id === "search-results" && !group.items.length ? <p className="tenant-nav__empty" role="status">No pages match your search. Try another name.</p> : null}
             {group.items.map((item) => (
               <NavBranch
                 key={item.id}
@@ -344,6 +375,8 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pinned, setPinned] = useState(() => readBoolean(pinnedKey, false));
+  const [wideNavigation, setWideNavigation] = useState(() => window.matchMedia("(min-width: 901px)").matches);
+  const pinnedVisible = pinned && wideNavigation;
   const [sidebarWidth, setSidebarWidth] = useState(() => readWidth(widthKey));
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [profileOpen, setProfileOpen] = useState(false);
@@ -353,7 +386,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const [favourites, setFavourites] = useState<Set<string>>(() => new Set(readStringArray(favouritesKey)));
   const [accent, setAccent] = useState<AccentId>(() => {
     if (typeof window === "undefined") return "tenant";
-    const saved = window.localStorage.getItem(accentKey) as AccentId | null;
+    const saved = readPreference(accentKey) as AccentId | null;
     return ACCENTS.some((item) => item.id === saved) ? (saved as AccentId) : "tenant";
   });
   const [adminProfile, setAdminProfile] = useState<AdminProfileState | null>(() => readCachedAdminProfileState(amoCode));
@@ -361,6 +394,13 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const [adminProfileError, setAdminProfileError] = useState<string | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 901px)");
+    const update = () => { setWideNavigation(media.matches); setDrawerOpen(false); };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const navigation = useMemo(
     () => buildPortalNavigation({
@@ -431,13 +471,13 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   useEffect(() => {
     document.documentElement.dataset.portalAccent = accent;
     document.body.dataset.portalAccent = accent;
-    window.localStorage.setItem(accentKey, accent);
+    writePreference(accentKey, accent);
   }, [accent, accentKey]);
 
-  useEffect(() => { window.localStorage.setItem(pinnedKey, pinned ? "1" : "0"); }, [pinned, pinnedKey]);
-  useEffect(() => { window.localStorage.setItem(widthKey, String(sidebarWidth)); }, [sidebarWidth, widthKey]);
-  useEffect(() => { window.localStorage.setItem(recentKey, JSON.stringify(recentPaths)); }, [recentKey, recentPaths]);
-  useEffect(() => { window.localStorage.setItem(favouritesKey, JSON.stringify([...favourites])); }, [favourites, favouritesKey]);
+  useEffect(() => { writePreference(pinnedKey, pinned ? "1" : "0"); }, [pinned, pinnedKey]);
+  useEffect(() => { writePreference(widthKey, String(sidebarWidth)); }, [sidebarWidth, widthKey]);
+  useEffect(() => { writePreference(recentKey, JSON.stringify(recentPaths)); }, [recentKey, recentPaths]);
+  useEffect(() => { writePreference(favouritesKey, JSON.stringify([...favourites])); }, [favourites, favouritesKey]);
 
   useEffect(() => {
     const best = [...leaves]
@@ -470,7 +510,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   }, [profileOpen]);
 
   useEffect(() => {
-    if (!drawerOpen || pinned) return;
+    if (!drawerOpen || pinnedVisible) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const sidebar = sidebarRef.current;
     const focusable = () => Array.from(sidebar?.querySelectorAll<HTMLElement>(
@@ -501,7 +541,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [drawerOpen, pinned]);
+  }, [drawerOpen, pinnedVisible]);
 
   useEffect(() => {
     const activeIds = new Set<string>();
@@ -527,8 +567,8 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const navigateFromDrawer = useCallback((path: string) => {
     navigate(path);
     setSearchQuery("");
-    if (!pinned) setDrawerOpen(false);
-  }, [navigate, pinned]);
+    if (!pinnedVisible) setDrawerOpen(false);
+  }, [navigate, pinnedVisible]);
 
   const toggleExpanded = useCallback((id: string) => {
     setExpanded((previous) => {
@@ -584,7 +624,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     endSession("manual");
   }, []);
 
-  const drawerVisible = pinned || drawerOpen;
+  const drawerVisible = pinnedVisible || drawerOpen;
   const shellStyle = { "--tenant-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
 
   return (
@@ -592,11 +632,11 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       <BrandContext.Consumer>
         {(brand) => (
           <div
-            className={`tenant-shell${pinned ? " tenant-shell--pinned" : ""}${drawerVisible ? " tenant-shell--drawer-open" : ""}`}
+            className={`tenant-shell${pinnedVisible ? " tenant-shell--pinned" : ""}${drawerVisible ? " tenant-shell--drawer-open" : ""}`}
             data-workspace-module={activeDepartment}
             style={shellStyle}
           >
-            {!pinned && drawerOpen ? (
+            {!pinnedVisible && drawerOpen ? (
               <button className="tenant-shell__scrim" type="button" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} />
             ) : null}
 
@@ -605,8 +645,9 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               className="tenant-shell__sidebar"
               aria-label="Portal navigation drawer"
               aria-hidden={!drawerVisible}
-              role={!pinned ? "dialog" : undefined}
-              aria-modal={!pinned && drawerVisible ? true : undefined}
+              inert={!drawerVisible}
+              role={!pinnedVisible ? "dialog" : undefined}
+              aria-modal={!pinnedVisible && drawerVisible ? true : undefined}
             >
               <header className="tenant-shell__sidebar-header">
                 <button className="tenant-shell__brand" type="button" onClick={() => navigateFromDrawer(homePath)} title="Open department home">
@@ -617,10 +658,10 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                   </span>
                 </button>
                 <div className="tenant-shell__sidebar-actions">
-                  <button type="button" className="tenant-shell__icon-button" onClick={() => setPinned((value) => !value)} aria-label={pinned ? "Unpin navigation" : "Pin navigation"} title={pinned ? "Unpin navigation" : "Pin navigation"}>
+                  {wideNavigation ? <button type="button" className="tenant-shell__icon-button" onClick={() => setPinned((value) => !value)} aria-label={pinned ? "Unpin navigation" : "Pin navigation"} title={pinned ? "Unpin navigation" : "Pin navigation"}>
                     {pinned ? <PinOff size={16} /> : <Pin size={16} />}
-                  </button>
-                  {!pinned ? (
+                  </button> : null}
+                  {!pinnedVisible ? (
                     <button type="button" className="tenant-shell__icon-button" onClick={() => setDrawerOpen(false)} aria-label="Close navigation"><X size={17} /></button>
                   ) : null}
                 </div>
@@ -652,13 +693,13 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                 onNavigate={navigateFromDrawer}
               />
 
-              {pinned ? <button type="button" className="tenant-shell__resize-handle" onPointerDown={startResize} aria-label="Resize navigation" title="Drag to resize navigation" /> : null}
+              {pinnedVisible ? <button type="button" className="tenant-shell__resize-handle" onPointerDown={startResize} aria-label="Resize navigation" title="Drag to resize navigation" /> : null}
             </aside>
 
-            <div className="tenant-shell__workspace">
+            <div className="tenant-shell__workspace" inert={drawerOpen && !pinnedVisible}>
               <header className="tenant-shell__topbar">
                 <div className="tenant-shell__topbar-start">
-                  <button type="button" className="tenant-shell__menu-button" onClick={() => pinned ? setPinned(false) : setDrawerOpen((value) => !value)} aria-label={drawerVisible ? "Close navigation" : "Open navigation"} aria-expanded={drawerVisible} aria-controls="tenant-navigation">
+                  <button type="button" className="tenant-shell__menu-button" onClick={() => pinnedVisible ? setPinned(false) : setDrawerOpen((value) => !value)} aria-label={drawerVisible ? "Close navigation" : "Open navigation"} aria-expanded={drawerVisible} aria-controls="tenant-navigation">
                     {drawerVisible || pinned ? <PanelLeftClose size={19} /> : <Menu size={20} />}
                   </button>
                   <button className="tenant-shell__compact-brand" type="button" onClick={() => navigate(homePath)} aria-label="Open department home"><BrandLogo size={22} /></button>
@@ -671,10 +712,10 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
                 <div className="tenant-shell__topbar-actions">
                   <LiveStatusIndicator compact />
-                  <button type="button" className="tenant-shell__icon-button" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Assigned work" title="Assigned work"><ClipboardCheck size={17} /></button>
+                  <button type="button" className="tenant-shell__icon-button tenant-shell__assigned-work" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Assigned work" title="Assigned work"><ClipboardCheck size={17} /></button>
                   <MessagingHeaderLaunchers />
                   <div className="tenant-shell__profile" ref={profileRef}>
-                    <button type="button" className="tenant-shell__profile-trigger" onClick={() => setProfileOpen((value) => !value)} aria-expanded={profileOpen} aria-haspopup="menu">
+                    <button type="button" className="tenant-shell__profile-trigger" onClick={() => setProfileOpen((value) => !value)} aria-label="Account and appearance" aria-expanded={profileOpen} aria-haspopup="menu">
                       <span className="tenant-shell__avatar">
                         {(currentUser?.first_name?.[0] || currentUser?.full_name?.[0] || "U").toUpperCase()}
                         {(currentUser?.last_name?.[0] || "").toUpperCase()}
@@ -685,6 +726,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
                     {profileOpen ? (
                       <div className="tenant-shell__profile-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(assignedWorkPath); }}><ClipboardCheck size={15} /> Assigned work</button>
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
                         {adminProfile?.eligible && !standingAdmin ? (
                           <button type="button" role="menuitem" onClick={() => void toggleAdminProfile()} disabled={adminProfileBusy}>
@@ -701,7 +743,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                           <div className="tenant-shell__appearance" aria-label="Appearance settings">
                             <label>
                               <span>Theme</span>
-                              <select value={scheme} onChange={(event) => setScheme(event.target.value as "system" | "light" | "dark")}>
+                              <select aria-label="Theme" value={scheme} onChange={(event) => setScheme(event.target.value as "system" | "light" | "dark")}>
                                 <option value="system">System</option>
                                 <option value="light">Light</option>
                                 <option value="dark">Dark</option>
@@ -709,14 +751,14 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                             </label>
                             <label>
                               <span>Density</span>
-                              <select value={density} onChange={(event) => setDensity(event.target.value as "comfortable" | "compact")}>
+                              <select aria-label="Density" value={density} onChange={(event) => setDensity(event.target.value as "comfortable" | "compact")}>
                                 <option value="comfortable">Comfortable</option>
                                 <option value="compact">Compact</option>
                               </select>
                             </label>
                             <label>
                               <span>Motion</span>
-                              <select value={motion} onChange={(event) => setMotion(event.target.value as "system" | "full" | "reduced")}>
+                              <select aria-label="Motion" value={motion} onChange={(event) => setMotion(event.target.value as "system" | "full" | "reduced")}>
                                 <option value="system">System</option>
                                 <option value="full">Full</option>
                                 <option value="reduced">Reduced</option>

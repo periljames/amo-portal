@@ -23,6 +23,18 @@
   font-size: 0.7rem;
 }
 
+#audit-fieldwork-release-controls .qms-live-release-launcher {
+  position: static;
+  min-height: 44px;
+  margin-block-end: 8px;
+  border-color: var(--fw-line);
+  border-radius: var(--fw-radius);
+  background: var(--fw-surface);
+  color: var(--fw-ink);
+  font-weight: 500;
+  box-shadow: none;
+}
+
 .qms-live-release-panel {
   position: fixed;
   right: 1rem;
@@ -80,6 +92,15 @@
 .qms-live-release-panel > header button {
   width: 2.2rem;
   padding: 0;
+}
+
+.qms-live-release-panel > header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block: 0.4rem;
+  border-bottom: 1px solid var(--border-color, #cbd5e1);
+  background: inherit;
 }
 
 .qms-live-release-panel > p,
@@ -204,4 +225,30 @@
     bottom: 3.8rem;
     width: calc(100vw - 1rem);
   }
+}
+
+.qms-live-release-panel, .qms-live-release-decision {
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #0f172a));
+}
+
+.qms-live-release-panel button,
+.qms-live-release-decision button,
+.qms-live-release-decision textarea {
+  min-height: 44px;
+  min-width: 44px;
+  border-color: var(--border-color, #cbd5e1);
+  background: var(--qms-panel, var(--surface-elevated, #fff));
+  color: var(--qms-text, var(--text-primary, #0f172a));
+  font-weight: 500;
+}
+
+.qms-live-release-decision button.is-primary {
+  background: var(--accent, #0f172a);
+  color: var(--text-on-accent, #fff);
+}
+
+.qms-live-release-decision {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
 }

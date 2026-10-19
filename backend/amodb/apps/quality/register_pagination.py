@@ -134,19 +134,25 @@ def get_audit_register_paged(
     if only_with_cars:
         query = query.filter(linked_car_exists)
     if workflow_stage:
-        car_stage_statuses = {
-            "needs_review": [models.CARStatus.DRAFT],
-            "with_auditee": [models.CARStatus.OPEN, models.CARStatus.ESCALATED],
-            "implementation": [models.CARStatus.IN_PROGRESS],
-            "effectiveness": [models.CARStatus.PENDING_VERIFICATION],
-            "closed": [models.CARStatus.CLOSED],
+        submitted = or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED")
+        returned = or_(Car.root_cause_status == "REJECTED", Car.capa_status.in_(["REJECTED", "NEEDS_EVIDENCE"]))
+        # Coalesce nullable legacy review fields before negation; SQL NULL must
+        # not silently hide an otherwise open finding from its workflow queue.
+        has_review = or_(func.coalesce(Car.root_cause_status, "") == "SUBMITTED", func.coalesce(Car.capa_status, "") == "SUBMITTED")
+        has_return = or_(func.coalesce(Car.root_cause_status, "") == "REJECTED", func.coalesce(Car.capa_status, "").in_(["REJECTED", "NEEDS_EVIDENCE"]))
+        stage_predicates = {
+            "needs_review": or_(Car.status == models.CARStatus.DRAFT, and_(Car.status.in_([models.CARStatus.OPEN, models.CARStatus.IN_PROGRESS, models.CARStatus.PENDING_VERIFICATION, models.CARStatus.ESCALATED]), submitted)),
+            "with_auditee": and_(or_(Car.status.in_([models.CARStatus.OPEN, models.CARStatus.ESCALATED]), and_(Car.status == models.CARStatus.IN_PROGRESS, returned)), ~has_review),
+            "implementation": and_(Car.status == models.CARStatus.IN_PROGRESS, ~has_review, ~has_return),
+            "effectiveness": or_(and_(Car.status == models.CARStatus.PENDING_VERIFICATION, ~has_review), Car.status == models.CARStatus.CLOSED),
+            "closed": Car.status == models.CARStatus.CLOSED,
         }
         matching_stage_car_exists = (
             db.query(Car.id)
             .filter(
                 Car.amo_id == amo_id,
                 Car.finding_id == Finding.id,
-                Car.status.in_(car_stage_statuses[workflow_stage]),
+                stage_predicates[workflow_stage],
             )
             .exists()
         )
@@ -156,7 +162,7 @@ def get_audit_register_paged(
                 or_(~linked_car_exists, matching_stage_car_exists),
             )
         elif workflow_stage == "closed":
-            query = query.filter(or_(Finding.closed_at.is_not(None), matching_stage_car_exists))
+            query = query.filter(Finding.closed_at.is_not(None))
         else:
             query = query.filter(Finding.closed_at.is_(None), matching_stage_car_exists)
     if car_timing:
@@ -271,7 +277,7 @@ def get_audit_register_paged(
             .order_by(Car.created_at.asc(), Car.id.asc())
             .all()
         )
-        for linked_car in linked_cars:
+        for linked_car in _decorate_car_register_items(db, linked_cars):
             cars_by_finding.setdefault(linked_car.finding_id, []).append(linked_car)
 
     rows = [
@@ -417,7 +423,9 @@ def get_car_register_paged(
             or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED")
         )
     elif scope == "awaiting_effectiveness_review":
-        query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION)
+        query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION,
+            func.coalesce(Car.root_cause_status, "") != "SUBMITTED",
+            func.coalesce(Car.capa_status, "") != "SUBMITTED")
     elif scope == "closed":
         query = query.filter(Car.status == models.CARStatus.CLOSED)
 

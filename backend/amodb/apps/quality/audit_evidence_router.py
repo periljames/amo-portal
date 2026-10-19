@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Cookie, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from amodb.apps.audit import models as audit_models
 from amodb.apps.events.broker import EventEnvelope, publish_event
@@ -346,7 +347,15 @@ def list_audit_evidence(
     if checklist_item_id is not None:
         query = query.filter(QualityAuditEvidenceArtifact.checklist_item_id == checklist_item_id)
     if finding_id is not None:
-        query = query.filter(QualityAuditEvidenceArtifact.finding_id == finding_id)
+        linked_items = db.query(models.QualityAuditChecklistItem.id).filter(
+            models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
+            models.QualityAuditChecklistItem.audit_id == audit_id,
+            models.QualityAuditChecklistItem.finding_id == finding_id,
+        )
+        query = query.filter(or_(
+            QualityAuditEvidenceArtifact.finding_id == finding_id,
+            QualityAuditEvidenceArtifact.checklist_item_id.in_(linked_items),
+        ))
     rows = query.order_by(QualityAuditEvidenceArtifact.created_at.asc()).limit(1000).all()
     return {"items": [_artifact_dict(row) for row in rows]}
 

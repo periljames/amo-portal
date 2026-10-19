@@ -1,3 +1,4 @@
+import { resolveDownloadFilename } from "../utils/downloads";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { DocumentationExecutionProfile, DocumentationRecord } from "./documentation";
@@ -68,13 +69,7 @@ async function authenticatedFetch(path: string, init: RequestInit = {}): Promise
 }
 
 function contentDispositionFilename(response: Response, fallback: string): string {
-  const disposition = response.headers.get("Content-Disposition") || "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  if (encoded) {
-    try { return decodeURIComponent(encoded); } catch { return fallback; }
-  }
-  return plain || fallback;
+  return resolveDownloadFilename(response.headers.get("Content-Disposition"), fallback, response.headers.get("Content-Type"));
 }
 
 function selectedPageHeader(value: string | null): number[] {

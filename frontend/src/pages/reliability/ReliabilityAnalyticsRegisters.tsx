@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { DashboardResponse, DrilldownDescriptor, DrilldownResponse } from "./reliabilityAnalyticsTypes";
@@ -24,7 +25,7 @@ function exportVisibleCsv(filename: string, headers: string[], values: Array<Arr
   const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   document.body.append(link);
   link.click();
   link.remove();
