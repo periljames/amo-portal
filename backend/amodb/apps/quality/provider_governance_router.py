@@ -779,6 +779,12 @@ def update_external_provider_profile(
         metadata={"reason": payload.reason},
         critical=True,
     )
+    if payload.risk_level and payload.risk_level != before["risk_level"]:
+        from .provider_oversight_events import record_status_snapshot
+        record_status_snapshot(db,amo_id=ctx.amo_id,supplier_id=provider_id,
+            actor_id=ctx.user_id,previous_status=str(provider["status"]),
+            current_status=str(provider["status"]),action="QUALITY_RISK_RECLASSIFICATION",
+            source_reference=str(payload.expected_version))
     db.commit()
     return _provider_detail(db, ctx=ctx, provider_id=provider_id)
 

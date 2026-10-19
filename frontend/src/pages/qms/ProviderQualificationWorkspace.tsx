@@ -240,6 +240,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
               initial_audit_required:initialAudit,authority_required:authorityRequired,
               safety_assessment_required:safetyRequired,
               manual_references:manuals.split(";").map(x=>x.trim()).filter(Boolean),reason:note,
+              expected_revision:policies.find(p=>p.category===category)?.revision||0,
             },"PUT");}
           catch{setError("Questionnaire must be an array in JSON");}
         }}>Save Quality-approved policy</button></div>}</section>}

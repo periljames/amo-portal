@@ -10,7 +10,10 @@ type ImportRow = {
   status: string;
   supplier_id: number | null;
 };
-type ImportDetail = { batch: {id:string;filename:string;status:string;import_kind:string}; rows: ImportRow[] };
+type ImportDetail = { batch: {id:string;filename:string;status:string;import_kind:string};
+  rows:ImportRow[];total:number;limit:number;offset:number};
+type ImportHistory={items:{id:string;filename:string;import_kind:string;status:string;created_at:string}[];
+  total:number};
 type Preview = {
   batch_id: string;
   source_sha256: string;
@@ -35,14 +38,28 @@ export default function ProviderImportPanel({amoCode,onImported}:{
   const [reason,setReason]=useState("");
   const [preview,setPreview]=useState<Preview|null>(null);
   const [detail,setDetail]=useState<ImportDetail|null>(null);
+  const [history,setHistory]=useState<ImportHistory|null>(null);
+  const [rowOffset,setRowOffset]=useState(0);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [message,setMessage]=useState("");
   const base=`/api/maintenance/${encodeURIComponent(amoCode)}/procurement/external-provider-imports`;
-  async function getDetail(id:string) {
-    const data=await apiRequest<ImportDetail>(`${base}/${encodeURIComponent(id)}`,{cacheTtlMs:0});
-    setDetail(data);return data;
+  async function getDetail(id:string,offset=0) {
+    const data=await apiRequest<ImportDetail>(base+"/"+encodeURIComponent(id)+
+      "?limit=100&offset="+offset,{cacheTtlMs:0});
+    setRowOffset(offset);setDetail(data);return data;
   }
+  async function refreshHistory(){
+    const data=await apiRequest<ImportHistory>(base+"/history?limit=100",{cacheTtlMs:0});
+    setHistory(data);
+  }
+  React.useEffect(()=>{
+    let live=true;
+    apiRequest<ImportHistory>(base+"/history?limit=100",{cacheTtlMs:0})
+      .then(result=>{if(live)setHistory(result);})
+      .catch(()=>{if(live)setHistory(null);});
+    return()=>{live=false;};
+  },[base]);
   async function upload(event:React.FormEvent<HTMLFormElement>) {
     event.preventDefault();if(!file)return;
     setBusy(true);setError("");setMessage("");
@@ -54,18 +71,20 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       data.append("header_row",String(headerRow));
       const result=await apiRequest<Preview>(`${base}/preview`,{method:"POST",body:data});
       setPreview(result);await getDetail(result.batch_id);
+      await refreshHistory();
       if(result.already_uploaded)setMessage("This exact workbook has already been staged. Showing its existing reconciliation.");
     }catch(e){setError(e instanceof Error?e.message:"Could not stage workbook.");}
     finally{setBusy(false);}
   }
   async function confirm() {
-    if(!preview)return;
+    const batchId=detail?.batch.id||preview?.batch_id;
+    if(!batchId)return;
     setBusy(true);setError("");setMessage("");
     try{
       const result=await apiRequest<{created_record_ids:Array<string|number>;operational_eligibility_granted:boolean}>(
-        `${base}/${encodeURIComponent(preview.batch_id)}/confirm`,{method:"POST"});
+        `${base}/${encodeURIComponent(batchId)}/confirm`,{method:"POST"});
       setMessage(`${result.created_record_ids.length} ${detail?.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"} recorded. Quality approval was not granted.`);
-      await getDetail(preview.batch_id);await onImported();
+      await getDetail(batchId);await onImported();await refreshHistory();
     }catch(e){setError(e instanceof Error?e.message:"Could not confirm reconciliation.");}
     finally{setBusy(false);}
   }
@@ -100,7 +119,7 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       const form=new FormData();form.append("reason",reason);
       await apiRequest(base+"/"+encodeURIComponent(detail.batch.id)+"/"+action,{method:"POST",body:form});
       await getDetail(detail.batch.id);
-      await onImported();
+      await onImported();await refreshHistory();
       setMessage("Reconciliation "+action+" recorded.");
       setReason("");
     }catch(e){setError(e instanceof Error?e.message:"Reconciliation action failed.");}
@@ -127,6 +146,16 @@ export default function ProviderImportPanel({amoCode,onImported}:{
       <button type="submit" className="proc-button proc-button--primary" disabled={!file||busy}>
         {busy?"Working…":"Stage and preview"}</button>
     </form>
+    <div className="proc-toolbar"><label>Saved import and reconciliation history
+      <select value={detail?.batch.id||""} onChange={e=>{
+        const id=e.target.value;
+        if(id){setPreview(null);setError("");
+          void getDetail(id).catch(e=>setError(e instanceof Error?e.message:"Batch unavailable"));}
+      }}><option value="">Select a batch</option>
+        {history?.items.map(b=><option key={b.id} value={b.id}>{b.filename} · {b.import_kind} · {b.status} · {b.created_at?.slice(0,10)}</option>)}
+      </select></label>
+      <button type="button" className="proc-button" disabled={busy} onClick={()=>void refreshHistory().catch(e=>setError(e instanceof Error?e.message:"History unavailable"))}>Refresh history</button>
+    </div>
     {error&&<p role="alert">{error}</p>}
     {message&&<p role="status">{message}</p>}
     {preview&&<p>Import {preview.batch_id}: {preview.status}.
@@ -143,12 +172,17 @@ export default function ProviderImportPanel({amoCode,onImported}:{
           <td>{row.status}</td><td>{issues.join(", ")||"—"}</td></tr>;
       })}</tbody></table></div>
       <div className="proc-toolbar">
-        <button type="button" className="proc-button" onClick={download}>Export reconciliation CSV</button>
+        <button type="button" className="proc-button" onClick={download}>Export visible reconciliation page (CSV)</button>
         {detail.batch.status==="STAGED"&&<button type="button"
-          className="proc-button proc-button--primary" disabled={busy||errors.length>0||detail.rows.length===0}
-          onClick={()=>void confirm()}>Confirm {detail.rows.length} {detail.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"}</button>}
+          className="proc-button proc-button--primary" disabled={busy||errors.length>0||detail.total===0}
+          onClick={()=>void confirm()}>Confirm {detail.total} {detail.batch.import_kind==="CONTRACTS"?"draft contracts":"prospective suppliers"}</button>}
       </div>
-      {errors.length>0&&<p role="alert">Resolve {errors.length} row errors in the source workbook and stage the corrected file before confirmation.</p>}
+      <div className="proc-toolbar" role="navigation" aria-label="Import reconciliation pages">
+        <button type="button" disabled={busy||rowOffset===0} onClick={()=>void getDetail(detail.batch.id,Math.max(0,rowOffset-100)).catch(e=>setError(e instanceof Error?e.message:"Page unavailable"))}>Previous</button>
+        <span>{detail.rows.length?rowOffset+1:0}–{rowOffset+detail.rows.length} of {detail.total} source rows</span>
+        <button type="button" disabled={busy||rowOffset+detail.rows.length>=detail.total} onClick={()=>void getDetail(detail.batch.id,rowOffset+100).catch(e=>setError(e instanceof Error?e.message:"Page unavailable"))}>Next</button>
+      </div>
+      {errors.length>0&&<p role="alert">This page contains {errors.length} invalid rows. The server validates the entire batch before confirmation.</p>}
       {["STAGED","COMMITTED"].includes(detail.batch.status)&&<div>
         <label>Reason for correction or rollback<textarea value={reason} onChange={e=>setReason(e.target.value)} rows={2}/></label>
         <button type="button" disabled={busy||reason.trim().length<8} onClick={()=>void changeBatch(detail.batch.status==="COMMITTED"?"rollback":"supersede")}>{detail.batch.status==="COMMITTED"?"Controlled rollback":"Supersede preview"}</button>

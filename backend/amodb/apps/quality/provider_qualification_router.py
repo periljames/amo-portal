@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text, bindparam
 from sqlalchemy.orm import Session
 
+from amodb.apps.audit import services as audit_services
 from amodb.apps.accounts import models as account_models
 from amodb.apps.procurement import service as procurement_service
 from amodb.apps.procurement import schemas as procurement_schemas
@@ -122,6 +123,7 @@ class PolicyWrite(BaseModel):
     safety_assessment_required: bool = False
     manual_references: list[str] = Field(default_factory=list,max_length=30)
     reason: str = Field(min_length=8,max_length=1000)
+    expected_revision: int | None = Field(default=None,ge=0)
 
 
 @router.get("/policies")
@@ -145,6 +147,12 @@ def configure_policy(amo_code:str,category:str,payload:PolicyWrite,
     category=category.strip().upper()
     if not 2<=len(category)<=64 or any(x not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for x in category):
         raise HTTPException(422,"Invalid provider category")
+    current=db.execute(text("""SELECT revision FROM quality_provider_qualification_policies
+      WHERE amo_id=:amo AND category=:category""" +
+      (" FOR UPDATE" if db.get_bind().dialect.name=="postgresql" else "")),
+      {"amo":amo,"category":category}).scalar()
+    if payload.expected_revision is not None and payload.expected_revision!=int(current or 0):
+        raise HTTPException(409,"Qualification policy changed; refresh the policy before saving")
     keys=[str(x.get("key","")).strip().upper() for x in payload.questionnaire]
     if any(not k or len(k)>80 for k in keys) or len(keys)!=len(set(keys)):
         raise HTTPException(422,"Questionnaire keys must be unique and nonempty")
@@ -182,6 +190,14 @@ def configure_policy(amo_code:str,category:str,payload:PolicyWrite,
         "manuals":json.dumps(payload.manual_references),"actor":str(user.id)})
     # Tenant-wide category policy audit is attributable; zero is an administrative
     # supplier sentinel, not an issued supplier approval.
+    audit_services.log_event(db,amo_id=amo,actor_user_id=str(user.id),
+        entity_type="external_provider_policy",entity_id=category,
+        action="category_policy_updated",
+        before={"revision":current},
+        after={"revision":int(current or 0)+1,
+               "required_checks":required,"surveillance_days":payload.surveillance_days},
+        correlation_id=str(uuid4()),
+        metadata={"reason":payload.reason},critical=True)
     db.commit()
     return {"category":category,"status":"CONFIGURED","annual_audit_required":payload.surveillance_days==365}
 

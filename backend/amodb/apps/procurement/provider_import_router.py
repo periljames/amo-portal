@@ -8,7 +8,7 @@ import re
 from datetime import date, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from openpyxl import load_workbook
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -278,8 +278,27 @@ async def preview(amo_code: str, file: UploadFile = File(...), mapping_json: str
     finally:
         workbook.close()
 
+@router.get("/external-provider-imports/history")
+def import_history(amo_code:str,limit:int=Query(30,ge=1,le=100),
+                   offset:int=Query(0,ge=0,le=100000),
+                   db:Session=Depends(get_db),
+                   user:accounts.User=Depends(require_roles(*_EDIT))):
+    tenant=_tenant(db,amo_code,user)
+    batches=db.execute(text("""SELECT id,filename,import_kind,status,created_at
+      FROM external_provider_import_batches WHERE amo_id=:amo
+      ORDER BY created_at DESC,id DESC LIMIT :limit OFFSET :offset"""),
+      {"amo":tenant,"limit":limit,"offset":offset}).mappings().all()
+    total=db.execute(text("""SELECT COUNT(*) FROM external_provider_import_batches
+      WHERE amo_id=:amo"""),{"amo":tenant}).scalar()
+    return {"items":[dict(row) for row in batches],"total":int(total or 0),
+            "limit":limit,"offset":offset}
+
+
 @router.get("/external-provider-imports/{batch_id}")
-def review(amo_code: str, batch_id: str, db: Session = Depends(get_db),
+def review(amo_code: str, batch_id: str,
+           limit: int = Query(100,ge=1,le=200),
+           offset: int = Query(0,ge=0,le=100000),
+           db: Session = Depends(get_db),
            user: accounts.User = Depends(require_roles(*_EDIT))):
     tenant = _tenant(db, amo_code, user)
     batch = db.execute(text("""SELECT * FROM external_provider_import_batches
@@ -288,9 +307,14 @@ def review(amo_code: str, batch_id: str, db: Session = Depends(get_db),
         raise HTTPException(404, "Import batch not found.")
     rows = db.execute(text("""SELECT id, sheet_name, row_number, normalized_json,
             diagnostics_json, status, supplier_id FROM external_provider_import_rows
-            WHERE batch_id=:batch AND amo_id=:amo ORDER BY sheet_name,row_number LIMIT 2000"""),
-            {"batch":batch_id, "amo":tenant}).mappings().all()
-    return {"batch":dict(batch), "rows":[dict(row) for row in rows]}
+            WHERE batch_id=:batch AND amo_id=:amo ORDER BY sheet_name,row_number,id
+            LIMIT :limit OFFSET :offset"""),
+            {"batch":batch_id, "amo":tenant,"limit":limit,"offset":offset}).mappings().all()
+    total=db.execute(text("""SELECT COUNT(*) FROM external_provider_import_rows
+        WHERE batch_id=:batch AND amo_id=:amo"""),
+        {"batch":batch_id,"amo":tenant}).scalar()
+    return {"batch":dict(batch), "rows":[dict(row) for row in rows],
+            "total":int(total or 0),"limit":limit,"offset":offset}
 
 @router.post("/external-provider-imports/{batch_id}/confirm")
 def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),

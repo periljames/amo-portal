@@ -5,7 +5,7 @@ type Summary={states:{status:string;risk_level:string;total:number}[];
   queue:{qualification_pending:number;reviews_due:number};
   next_120_days:{contracts:number;certificates:number;scopes:number};
   as_of:string;computed_not_approval:boolean};
-type CalendarRow={kind:string;supplier_id:number;reference:string;due_on:string};
+type CalendarRow={kind:string;supplier_code:string;reference:string;due_on:string};
 type Profile={supplier:{legal_name:string;risk_level:string;status:string};
   sites:{site_code:string;site_name:string;country:string|null;is_primary:boolean}[];
   scopes:{site_code:string;category:string;product_family:string;status:string;expires_on:string|null}[];
@@ -42,7 +42,7 @@ export function ProviderPortfolio({amoCode}:{amoCode:string}) {
   const [exporting,setExporting]=useState(false);
   const [error,setError]=useState("");
   const root=qmsPath(amoCode,"/provider-oversight");
-  useEffect(()=>{if(!expanded)return;let live=true;setPending(true);setError("");
+  useEffect(()=>{if(!expanded)return;let live=true;setPending(true);setError("");setSummary(null);setCalendar([]);
     Promise.all([
       apiRequest<Summary>(root+"/portfolio",{cacheTtlMs:0}),
       apiRequest<{items:CalendarRow[]}>(root+"/calendar?days=120&limit=100",{cacheTtlMs:0})
@@ -79,7 +79,7 @@ export function ProviderPortfolio({amoCode}:{amoCode:string}) {
         items={summary.states.map(r=>[r.status,r.risk_level,r.total])}/>
       <h3>Expiry and renewal calendar — first 100 records</h3>
       <Table head={["Record","Supplier","Reference","Due"]}
-        items={calendar.map(r=>[r.kind,r.supplier_id,r.reference,r.due_on])}/>
+        items={calendar.map(r=>[r.kind,r.supplier_code,r.reference,r.due_on])}/>
       <button type="button" disabled={exporting} onClick={()=>void exportCsv()} className="qms-provider-button is-secondary">
         {exporting?"Preparing authorized export…":"Export controlled provider register (CSV)"}
       </button></>}
@@ -91,7 +91,7 @@ export default function ProviderOversight({amoCode,supplierId}:{amoCode:string;s
   const [error,setError]=useState("");
   const [pending,setPending]=useState(true);
   const [revision,setRevision]=useState(0);
-  useEffect(()=>{let live=true;setPending(true);setError("");
+  useEffect(()=>{let live=true;setPending(true);setError("");setData(null);
     apiRequest<Profile>(qmsPath(amoCode,"/provider-oversight/providers/"+supplierId),{cacheTtlMs:0})
       .then(v=>{if(live)setData(v);})
       .catch(e=>{if(live)setError(e instanceof Error?e.message:"Provider oversight unavailable.");})

@@ -175,9 +175,11 @@ def _fingerprint(tenant, source, source_id, stamp, event, recipient_kind, recipi
 def _qualifying_users(db, amo, roles):
     if not roles:
         return []
-    users = db.query(accounts.User).filter(accounts.User.amo_id == amo,
-                                            accounts.User.is_active.is_(True)).all()
-    return [u for u in users if str(getattr(u.role, "value", u.role)) in roles]
+    # Keep role filtering within the indexed tenant query. Do not load every
+    # user into the hourly scheduler for each notification event.
+    return db.query(accounts.User).filter(
+        accounts.User.amo_id == amo, accounts.User.is_active.is_(True),
+        accounts.User.role.in_(roles)).all()
 
 def _queue(db, *, amo, event, source, source_id, stamp, supplier=None, due=None, recipient_kind="staff",
            provider=None, recipient_id=None, cancel_older=False):
@@ -287,7 +289,12 @@ def _schedule_expiries(db, amo, local_now, zone, policy):
         else:
             query = f"""SELECT id,supplier_id,{column} AS due FROM {table}
                WHERE amo_id=:amo AND {predicate} AND {column} IS NOT NULL"""
-        for row in _rows(db, query, amo=amo):
+        # Tenant policy permits up to 365-day leads/escalations. Never sweep
+        # all historic certificates/agreements every scheduler invocation.
+        query += f" AND {column}>=:window_start AND {column}<:window_end"
+        for row in _rows(db, query, amo=amo,
+                         window_start=today-timedelta(days=366),
+                         window_end=today+timedelta(days=367)):
             due_date = _date_in_tenant_zone(row["due"], zone)
             if due_date is None:
                 continue

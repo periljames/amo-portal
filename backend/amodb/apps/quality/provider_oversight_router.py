@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from uuid import uuid4
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,6 +30,11 @@ def _one(db: Session, sql: str, **params: Any) -> dict:
 def _context(db: Session, ctx: TenantContext) -> None:
     set_postgres_tenant_context(db,amo_id=ctx.amo_id,user_id=ctx.user_id)
 
+def _tenant_today(db: Session, amo_id: str) -> date:
+    tz=db.execute(text("SELECT time_zone FROM amos WHERE id=:amo"),{"amo":amo_id}).scalar()
+    try: return datetime.now(ZoneInfo(tz or "UTC")).date()
+    except ZoneInfoNotFoundError: return datetime.now(ZoneInfo("UTC")).date()
+
 @router.get("/providers/{supplier_id}")
 def provider_360(amo_code: str,supplier_id: int,
                  ctx: TenantContext=Depends(require_quality_permission("qms.supplier.view")),
@@ -38,7 +45,7 @@ def provider_360(amo_code: str,supplier_id: int,
         CAST(status AS TEXT) status, CAST(risk_level AS TEXT) risk_level,is_active
         FROM procurement_suppliers WHERE amo_id=:amo AND id=:supplier""",**key)
     if not identity:raise HTTPException(404,"Provider not found")
-    today=date.today()
+    today=_tenant_today(db,ctx.amo_id)
     sites=_all(db,"""SELECT site_code,site_name,country,is_primary
         FROM external_provider_sites WHERE amo_id=:amo AND supplier_id=:supplier
         ORDER BY is_primary DESC,site_code LIMIT 100""",**key)
@@ -136,7 +143,7 @@ def portfolio(amo_code: str,
               ctx: TenantContext=Depends(require_quality_permission("qms.supplier.view")),
               db: Session=Depends(get_read_db)):
     _context(db,ctx)
-    today=date.today()
+    today=_tenant_today(db,ctx.amo_id)
     states=_all(db,"""SELECT CAST(status AS TEXT) status,
         CAST(risk_level AS TEXT) risk_level,COUNT(*) total
         FROM procurement_suppliers WHERE amo_id=:amo AND is_active=TRUE
@@ -166,17 +173,19 @@ def expiry_calendar(amo_code: str,days:int=Query(default=120,ge=1,le=730),
               ctx:TenantContext=Depends(require_quality_permission("qms.supplier.view")),
               db:Session=Depends(get_read_db)):
     _context(db,ctx)
-    data=_all(db,"""SELECT kind,supplier_id,reference,due_on FROM (
+    today=_tenant_today(db,ctx.amo_id)
+    data=_all(db,"""SELECT due.kind,s.supplier_code, due.reference,due.due_on FROM (
         SELECT 'CONTRACT' kind,supplier_id,contract_number reference,expires_on due_on
         FROM quality_external_provider_contracts WHERE amo_id=:amo AND status='ACTIVE'
         UNION ALL SELECT 'CERTIFICATE',supplier_id,certificate_type,valid_until
         FROM external_provider_certificates WHERE amo_id=:amo AND verification_state='VERIFIED'
         UNION ALL SELECT 'CAPABILITY',supplier_id,category,expires_on
         FROM procurement_supplier_approval_scopes WHERE amo_id=:amo AND CAST(status AS TEXT)='ACTIVE'
-        ) due WHERE due_on BETWEEN :today AND :end
-        ORDER BY due_on,kind,supplier_id LIMIT :limit""",
-        amo=ctx.amo_id,today=date.today(),end=date.today()+timedelta(days=days),limit=limit)
-    return {"items":data,"limit":limit,"days":days,"as_of":date.today().isoformat()}
+        ) due JOIN procurement_suppliers s ON s.amo_id=:amo AND s.id=due.supplier_id
+        WHERE due.due_on BETWEEN :today AND :end
+        ORDER BY due.due_on,due.kind,due.supplier_id LIMIT :limit""",
+        amo=ctx.amo_id,today=today,end=today+timedelta(days=days),limit=limit)
+    return {"items":data,"limit":limit,"days":days,"as_of":today.isoformat()}
 
 @router.get("/register.csv")
 def export_register(amo_code: str,
@@ -203,7 +212,7 @@ def export_register(amo_code: str,
     audit_services.log_event(db,amo_id=ctx.amo_id,actor_user_id=ctx.user_id,
         entity_type="external_provider_register",entity_id=ctx.amo_id,
         action="controlled_export",after={"records":len(data)},
-        correlation_id=None,metadata={"format":"CSV"},critical=True)
+        correlation_id=str(uuid4()),metadata={"format":"CSV"},critical=True)
     db.commit()
     return Response(stream.getvalue(),media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition":'attachment; filename="provider-register.csv"',

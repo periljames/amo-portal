@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/maintenance/{amo_code}/provider-alerts",tags=["P
 partner_router = APIRouter(prefix="/api/external-provider/partner/{tenant_slug}/alert-preferences",
                            tags=["Provider alert preferences"])
 
-ADMIN_ROLES = {"ADMIN","TENANT_ADMIN","ACCOUNTABLE_EXECUTIVE","SUPERADMIN","ADMINISTRATOR"}
+ADMIN_ROLES = {"AMO_ADMIN","SUPERUSER","ADMIN","TENANT_ADMIN","ACCOUNTABLE_EXECUTIVE","SUPERADMIN","ADMINISTRATOR"}
 OWNERS = {
     "QUALITY": {"QUALITY_MANAGER","QUALITY_OFFICER"},
     "PROCUREMENT": {"PROCUREMENT_MANAGER","PROCUREMENT_OFFICER"},
@@ -162,20 +162,28 @@ def history(amo_code:str,department:str|None=None,status:str|None=None,
     permitted=_departments(user)
     if department and department.upper() not in permitted:
         raise HTTPException(403,"Department history not permitted")
-    rows=db.execute(text("""SELECT j.id,j.event_key,j.source_kind,j.source_id,j.due_at,
-            j.status,j.attempts,j.next_attempt_at,j.last_error,j.in_app_id,
-            j.email_log_id,j.acknowledged_at,j.delivered_at,j.cancelled_at,j.created_at,
-            e.status AS email_processing_status,e.delivery_status AS email_delivery_status,
-            e.provider_message_id AS email_provider_message_id
-         FROM external_provider_alert_jobs j
-         LEFT JOIN email_logs e ON e.id=j.email_log_id AND e.amo_id=j.amo_id
-         WHERE j.amo_id=:amo
-         AND (:status IS NULL OR j.status=:status)
-         ORDER BY j.created_at DESC LIMIT :limit"""),
-         {"amo":amo,"status":status,"limit":min(1000,limit*8)}).mappings()
-    items=[dict(r) for r in rows if alerts.CATALOG.get(r["event_key"]) in permitted
-           and (department is None or alerts.CATALOG.get(r["event_key"])==department.upper())]
-    return {"items":items[:limit],"has_more":len(items)>limit,
+    # Filter by authorized event catalog in SQL BEFORE LIMIT to avoid
+    # both cross-department scans and incorrectly truncated department pages.
+    from sqlalchemy import bindparam
+    events=[key for key,owner in alerts.CATALOG.items()
+            if owner in permitted and (department is None or owner==department.upper())]
+    if not events:
+        return {"items":[],"has_more":False}
+    query=text("""SELECT j.id,j.event_key,j.source_kind,j.source_id,j.due_at,
+          j.status,j.attempts,j.next_attempt_at,j.last_error,j.in_app_id,
+          j.email_log_id,j.acknowledged_at,j.delivered_at,j.cancelled_at,j.created_at,
+          e.status email_processing_status,e.delivery_status email_delivery_status,
+          e.provider_message_id email_provider_message_id
+        FROM external_provider_alert_jobs j
+        LEFT JOIN email_logs e ON e.id=j.email_log_id AND e.amo_id=j.amo_id
+        WHERE j.amo_id=:amo AND j.event_key IN :events
+          AND (:status IS NULL OR j.status=:status)
+        ORDER BY j.created_at DESC,j.id DESC LIMIT :limit""").bindparams(
+            bindparam("events",expanding=True))
+    values={"amo":amo,"events":events,"status":status,"limit":limit+1}
+    rows=[dict(r) for r in db.execute(query,values).mappings().all()]
+    items=rows[:limit]
+    return {"items":items,"has_more":len(rows)>limit,
             "email_status_note":"Email accepted by provider is not proof of recipient delivery or read."}
 
 @router.post("/delivery-history/{job_id}/retry")
