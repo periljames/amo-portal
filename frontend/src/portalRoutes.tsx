@@ -864,6 +864,11 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
 
+      {/* Provider scope is a governed cross-functional read surface. Technical
+          and Safety managers may inspect supplier qualification without the
+          broader QMS dashboard capability or any Quality decision rights. */}
+      <Route path="/maintenance/:amoCode/quality/suppliers/*"
+        element={<RequireAuth><RequireQmsPermission permission="qms.supplier.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />
