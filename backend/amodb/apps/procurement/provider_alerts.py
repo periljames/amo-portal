@@ -809,12 +809,26 @@ def _dispatch(db, amo, code, zone, policy, now):
             if email_on:
                 local = now.astimezone(zone)
                 digest = policy["digest_json"]
-                # A partner's saved digest preference is an actual delivery rule:
-                # batch email into its tenant-local daily window. Without this,
-                # the external settings toggle has no effect on delivery.
+                # Both the tenant's digest window and the partner's opted-in
+                # preference must be respected. A source arriving after today's
+                # window waits for the next local day's window; if quiet hours
+                # overlap that window, delivery resumes once quiet time ends.
+                # Requiring local.hour == digest_hour would strand such jobs.
                 digest_applies = bool(digest.get("enabled") or vendor_digest_enabled)
+                digest_blocked = False
+                if digest_applies:
+                    due_utc = _utc(job["due_at"])
+                    if due_utc is None:
+                        raise ValueError("Invalid source due timestamp")
+                    due_local = due_utc.astimezone(zone)
+                    hour = int(digest.get("hour", 8))
+                    eligible_at = datetime.combine(due_local.date(), time(hour, 0), zone)
+                    if due_local > eligible_at:
+                        eligible_at = datetime.combine(
+                            due_local.date() + timedelta(days=1), time(hour, 0), zone)
+                    digest_blocked = local < eligible_at
                 blocked = (_restricted_now(local,policy["quiet_hours_json"])
-                           or (digest_applies and local.hour != digest.get("hour",8)))
+                           or digest_blocked)
                 if blocked:
                     retry = now+timedelta(hours=1)
                     db.execute(text("""UPDATE external_provider_alert_jobs SET
