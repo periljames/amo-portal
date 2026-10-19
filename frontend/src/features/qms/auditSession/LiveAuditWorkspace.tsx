@@ -1082,6 +1082,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 }} aria-label="Close question details">Close details <X size={15} /></button>
                 <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
               </div>
+              <h3 className="qms-live-audit-focus__question-prompt">{selected.prompt}</h3>
               <div className="qms-live-audit-focus__question-subline">
                 <strong>{selected.checklist_ref || selected.requirement_ref || "Governed question"}</strong>
                 <span data-status={selected.canonical_response_status}>{statusLabel(selected.canonical_response_status)} · v{selected.entity_version}</span>
@@ -1181,7 +1182,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               </footer>
               </section>
 
-              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+              <details open className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
                 <summary className="qms-live-audit-focus__compliance-summary">
                   <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
                   <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
