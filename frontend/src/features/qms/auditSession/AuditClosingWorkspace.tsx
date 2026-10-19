@@ -359,11 +359,24 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
       {localError ? <div className="qms-audit-closing__error" role="alert"><ShieldAlert size={16} /> {localError}</div> : null}
       {notice ? <div className="qms-audit-closing__success" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
-      {currentAcknowledgement?.acknowledgement_status === "ACKNOWLEDGED" && currentRevision ? (
-        <div className="qms-audit-closing__success" role="note" aria-label="Current report closing-meeting receipt">
-          <CheckCircle2 size={16} />
-          <strong>ACKNOWLEDGED</strong>
-          <span>Auditee response to report R{currentRevision.revision_no} is recorded against the exact governed revision.</span>
+      {(currentAcknowledgement?.acknowledgement_status === "ACKNOWLEDGED"
+        || activeRevision?.status === "APPROVED" || currentSignature || issuedRevision) ? (
+        <div className="qms-audit-closing__success" role="note" aria-label="Governed report milestones">
+          <CheckCircle2 size={16} aria-hidden />
+          <div>
+            {currentAcknowledgement?.acknowledgement_status === "ACKNOWLEDGED" && currentRevision ? (
+              <p><strong>ACKNOWLEDGED</strong> · Auditee response recorded for exact report R{currentRevision.revision_no}.</p>
+            ) : null}
+            {activeRevision?.status === "APPROVED" ? (
+              <p><strong>R{activeRevision.revision_no} is approved and locked to SHA-256 {activeRevision.sha256}.</strong></p>
+            ) : null}
+            {currentSignature ? (
+              <p>Exact-revision signature: <strong>{currentSignature.method}</strong> · independently verified.</p>
+            ) : null}
+            {issuedRevision ? (
+              <p><strong>Issued R{issuedRevision.revision_no}</strong> · Governed report released for authorized use.</p>
+            ) : null}
+          </div>
         </div>
       ) : null}
       <div className="qms-audit-closing__body"><main>
@@ -391,7 +404,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
           ) : null}
           {activeRevision?.status === "INTERNAL_REVIEW" ? <div className="qms-audit-closing__actions"><button type="button" className="is-primary" disabled={!canApprove || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "APPROVE" })}>Approve exact report revision</button><button type="button" disabled={!canGovern || !stepAllowsActions(3) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "RETURN" })}>Return to draft</button></div> : null}
-          {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> R{activeRevision.revision_no} is approved and locked to SHA-256 {activeRevision.sha256}.</div> : null}
+          {activeRevision?.status === "APPROVED" ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> Approval record for report R{activeRevision.revision_no}: checksum SHA-256 {activeRevision.sha256} is locked.</div> : null}
         </details>
         <details open={activeClosingStep === 4} className={closingCardClass(4)} aria-current={activeClosingStep === 4 ? "step" : undefined}>
           <summary><Fingerprint size={19} /><div><h3>4 · Passkey signing ceremony</h3><small>WebAuthn user verification is recorded against the approved report revision. Password re-auth is not treated as equivalent evidence.</small></div></summary>
@@ -399,7 +412,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {!isWebAuthnSupported() || !isSecureContextAvailable() ? <div className="qms-audit-closing__blocker"><AlertTriangle size={16} /> This browser/origin does not currently expose a secure WebAuthn context.</div> : null}
           {!passkeys.length ? <div className="qms-audit-closing__passkey-setup"><label><span>Passkey label</span><input value={passkeyNickname} onChange={(event) => setPasskeyNickname(event.target.value)} maxLength={80} /></label><button type="button" disabled={!canGovern || ceremonyBusy !== null} onClick={() => void registerPasskey()}><KeyRound size={15} /> {ceremonyBusy === "register" ? "Registering…" : "Register passkey"}</button></div> : <p>{passkeys.length} active passkey{passkeys.length === 1 ? "" : "s"} registered for this Quality user.</p>}
           {activeRevision?.status === "APPROVED" && !currentSignature ? <div className="qms-audit-closing__passkey-sign"><label><span>Approval reason</span><textarea rows={3} value={signReason} onChange={(event) => setSignReason(event.target.value)} /></label><button type="button" className="is-primary" disabled={!canSign || !stepAllowsActions(4) || !passkeys.length || ceremonyBusy !== null || signReason.trim().length < 8} onClick={() => void signWithPasskey()}><Fingerprint size={15} /> {ceremonyBusy === "sign" ? "Verifying passkey…" : "Approve exact report with passkey"}</button></div> : null}
-          {currentSignature ? <dl className="qms-audit-closing__artifact"><div><dt>Method</dt><dd>{currentSignature.method}</dd></div><div><dt>Signed</dt><dd>{currentSignature.signed_at ? new Date(currentSignature.signed_at).toLocaleString() : "—"}</dd></div></dl> : null}
+          {currentSignature ? <dl className="qms-audit-closing__artifact"><div><dt>Method</dt><dd>Signature: {currentSignature.method}</dd></div><div><dt>Signed</dt><dd>{currentSignature.signed_at ? new Date(currentSignature.signed_at).toLocaleString() : "—"}</dd></div></dl> : null}
         </details>
         <details open={activeClosingStep === 5} className={closingCardClass(5)} aria-current={activeClosingStep === 5 ? "step" : undefined}>
           <summary><FileCheck2 size={19} /><div><h3>5 · Issue immutable report</h3><small>The server refuses ISSUE unless current passkey evidence matches the exact approved revision and is newer than the approval state.</small></div></summary>
@@ -409,9 +422,9 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <button type="button" className="is-primary" disabled={!canIssue || !stepAllowsActions(5) || transitionMutation.isPending} onClick={() => transitionMutation.mutate({ revision: activeRevision, action: "ISSUE" })}>Issue passkey-approved report</button>
             </div>
           ) : null}
-          {issuedRevision ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> Issued R{issuedRevision.revision_no} · {issuedRevision.issued_at ? new Date(issuedRevision.issued_at).toLocaleString() : "issued"}</div> : null}
+          {issuedRevision ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> Report R{issuedRevision.revision_no} issued · {issuedRevision.issued_at ? new Date(issuedRevision.issued_at).toLocaleString() : "issued"}</div> : null}
         </details>
-        <details open={activeClosingStep === 6} className={closingCardClass(6)} aria-current={activeClosingStep === 6 ? "step" : undefined}>
+        <details open={activeClosingStep === 6 || closure?.execution_status === "CLOSED"} className={closingCardClass(6)} aria-current={activeClosingStep === 6 ? "step" : undefined}>
           <summary><ShieldAlert size={19} /><div><h3>6 · Close execution without erasing follow-up</h3><small>Execution closure and CAR/CAPA completion are separate controls.</small></div></summary>
           {lockedReason(6) ? <div className="qms-audit-closing__locked">{lockedReason(6)}</div> : null}
           {closure?.execution_readiness?.blockers?.length ? <ul>{closure.execution_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : null}
