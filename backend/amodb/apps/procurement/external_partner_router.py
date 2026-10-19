@@ -74,6 +74,8 @@ def _ctx(db:Session,request:Request,tenant_slug:str,*,cap:str|None="profile.read
     if db.get_bind().dialect.name=="postgresql":
         db.execute(text("SELECT set_config('app.external_provider_id',:provider,true)"),
                    {"provider":str(user["tenant_provider_id"])})
+        db.execute(text("SELECT set_config('app.external_identity_id',:identity,true)"),
+                   {"identity":str(user["identity_id"])})
     return user
 
 def _context(user):
