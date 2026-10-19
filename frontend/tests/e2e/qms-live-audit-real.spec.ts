@@ -307,7 +307,7 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
     await internalPage.getByLabel("Audit closing meeting").getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
+    await expect(internalPage.getByText("ACKNOWLEDGED", { exact: true })).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
