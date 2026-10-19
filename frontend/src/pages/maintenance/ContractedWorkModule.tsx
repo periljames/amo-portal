@@ -1,6 +1,8 @@
 import React,{useCallback,useEffect,useMemo,useState} from "react";
 import {Link,useLocation,useParams} from "react-router-dom";
 import {apiRequest} from "../../services/apiClient";
+import {getCachedUser} from "../../services/auth";
+import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 
 type Provider={id:string;supplier_id:number;legal_name:string};
 type Scope={id:number;supplier_id:number;category:string;site_code:string;product_family:string;approval_number:string;authority:string};
@@ -30,6 +32,9 @@ export default function ContractedWorkModule(){
   const {amoCode=""}=useParams();
   const location=useLocation();
   const deepLinkedWork=new URLSearchParams(location.search).get("work")||"";
+  const notificationRole=String(getCachedUser()?.role||"").toUpperCase();
+  const canConfigureAlerts=["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER","ADMIN","TENANT_ADMIN","ACCOUNTABLE_EXECUTIVE","SUPERADMIN","ADMINISTRATOR"].includes(notificationRole);
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/contracted-work";
   const [items,setItems]=useState<WorkList[]>([]);
   const [options,setOptions]=useState<Options|null>(null);
@@ -182,6 +187,7 @@ export default function ContractedWorkModule(){
       <div><button onClick={()=>void load()} disabled={loading}>Refresh</button>{" "}
         {canCreate&&<button onClick={()=>setNewOpen(x=>!x)}>{newOpen?"Close form":"New controlled work order"}</button>}</div>
     </header>
+    {canConfigureAlerts&&<ProviderAlertSettingsPanel amoCode={amoCode} department="MAINTENANCE" />}
     {loading&&<p role="status">Loading contracted work and approved sources…</p>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
     {newOpen&&canCreate&&<form className="partner-form" onSubmit={submitNew} style={{marginBlock:"1rem"}}>
