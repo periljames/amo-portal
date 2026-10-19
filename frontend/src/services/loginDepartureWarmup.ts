@@ -54,6 +54,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+/** Best-effort post-login warmup: never block a valid session indefinitely. */
+export async function waitForLoginPreloads(
+  tasks: Promise<unknown>[],
+  maxWaitMs = 3_000,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(tasks),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, maxWaitMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function qualityControlRoomPath(amoSlug: string, home: string): string | null {
   if (home.includes("/quality") || home.includes("/audits/")) {
     const match = home.match(/^(.*?\/quality)(?:\/|$)/i);
@@ -156,7 +174,9 @@ export async function runLoginDepartureWarmup(options: {
   );
 
   onProgress({ active: true, phase: "climb", label: departureLabel("climb") });
-  await Promise.all([controlRoomData, criticalChunks]);
+  // Login has already succeeded. Optional landing-page preloads must not
+  // strand an authenticated user on the login screen when a service stalls.
+  await waitForLoginPreloads([controlRoomData, criticalChunks]);
 
   const remaining = Math.max(0, TAKEOFF_MS - (performance.now() - takeoffStartedAt));
   if (remaining > 0) await sleep(remaining);
