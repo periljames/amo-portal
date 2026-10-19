@@ -57,3 +57,14 @@ def test_closed_car_cancels_queued_due_alert():
            "source_stamp": "OPEN:2026-10-19", "event_key": "quality.car_due"}
     db = _DB({"status": "CLOSED", "due_date": date(2026, 10, 19)})
     assert not _still_current(db, "tenant-one", row, None, {})
+
+
+def test_suspended_provider_alerts_preserve_only_existing_capa_obligations():
+    """Explicit regression contract for in-flight CARs versus new assigned work."""
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "apps/procurement/provider_alerts.py").read_text(encoding="utf-8")
+    assert 'p.portal_state IN (\'ACTIVE\',\'SUSPENDED\')' in source
+    assert 'if grant["portal_state"] != "ACTIVE":' in source
+    assert 'car_remediation=job["source_kind"]=="qms_car"' in source
+    assert "p.portal_state='SUSPENDED' AND :car_remediation=true" in source

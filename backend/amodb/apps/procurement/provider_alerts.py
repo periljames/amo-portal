@@ -476,7 +476,7 @@ def _scan_qms_provider_collaboration(db, amo):
     """
     count = 0
     grants = _rows(db, """SELECT g.tenant_provider_id, g.object_scope_json,
-        g.capabilities_json, m.identity_id, p.supplier_id
+        g.capabilities_json, m.identity_id, p.supplier_id, p.portal_state
         FROM external_tenant_grants g
         JOIN external_organization_memberships m ON m.id=g.membership_id
         JOIN external_identities i ON i.id=m.identity_id
@@ -484,7 +484,7 @@ def _scan_qms_provider_collaboration(db, amo):
           AND p.amo_id=g.amo_id
         WHERE g.amo_id=:amo AND g.status='ACTIVE'
           AND m.status='ACTIVE' AND i.status='ACTIVE'
-          AND p.portal_state='ACTIVE'
+          AND p.portal_state IN ('ACTIVE','SUSPENDED')
         ORDER BY g.id LIMIT 1000""", amo=amo)
     if not grants:
         return 0
@@ -497,6 +497,8 @@ def _scan_qms_provider_collaboration(db, amo):
         ORDER BY n.notice_date DESC,n.id LIMIT 150""", amo=amo)
     for row in notices:
         for grant in grants:
+            if grant["portal_state"] != "ACTIVE":
+                continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
                 continue
             count += _queue(
@@ -514,6 +516,8 @@ def _scan_qms_provider_collaboration(db, amo):
         ORDER BY due_date NULLS LAST,id LIMIT 150""", amo=amo)
     for row in requests:
         for grant in grants:
+            if grant["portal_state"] != "ACTIVE":
+                continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
                 continue
             count += _queue(
@@ -536,6 +540,8 @@ def _scan_qms_provider_collaboration(db, amo):
         ORDER BY e.created_at DESC,e.id DESC LIMIT 150""", amo=amo)
     for row in findings:
         for grant in grants:
+            if grant["portal_state"] != "ACTIVE":
+                continue
             if not _qms_grant_allows(grant, str(row["audit_id"]), "task.read"):
                 continue
             count += _queue(
@@ -885,9 +891,12 @@ def _dispatch(db, amo, code, zone, policy, now):
                       AND p.amo_id=g.amo_id
                    WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider
                    AND i.id=:identity AND g.status='ACTIVE' AND m.status='ACTIVE'
-                   AND i.status='ACTIVE' AND p.portal_state='ACTIVE'""", amo=amo,
+                   AND i.status='ACTIVE'
+                   AND (p.portal_state='ACTIVE'
+                     OR (p.portal_state='SUSPENDED' AND :car_remediation=true))""", amo=amo,
                    provider=job["recipient_provider_id"],
-                   identity=job["recipient_identity_id"])
+                   identity=job["recipient_identity_id"],
+                   car_remediation=job["source_kind"]=="qms_car")
                 source_kind = job["source_kind"]
                 scope_kind = ("contracted_work" if source_kind == "maintenance_event"
                               else "assignments" if source_kind.startswith("qms_")
