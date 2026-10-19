@@ -68,6 +68,10 @@ export type ProviderContract = {
   renewal_terms?: string | null;
   controlled_document_id?: string | null;
   controlled_document_revision?: string | null;
+  signed_evidence_submission_id?: string | null;
+  counterparties_json?: string[] | null;
+  approved_sites_json?: string[] | null;
+  authority_acceptance_reference?: string | null;
   supersedes_contract_id?: string | null;
   change_reason?: string | null;
   owner_user_id?: string | null;

@@ -300,6 +300,8 @@ def _provider_contracts(db: Session, *, amo_id: str, provider_id: int) -> list[d
             SELECT id, supplier_id, contract_number, title, status, scope_text,
                    effective_on, expires_on, termination_notice_days, renewal_terms,
                    controlled_document_id, controlled_document_revision, owner_user_id,
+                   signed_evidence_submission_id, counterparties_json, approved_sites_json,
+                   authority_acceptance_reference, supersedes_contract_id, change_reason,
                    approved_by_user_id, approved_at, transition_reason, version,
                    created_at, updated_at
             FROM quality_external_provider_contracts
