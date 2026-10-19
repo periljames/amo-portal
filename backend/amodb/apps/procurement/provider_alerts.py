@@ -550,6 +550,8 @@ def _dispatch(db, amo, code, zone, policy, now):
                 savepoint.commit()
                 continue
             recipient = None
+            vendor_email = None
+            vendor_email_enabled = False
             if job["recipient_user_id"]:
                 recipient = db.query(accounts.User).filter(
                     accounts.User.amo_id==amo,
@@ -563,20 +565,30 @@ def _dispatch(db, amo, code, zone, policy, now):
             elif job["recipient_identity_id"]:
                 # Never deliver to revoked identities or grants. A vendor may
                 # only receive a scoped record; no generic supplier-wide broadcast.
-                grant = _rows(db, """SELECT g.object_scope_json FROM external_tenant_grants g
+                grant = _rows(db, """SELECT g.object_scope_json,i.email,i.verified_at
+                   FROM external_tenant_grants g
                    JOIN external_organization_memberships m ON m.id=g.membership_id
                    JOIN external_identities i ON i.id=m.identity_id
+                   JOIN external_tenant_providers p ON p.id=g.tenant_provider_id
+                      AND p.amo_id=g.amo_id
                    WHERE g.amo_id=:amo AND g.tenant_provider_id=:provider
                    AND i.id=:identity AND g.status='ACTIVE' AND m.status='ACTIVE'
-                   AND i.status='ACTIVE'""", amo=amo,provider=job["recipient_provider_id"],
+                   AND i.status='ACTIVE' AND p.portal_state='ACTIVE'
+                   AND p.restrict_new_work=FALSE""", amo=amo,
+                   provider=job["recipient_provider_id"],
                    identity=job["recipient_identity_id"])
                 scope_kind = "contracted_work" if job["source_kind"]=="maintenance_event" else "procurement"
-                if not any(str(job["source_id"]) in [str(v) for v in
-                    (g["object_scope_json"] or {}).get(scope_kind, [])] for g in grant):
+                assigned = any(str(job["source_id"]) in [str(v) for v in
+                    (g["object_scope_json"] or {}).get(scope_kind, [])] for g in grant)
+                if not assigned:
                     db.execute(text("""UPDATE external_provider_alert_jobs
                          SET status='CANCELLED',cancelled_at=NOW() WHERE id=:id"""), {"id":job["id"]})
                     savepoint.commit()
                     continue
+                # Email requires a verified external identity, current grant,
+                # active provider account and explicit member opt-in.
+                if grant[0]["verified_at"]:
+                    vendor_email = grant[0]["email"]
             else:
                 savepoint.commit()
                 continue
@@ -591,11 +603,13 @@ def _dispatch(db, amo, code, zone, policy, now):
             channels = policy["channels_json"].get(CATALOG[job["event_key"]], {"in_app":True,"email":False})
             partner_in_app = True
             if job["recipient_identity_id"]:
-                pref = db.execute(text("""SELECT in_app_enabled FROM external_provider_alert_preferences
-                  WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
-                  {"amo":amo,"provider":job["recipient_provider_id"],
-                   "identity":job["recipient_identity_id"]}).scalar()
-                partner_in_app = pref is not False
+                preference = db.execute(text("""SELECT in_app_enabled,email_enabled
+                    FROM external_provider_alert_preferences
+                    WHERE amo_id=:amo AND tenant_provider_id=:provider AND identity_id=:identity"""),
+                    {"amo":amo,"provider":job["recipient_provider_id"],
+                     "identity":job["recipient_identity_id"]}).mappings().first()
+                partner_in_app = not preference or preference["in_app_enabled"] is not False
+                vendor_email_enabled = bool(preference and preference["email_enabled"])
             if not channels.get("in_app",True) and not channels.get("email",False):
                 db.execute(text("""UPDATE external_provider_alert_jobs
                     SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
@@ -626,11 +640,8 @@ def _dispatch(db, amo, code, zone, policy, now):
                    {"notification":new_id,"id":job["id"]})
             # A Resend API acknowledgement is NOT email delivery, inbox placement
             # or a read receipt. That evidence belongs to the signed webhook log.
-            email_on = channels.get("email",False) and recipient is not None
-            if job["recipient_identity_id"]:
-                # Vendor member email requires verified-address support; the
-                # existing vendor in-app notification register remains primary.
-                email_on=False
+            email_on = bool(channels.get("email",False) and (
+                recipient is not None or (vendor_email and vendor_email_enabled)))
             if not (channels.get("in_app",True) and partner_in_app) and not email_on:
                 db.execute(text("""UPDATE external_provider_alert_jobs
                     SET status='CANCELLED',cancelled_at=NOW(),updated_at=NOW()
@@ -649,11 +660,20 @@ def _dispatch(db, amo, code, zone, policy, now):
                         WHERE id=:id"""),{"retry":retry,"id":job["id"]})
                     savepoint.commit()
                     continue
-                email = mail_service.send_email("provider.lifecycle",getattr(recipient,"email",None),
+                if recipient:
+                    recipient_address = getattr(recipient,"email",None)
+                    action_url = _allowed_link(code,job)
+                else:
+                    from urllib.parse import quote
+                    recipient_address = vendor_email
+                    action_url = ("/partner/" + quote(str(code),safe="") +
+                                  "/work?work=" + quote(str(job["source_id"]),safe=""))
+                email = mail_service.send_email("provider.lifecycle",recipient_address,
                     "External provider action requires review",
-                    {"summary":message, "url":_allowed_link(code,job)},
+                    {"summary":message, "url":action_url},
                     job["fingerprint"]+":"+str(job["attempts"]),
-                    amo_id=amo,db=db,recipient_user_id=str(recipient.id),
+                    amo_id=amo,db=db,
+                    recipient_user_id=str(recipient.id) if recipient else None,
                     audit_context={"event_key":job["event_key"],"job_id":job["id"]})
                 db.execute(text("""UPDATE external_provider_alert_jobs
                    SET email_log_id=:log WHERE id=:id"""),{"log":str(email.id),"id":job["id"]})
