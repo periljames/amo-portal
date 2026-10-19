@@ -578,6 +578,25 @@ def _allowed_link(amo_code, row):
 
 def _still_current(db, amo, row, zone, policy):
     source=row["source_kind"]
+    # Action-needed projections must not survive source closure or review.
+    # Historical immutable transition events are retained separately.
+    if source=="partner_change":
+        current=db.execute(text("""SELECT status,version FROM external_partner_change_requests
+            WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
+        return bool(current and current["status"] in ("PENDING","UNDER_REVIEW")
+                    and row["source_stamp"]==f"{current['status']}:{current['version']}")
+    if source=="partner_evidence":
+        current=db.execute(text("""SELECT status FROM external_partner_evidence_submissions
+            WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).scalar()
+        return bool(current and current==row["source_stamp"])
+    if source=="qualification_state":
+        current=db.execute(text("""SELECT status,version FROM quality_provider_qualification_cases
+            WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
+        return bool(current and row["source_stamp"]==str(current["version"])+":"+current["status"])
+    if source=="agreement_state":
+        current=db.execute(text("""SELECT status,version FROM quality_external_provider_contracts
+            WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
+        return bool(current and row["source_stamp"]==f"{current['status']}:{current['version']}")
     if source in DATE_SOURCES:
         current=_active_source(db,amo,source,row["source_id"])
         if not current:
