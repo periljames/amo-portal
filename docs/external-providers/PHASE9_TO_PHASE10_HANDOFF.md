@@ -26,3 +26,16 @@ See Phase9 matrix \`P/G\` cells and risk register \`P9-01–P9-20\`: QMS audit/C
 ## Actual result to report
 
 The Phase 10 result must identify final **branch/commit**, exact GitHub status including any **new main movements**, each workflow Pass/Fail/Blocked with evidence, migration and RLS matrix, full CI names and links, remediation commit(s), performance numbers and explicit human regulatory acceptance. Until then PR #560 remains **draft and unmerged**.
+
+
+## Additional mandated regression matrix from late Phase 9 remediation
+
+1. **Untrusted register XLSX/XLSM**: malformed ZIP, encrypted member, compression bomb, >128 MiB expanded archive, >64 MiB part, excessive archive members, sheets, columns, cell length and scanned rows; confirm HTTP 413/422, memory ceiling, rollback and tenant RLS after exceptions. Also validate an actual 2,000-row legitimate workbook.
+2. **Human classification**: future-dated independently VERIFIED evidence, expired evidence, revoked Quality status, evidence from another provider/tenant, concurrent revision, an archived/prospective supplier and an attempted unreferenced evidence ID. No automatic approval, suspension or reinstatement.
+3. **Prospective/full controlled register**: both `is_active=true` and `false` states, CSV neutralization of formulas, 10k cap, complete tenant isolation and attributed export audit; user-visible empty/error handling.
+4. **CAR control effectiveness**: valid canonical profile + `EFFECTIVENESS_REVIEW` accepted/rejected/blocked/overdue/absent and verified CAP without completed effectiveness. Compare counts with original CAR control-loop source and prove no invented assessment. Repeat findings, warranty outcomes and actual operator authority remain separate.
+5. **Notification windows and transport truth**: vendor digest true/false versus global digest, source created before/after daily hour, quiet hours overlapping configured hour, differing tenant time zones and DST folds/gaps; requeue after suspension/revocation, interrupted Resend accept/commit and signed webhook bounce/delivered/open. Backend job `DELIVERED` means handoff, **not** inbox proof.
+6. **Rapid provider list navigation**: type three searches, change status/page/tenant during debounce, and resolve the oldest network response last. The UI must show only the newest authorized tenant's current list, never stale supplier data.
+7. **CI coverage matrix**: use the seven inspected workflow definitions recorded in `PHASE9_INVENTORIES.md` plus all matching job suites. Because GitHub path filters may miss later source areas, identify and run supplemental acceptance explicitly once Phase 10 is authorized.
+
+Do not start these checks or merge from Phase 9. Maintain all original `P9-01–P9-20` open risk gates until actual evidence closes them.

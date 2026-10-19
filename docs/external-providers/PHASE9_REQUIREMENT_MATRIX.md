@@ -77,3 +77,16 @@
 8. **Source trace**: Safarilink Issue 4 is a draft reference for tenant-specific procedures; actual adopted MOPM and statutory requirements need appointed post-holder approval. The original XLSX/XLSM supplier and contracts examples have not been reconciled against this source.
 
 **Gate:** This matrix is an honest source-status ledger, not declaration that Phases 1–9 are accepted. See \`PHASE9_RISK_REGISTER.md\` and \`PHASE10_VERIFICATION_LEDGER.md\`.
+
+
+### Late Phase 9 source remediation mapping (post-matrix review)
+
+| Matrix row | Corrective source | Status after correction |
+|---|---|---|
+| 5–7: workbook staging/import reconciliation | ZIP expanded-size/parts/ratio, sheet/column/cell and scanned-row guards added to `provider_import_router.py`. Original per-tenant source reconciliation and parallel load remain unproven. | **S**, unexecuted |
+| 36/38–39: portfolio, controlled register and Quality classification | Inactive/prospective lifecycle records retained in export/portfolio; verified evidence now checks `valid_from` and `valid_until` and tenant/provider; original Quality Manager decision remains authoritative. | **S**, unexecuted |
+| 32/34: digest and alert delivery | Member digest opt-in applied to email; quiet-hour overlap cannot starve daily digest; source outbox `DELIVERED` clarified as handoff rather than inbox status. | **P**, signed-provider delivery/retry proof pending |
+| 40: CAR effectiveness trends | Separate canonical `quality_car_milestones` outcomes now feed provider 360, including overdue, accepted, blocked and missing profile counts. Repeat-finding and warranty outcome trends remain incomplete. | **P**, remaining scopes explicitly open |
+| 1/36: frontend register workflow | Stale tenant/search/filter/page responses are discarded during debounce and after navigation. | **S**, browser regression required |
+
+This matrix retains its 42 original status rows and outstanding `P/G` cells. A source change is not a regulatory approval or a runtime PASS.

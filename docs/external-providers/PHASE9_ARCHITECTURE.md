@@ -45,3 +45,10 @@ External identities have opaque, revocable cookies and CSRF proof; grant+members
 ## Migration, API, and UI inventories
 
 See \`PHASE9_INVENTORIES.md\`. The requirement status is in \`PHASE9_REQUIREMENT_MATRIX.md\`, risks in \`PHASE9_RISK_REGISTER.md\`, and execution-only acceptance in \`PHASE10_VERIFICATION_LEDGER.md\`.
+
+
+## Post-review operational controls
+
+Workbook stages are compressed-length, expanded-archive and row/cell bounded before source rows are persisted. Independent Quality evidence is current only if both validity-start and validity-end allow the tenant's present date. The management-review projection separately derives CAR effectiveness from canonical CAR milestone acceptance, not from CAP verification time. Prospective/inactive suppliers remain in lifecycle distribution and controlled register, without becoming eligible for work. Provider email scheduling honors independent identity digest opt-in and tenant quiet hours without indefinite exact-hour starvation; acceptance by Resend must never be conflated with delivery or read. Frontend list request sequencing rejects stale tenant/filter data without periodic polling.
+
+No new canonical master, authorization, migration or QMS CAR entity was created by these corrections. The existing Phase 9 schema inventory remains the migration source of truth.

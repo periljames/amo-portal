@@ -98,3 +98,13 @@ Existing canonical Procurement/Stores, QMS Audit/CAR/DMS and Platform/Resend API
 - Hourly scheduler reuses application jobs; bounded date window and staff role SQL filter; still may scan hundreds of recent events and cannot guarantee no backlog loss in large tenants.
 - Controlled CSV synchronous export capped at 10,000 active suppliers; larger exports explicitly blocked pending asynchronous implementation.
 - Database timeout/deadlock, object store latency/large streaming download, long-lived worker recovery and in-flight request cancellation remain Phase 10 stress conditions.
+
+
+## F. Actual source-level Phase 9 corrections and CI review inventory
+
+- Import route: `provider_import_router.py` preview uses ZIP bounded expansion and per-row memory limits before retained raw/normalized JSON staging. Tenants remain resolved before all SQL, and the same staged import batch/row migrations are used; no new tables.
+- QMS supplier oversight: `provider_oversight_router.py` now uses independently governed `quality_car_control_profiles` and `quality_car_milestones` for effectiveness status and validates both ends of `quality_external_provider_evidence` validity. The full register retains `is_active`, status and risk for prospective/historical supplier rows. No new regulator decision schema or shadow CAR.
+- Provider notifications: `provider_alerts.py` uses saved `external_provider_alert_preferences.digest_enabled` and tenant-local eligible date/time plus quiet-hour requeue. `ProviderAlertSettingsPanel.tsx` distinguishes accepted/handed-off jobs from confirmed email delivery/read.
+- React register: `QmsExternalProvidersPage.tsx` invalidates earlier in-flight requests when search/filter/page or selected tenant changes, and avoids global polling.
+- Inspected but did not execute workflows: `.github/workflows/procurement-module-ci.yml`, `qms-external-draft-ci.yml`, `qms-car-control-loop-ci.yml`, `qms-live-audit-real-browser-ci.yml`, `document-control-lifecycle-ci.yml`, `platform-control-plane-ci.yml`, `platform-shared-storage-ci.yml`. Their definitions include PostgreSQL 16, migration graph/upgrade, backend pytest, frontend Vitest/lint/build/TypeScript-linked scripts, Playwright and storage probes. Path filters differ; Phase 10 must explicitly run missing coverage rather than infer that all checks fired from PR file changes.
+- GitHub connector returned **zero inline review threads and zero discussion comments** at review time; this does not prove Codex source defects or prior CI findings were absent, and unverified review findings remain an explicit Phase 10 gate.

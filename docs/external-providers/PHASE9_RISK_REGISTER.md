@@ -26,3 +26,15 @@
 | P9-20 | Medium | User configured quiet/digest without independently confirmed Resend domain authentication/spam inbox placement | Platform/Email | SPF/DKIM/DMARC, verified sender, Resend signed webhook, spam feedback; never mark handoff as read |
 
 **Decision:** Phase 9 source improvements are committed, but user-defined *material completion* gate cannot be certified while critical integration gaps and Phase10-only execution obligations remain. Leave PR #560 draft/unmerged. Do not silently weaken audit/CAR/Stores/technical authority to satisfy this list.
+
+
+## Source mitigations implemented after the original register (not acceptance closure)
+
+- `P9-14`: spreadsheet expanded-size, archive structure, scanned-row, cell, worksheet and column resource gates added; original source-workbook format parity still blocked.
+- `P9-07/P9-12`: Quality classification now requires currently effective independently VERIFIED evidence (both validity dates); inactive supplier rows no longer disappear from the register. Tenant RLS and human approval behavior still require production-like PostgreSQL verification.
+- `P9-11`: vendor digest preference is wired; local-day scheduling no longer starves when configured digest hour falls within quiet hours. DST/fold, signed delivery, retries and timezone policy require Phase 10 proof.
+- `P9-12`: source-derived CAR effectiveness milestone counts added, distinct from CAP verification. Repeat finding common-cause and warranty success rates still lack verified authoritative definitions.
+- `P9-18`: stale debounced provider-list responses are discarded; browser navigation and multi-tenant visual acceptance remain pending.
+- `P9-19`: seven repository workflow definitions and available review feeds inspected without execution. No inline review threads returned, **not** a proof of clean Codex or CI.
+
+All original high/critical risks remain open where only runtime, regulated-person review, external systems or a missing source workflow can resolve them.
