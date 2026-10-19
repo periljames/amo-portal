@@ -394,14 +394,21 @@ def purchase_order(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(
 def purchase_order_documents(tenant_slug:str,po_id:int,request:Request,db:Session=Depends(get_db)):
     user,ctx=_session(db,request,tenant_slug)
     _po(db,ctx,po_id)
-    # Only explicit partner-releasable DMS revision IDs; no internal attachments.
+    # Both the commercial PO and its controlled original need independent
+    # member grants. Metadata/listing must not disclose an unassigned DMS
+    # document that a direct download correctly denies.
+    allowed_documents=partner._allowed(user,"documents")
+    if not allowed_documents:
+        return {"items":[]}
     return {"items":_rows(db,"""SELECT d.id,d.title,d.document_type,d.document_number,d.revision,
        d.dms_document_id,d.dms_revision_id
        FROM procurement_documents d WHERE d.amo_id=:amo
          AND d.entity_type='PURCHASE_ORDER' AND d.entity_id=:id
          AND d.source='DMS_CONTROLLED' AND d.status='ACTIVE'
          AND d.dms_document_id IS NOT NULL AND d.dms_revision_id IS NOT NULL
-       ORDER BY d.uploaded_at""",amo=ctx["amo"],id=str(po_id))}
+         AND CAST(d.dms_document_id AS TEXT) IN :scoped
+       ORDER BY d.uploaded_at""",amo=ctx["amo"],id=str(po_id),
+       scoped=sorted(allowed_documents))}
 
 @partner_router.get("/purchase-orders/{po_id}/documents/{document_id}/download")
 def po_document(tenant_slug:str,po_id:int,document_id:int,request:Request,db:Session=Depends(get_db)):

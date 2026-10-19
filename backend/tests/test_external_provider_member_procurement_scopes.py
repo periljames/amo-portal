@@ -124,3 +124,40 @@ def test_malformed_scopes_return_validation_error(scope):
     with pytest.raises(HTTPException) as bad:
         access._scope(scope)
     assert bad.value.status_code == 422
+
+
+@pytest.mark.parametrize("documents", [[], ["doc-assigned"]])
+def test_po_document_listing_requires_separate_exact_dms_grant(monkeypatch, documents):
+    user = {"object_scope_json": {"documents": documents}}
+    monkeypatch.setattr(commerce, "_session", lambda *a, **k: (user, _ctx()))
+    monkeypatch.setattr(commerce, "_po", lambda *a, **k: {"id": 31})
+    queries = []
+    def listing(db, sql, **params):
+        queries.append((sql, params))
+        return []
+    monkeypatch.setattr(commerce, "_rows", listing)
+    result = commerce.purchase_order_documents("tenant-a", 31, object(), object())
+    assert result["items"] == []
+    if not documents:
+        assert queries == []
+    else:
+        assert len(queries) == 1
+        sql, params = queries[0]
+        assert "CAST(d.dms_document_id AS TEXT) IN :scoped" in sql
+        assert params["scoped"] == documents
+        assert params["amo"] == "tenant-a"
+
+
+def test_legacy_partner_procurement_summary_is_denied_without_transaction_scopes(monkeypatch):
+    from amodb.apps.procurement import external_partner_router as partner
+    user = {
+        "amo_id": "tenant-a", "supplier_id": 7,
+        "tenant_provider_id": "provider-a", "identity_id": "person-a",
+        "object_scope_json": {}, "capabilities_json": ["task.read"],
+    }
+    monkeypatch.setattr(partner, "_ctx", lambda *a, **k: user)
+    monkeypatch.setattr(partner, "_rows_compiled",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("unscoped query")))
+    result = partner.procurement("tenant-a", object(), object(), limit=20, offset=0)
+    assert result["rfqs"]["items"] == []
+    assert result["purchase_orders"]["items"] == []
