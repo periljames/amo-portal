@@ -318,8 +318,8 @@ def _schedule_expiries(db, amo, local_now, zone, policy):
     # Purchase order acknowledgements are tracked against canonical supplier
     # acknowledgement, never against manually-entered frontend badge states.
     for row in _rows(db, """SELECT id,supplier_id,sent_at FROM procurement_purchase_orders
-       WHERE amo_id=:amo AND sent_at IS NOT NULL AND supplier_ack_reference IS NULL
-         AND status NOT IN ('CANCELLED','CLOSED') ORDER BY sent_at DESC LIMIT 200""",amo=amo):
+       WHERE amo_id=:amo AND sent_at IS NOT NULL AND supplier_ack_reference IS NULL AND acknowledged_at IS NULL
+         AND status NOT IN ('CANCELLED','CLOSED','ACKNOWLEDGED','FULFILLED') ORDER BY sent_at DESC LIMIT 200""",amo=amo):
         sent = _utc(row["sent_at"])
         if sent and _local_day(sent,zone)<=today:
             count += _queue(db,amo=amo,event="procurement.po_ack_due",source="po_ack",
@@ -456,10 +456,14 @@ def _scan_contracted_work_deadlines(db,amo,local_now,zone,policy):
                 trigger=due_date+timedelta(days=overdue)
                 if trigger!=today:
                     continue
+                # A missed deadline must not be announced before the
+                # actual promised timestamp on the same local day.
+                at=datetime.combine(trigger,time(8),zone)
+                if overdue==0:
+                    at=max(at,due.astimezone(zone))
                 count+=_queue(db,amo=amo,event=event,source="maintenance_due",
                               source_id=row["id"],stamp=f"{field}:{requirements[field]}:{overdue}",
-                              supplier=row["supplier_id"],
-                              due=datetime.combine(trigger,time(8),zone).astimezone(timezone.utc),
+                              supplier=row["supplier_id"],due=at.astimezone(timezone.utc),
                               cancel_older=True)
     return count
 
@@ -493,18 +497,26 @@ def _still_current(db, amo, row, zone):
     if source=="po_ack":
         found=db.execute(text("""SELECT id FROM procurement_purchase_orders
              WHERE amo_id=:amo AND id=:id AND sent_at IS NOT NULL
-             AND supplier_ack_reference IS NULL AND status NOT IN ('CANCELLED','CLOSED')"""),
+             AND supplier_ack_reference IS NULL AND acknowledged_at IS NULL
+             AND status NOT IN ('CANCELLED','CLOSED','ACKNOWLEDGED','FULFILLED')"""),
              {"amo":amo,"id":row["source_id"]}).first()
         return found is not None
     if source=="maintenance_due":
         result=db.execute(text("""SELECT status,requirements_json FROM external_contracted_work
             WHERE amo_id=:amo AND id=:id"""),{"amo":amo,"id":row["source_id"]}).mappings().first()
-        if not result or result["status"] in ("CLOSED","CANCELLED"):
+        if not result:
             return False
         requirements=result["requirements_json"] or {}
-        return any(str(row["source_stamp"]).startswith(f"{key}:{requirements.get(key)}:")
-                   for key in ("provider_ack_due_at","expected_completion_at")
-                   if requirements.get(key))
+        allowed={
+            "provider_ack_due_at": {"DISPATCHED"},
+            "expected_completion_at": {"DISPATCHED","PROVIDER_ACCEPTED","IN_PROGRESS",
+                                       "ADDITIONAL_WORK_REQUESTED","ON_HOLD"},
+        }
+        # Completed acknowledgement, changed ETA or closure supersedes
+        # outstanding reminders even when the old scheduled date persists.
+        return any(result["status"] in states
+                   and str(row["source_stamp"]).startswith(f"{field}:{requirements.get(field)}:")
+                   for field,states in allowed.items() if requirements.get(field))
     return True
 
 
@@ -639,12 +651,26 @@ def _dispatch(db, amo, code, zone, policy, now):
                     continue
                 email = mail_service.send_email("provider.lifecycle",getattr(recipient,"email",None),
                     "External provider action requires review",
-                    {"summary":message, "url":_allowed_link(code,job)},job["fingerprint"],
+                    {"summary":message, "url":_allowed_link(code,job)},
+                    job["fingerprint"]+":"+str(job["attempts"]),
                     amo_id=amo,db=db,recipient_user_id=str(recipient.id),
                     audit_context={"event_key":job["event_key"],"job_id":job["id"]})
                 db.execute(text("""UPDATE external_provider_alert_jobs
                    SET email_log_id=:log WHERE id=:id"""),{"log":str(email.id),"id":job["id"]})
                 delivery_state = str(getattr(email.status,"value",email.status))
+                if delivery_state=="SKIPPED_BY_PREFERENCE":
+                    # An email suppressed by existing user preferences
+                    # is not counted as a delivered email. A valid in-app
+                    # notice may still be visible in the shared center.
+                    has_notice=bool(job["in_app_id"] or (
+                        channels.get("in_app",True) and partner_in_app))
+                    db.execute(text("""UPDATE external_provider_alert_jobs SET
+                        status=:status,delivered_at=CASE WHEN :notice THEN NOW()
+                          ELSE NULL END,updated_at=NOW() WHERE id=:id"""),
+                        {"status":"DELIVERED" if has_notice else "CANCELLED",
+                         "notice":has_notice,"id":job["id"]})
+                    savepoint.commit()
+                    continue
                 if delivery_state in ("FAILED","SKIPPED_NO_PROVIDER","QUEUED"):
                     attempts=int(job["attempts"])+1
                     db.execute(text("""UPDATE external_provider_alert_jobs
