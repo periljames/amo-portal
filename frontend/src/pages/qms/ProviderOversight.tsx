@@ -24,6 +24,7 @@ type Profile={supplier:{legal_name:string;risk_level:string;status:string};
   lifecycle_snapshots:{action:string;previous_status:string|null;current_status:string;risk_level:string;occurred_at:string}[];
   special_classification:{critical_service:boolean;sole_source:boolean;reason:string;revision:number}|null;
   qms_assurance:{findings:number;open_cars:number;overdue_cars:number;verified_caps:number};
+  car_effectiveness:{required:number;accepted:number;rejected_or_blocked:number;overdue:number;without_control_profile:number};
   finding_months:{month:string;total:number}[];
   limitations:string[];as_of:string;computed_not_approval:boolean};
 function value(n:number|string|null|undefined):string{
@@ -188,7 +189,12 @@ export default function ProviderOversight({amoCode,supplierId,evidenceOptions}:{
       <h4>QMS assurance and findings trend</h4>
       <div className="qms-provider-summary">
         <Stat label="Open linked CARs" content={data.qms_assurance.open_cars}/>
-        <Stat label="CAP verification records" content={data.qms_assurance.verified_caps}/>
+        <Stat label="CAP verification records (not effectiveness)" content={data.qms_assurance.verified_caps}/>
+        <Stat label="CAR effectiveness reviews required" content={data.car_effectiveness.required}/>
+        <Stat label="Effectiveness accepted or completed" content={data.car_effectiveness.accepted}/>
+        <Stat label="Effectiveness overdue" content={data.car_effectiveness.overdue}/>
+        <Stat label="Effectiveness rejected or blocked" content={data.car_effectiveness.rejected_or_blocked}/>
+        <Stat label="CARs without control-loop profile" content={data.car_effectiveness.without_control_profile}/>
       </div>
       <Table head={["Finding month","Finding count"]}
         items={data.finding_months.map(r=>[r.month,r.total])}/>
