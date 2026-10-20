@@ -12,6 +12,15 @@ const MAX_MOUNTED_PDF_PAGES = 30;
 
 let materialBrowserErrors: string[] = [];
 
+// Authentication is verified via the real login endpoint once. Reuse the
+// resulting short-lived bearer/session state across fresh browser contexts to
+// avoid treating a serial 21-case acceptance suite as a login brute-force.
+// This does not disable or change the production authentication rate limiter.
+let verifiedAdminSession: {
+  local: Array<[string, string]>;
+  session: Array<[string, string]>;
+} | null = null;
+
 test.use({
   viewport: { width: 1440, height: 900 },
   ignoreHTTPSErrors: true,
@@ -38,6 +47,20 @@ function watchMaterialBrowserErrors(page: Page): void {
 }
 
 async function signIn(page: Page): Promise<void> {
+  if (verifiedAdminSession) {
+    const state = verifiedAdminSession;
+    await page.addInitScript(({ local, session }) => {
+      for (const [key, value] of local) window.localStorage.setItem(key, value);
+      for (const [key, value] of session) window.sessionStorage.setItem(key, value);
+    }, state);
+    await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/document-control`);
+    await expect(page.getByTestId("document-control-home")).toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
+      { timeout: 10_000 },
+    ).toBe(true);
+    return;
+  }
   await page.context().clearCookies();
   await page.goto(`/maintenance/${encodeURIComponent(AMO_CODE)}/login`);
   await page.evaluate(() => {
@@ -57,6 +80,12 @@ async function signIn(page: Page): Promise<void> {
     () => page.evaluate(() => Boolean(sessionStorage.getItem("amo_portal_token"))),
     { timeout: 10_000 },
   ).toBe(true);
+  // Capture only the session produced by a real, successful browser login.
+  // New Playwright contexts are still isolated; no password or auth bypass.
+  verifiedAdminSession = await page.evaluate(() => ({
+    local: Object.entries(window.localStorage),
+    session: Object.entries(window.sessionStorage),
+  }));
 }
 
 function futureLocalDateTime(hours = 2): string {

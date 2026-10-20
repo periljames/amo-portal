@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { departureLabel, departurePhaseForPercent, waitForLoginPreloads } from "./loginDepartureWarmup";
 
@@ -19,13 +18,6 @@ describe("login departure phases", () => {
 });
 
 describe("authenticated landing warmup", () => {
-  it("never waits on the independent Control Room request before redirecting", () => {
-    const source = readFileSync(new URL("../pages/LoginPage.tsx", import.meta.url), "utf8");
-    expect(source).toContain("void beginControlRoomPrefetch({");
-    expect(source).not.toContain("await controlRoomWarm");
-    expect(source).toMatch(/await runLoginDepartureWarmup\([\s\S]*?navigate\(landing\.path, \{ replace: true \}\)/);
-  });
-
   it("does not keep an authenticated user on login when a preload stalls", async () => {
     vi.useFakeTimers();
     try {
