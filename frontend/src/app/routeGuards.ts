@@ -118,6 +118,16 @@ export function userHasQmsRolePermission(
     return user.capability_codes.includes(permission);
   }
 
+  // Appointed technical and Safety post-holders need provider qualification
+  // visibility for their own review. This is NOT QMS decision authority.
+  if ([
+    "BASE_MAINTENANCE_MANAGER",
+    "LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER",
+    "SAFETY_MANAGER",
+  ].includes(user.role)) {
+    return permission === "qms.supplier.view";
+  }
   if (user.role === "QUALITY_MANAGER") return permission.startsWith("qms.");
   if (user.role === "ACCOUNTABLE_EXECUTIVE") return QMS_ACCOUNTABLE_EXECUTIVE_PERMISSIONS.has(permission);
   if (user.role === "QUALITY_OFFICER") return QMS_OFFICER_PERMISSIONS.has(permission);

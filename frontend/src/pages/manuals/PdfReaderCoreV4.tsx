@@ -94,7 +94,7 @@ const PdfDocument = Document as unknown as FC<Record<string, unknown>>;
 const PdfPage = Page as unknown as FC<Record<string, unknown>>;
 const PAGE_GAP = 18;
 const PAGE_TOP_INSET = 14;
-const NAVIGATION_TIMEOUT_MS = 4_000;
+const NAVIGATION_TIMEOUT_MS = 12_000;
 
 type PdfDocumentHandle = {
   numPages: number;
@@ -271,6 +271,7 @@ function VirtualPdfPage({
   onFormDetected,
   onEdited,
   onTextReady,
+  onPageReady,
   resolveInternalPage,
   onInternalPage,
 }: {
@@ -290,6 +291,7 @@ function VirtualPdfPage({
   onFormDetected: (page: number) => void;
   onEdited: (page: number) => void;
   onTextReady: (page: number) => void;
+  onPageReady: (page: number) => void;
   resolveInternalPage: (target: PdfItemClickTarget) => Promise<number | null>;
   onInternalPage: (page: number) => void;
 }) {
@@ -455,6 +457,7 @@ function VirtualPdfPage({
           onRenderSuccess={() => {
             setFailed("");
             setReady(true);
+            onPageReady(page);
           }}
           onRenderError={(error: unknown) => {
             setReady(false);
@@ -510,6 +513,7 @@ export default function PdfReaderCoreV4({
   const dirtyRef = useRef(false);
   const editedPagesRef = useRef<number[]>([]);
   const currentPageRef = useRef(Math.max(1, initialPage));
+  const appliedExternalNavigationRef = useRef("");
   const documentLoadedRef = useRef(false);
   const pendingPageRef = useRef<number | null>(null);
   const navigationTimerRef = useRef<number | null>(null);
@@ -550,6 +554,9 @@ export default function PdfReaderCoreV4({
     setSearchOpen(true);
   }, [initialSearchQuery]);
   const [hotIndexes, setHotIndexes] = useState<number[]>([]);
+  // A requested distant page must remain mounted while the virtualizer catches
+  // up with the scroll offset and PDF.js completes its first raster.
+  const [navigationTarget, setNavigationTarget] = useState<number | null>(null);
   const [fastScrolling, setFastScrolling] = useState(false);
   const fastScrollingRef = useRef(false);
   const scrollSettleTimerRef = useRef<number | null>(null);
@@ -604,8 +611,11 @@ export default function PdfReaderCoreV4({
   const rangeExtractor = useCallback((range: Range) => {
     const visible = defaultRangeExtractor(range);
     const retained = hotIndexes.filter((index) => index >= 0 && index < pageCount);
-    return [...new Set([...visible, ...retained])].sort((left, right) => left - right);
-  }, [hotIndexes, pageCount]);
+    const target = navigationTarget !== null && navigationTarget >= 1 && navigationTarget <= pageCount
+      ? [navigationTarget - 1]
+      : [];
+    return [...new Set([...visible, ...retained, ...target])].sort((left, right) => left - right);
+  }, [hotIndexes, navigationTarget, pageCount]);
 
   const virtualizer = useVirtualizer({
     count: pageCount,
@@ -638,7 +648,15 @@ export default function PdfReaderCoreV4({
 
   const publishPhysicalPage = useCallback((page: number) => {
     const next = clampPdfValue(page, 1, Math.max(1, pageCount));
-    settleNavigation(next);
+    // A virtualizer estimate can reach page N before PDF.js has rendered it.
+    // Clearing the pending jump at that point lets a subsequent scroll defer
+    // and evict N, bouncing a 2,000-page reader back to page 1.
+    if (pendingPageRef.current === next) {
+      const readyPage = viewportRef.current?.querySelector<HTMLElement>(
+        `.pdfv3-page[data-page-number="${next}"].is-ready`,
+      );
+      if (readyPage && pageIsAtReadingLine(next)) settleNavigation(next);
+    }
     if (next === currentPageRef.current) return;
     currentPageRef.current = next;
     setCurrentPage(next);
@@ -657,9 +675,12 @@ export default function PdfReaderCoreV4({
           .slice(0, profile.hotPageLimit);
       });
     }
-  }, [onPageChange, pageCount, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
+  }, [onPageChange, pageCount, pageIsAtReadingLine, profile.hotPageLimit, profile.renderRadius, settleNavigation]);
 
   const synchronizePhysicalPage = useCallback(() => {
+    // Do not let a transient virtualizer range at the old scroll offset
+    // reset an explicit distant-page request before the target has rendered.
+    if (pendingPageRef.current !== null) return;
     const viewport = viewportRef.current;
     if (!viewport || !pageCount) return;
     const anchor = viewport.scrollTop + PAGE_TOP_INSET;
@@ -682,6 +703,13 @@ export default function PdfReaderCoreV4({
   }, [synchronizePhysicalPage]);
 
   const handleViewportScroll = useCallback(() => {
+    // A programmatic deep jump generates scroll events while virtual row
+    // measurements settle. Unlike a user fling it MUST continue rendering
+    // its requested PDF page instead of entering fast-scroll defer mode.
+    if (pendingPageRef.current !== null) {
+      schedulePhysicalSync();
+      return;
+    }
     if (!fastScrollingRef.current) {
       fastScrollingRef.current = true;
       setFastScrolling(true);
@@ -713,17 +741,25 @@ export default function PdfReaderCoreV4({
     if (!pageCount) return;
     const page = clampPdfValue(requested, 1, pageCount);
     pendingPageRef.current = page;
+    setNavigationTarget(page);
+    fastScrollingRef.current = false;
+    setFastScrolling(false);
+    currentPageRef.current = page;
+    setCurrentPage(page);
+    setPageInput(String(page));
+    onPageChange?.(page);
     setActionError("");
 
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
     navigationTimerRef.current = window.setTimeout(() => {
       window.requestAnimationFrame(() => {
-        synchronizePhysicalPage();
-        if (currentPageRef.current === page || pageIsAtReadingLine(page)) {
+        if (currentPageRef.current === page && pageIsAtReadingLine(page)) {
           settleNavigation(page);
         } else if (pendingPageRef.current === page) {
           pendingPageRef.current = null;
+          setNavigationTarget((current) => current === page ? null : current);
           setActionError(`Page ${page} could not be brought into view. Retry the navigation action.`);
+          synchronizePhysicalPage();
         }
         navigationTimerRef.current = null;
       });
@@ -736,6 +772,7 @@ export default function PdfReaderCoreV4({
     });
   }, [
     pageCount,
+    onPageChange,
     pageIsAtReadingLine,
     schedulePhysicalSync,
     settleNavigation,
@@ -959,10 +996,14 @@ export default function PdfReaderCoreV4({
   }, []);
 
   useEffect(() => {
-    if (navigationRequest?.page && pageCount) {
-      jump(navigationRequest.page, "auto");
-    }
-  }, [jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
+    if (!navigationRequest?.page || !pageCount) return;
+    const commandKey = `${fileUrl}:${navigationRequest.token}:${navigationRequest.page}`;
+    // A changing PDF measurement/virtualizer callback must not replay the
+    // same external navigation and restart an otherwise successful jump.
+    if (appliedExternalNavigationRef.current === commandKey) return;
+    appliedExternalNavigationRef.current = commandKey;
+    jump(navigationRequest.page, "auto");
+  }, [fileUrl, jump, navigationRequest?.page, navigationRequest?.token, pageCount]);
 
   useEffect(() => {
     if (!pageCount) return;
@@ -993,6 +1034,7 @@ export default function PdfReaderCoreV4({
     setPageOriginalWidths({});
     setLoadError("");
     setHotIndexes([restored - 1]);
+    setNavigationTarget(null);
 
     if (pdf.annotationStorage) {
       pdf.annotationStorage.onSetModified = () => markEdited(currentPageRef.current);
@@ -1610,6 +1652,19 @@ export default function PdfReaderCoreV4({
       <div
         ref={viewportRef}
         className="pdfv3-viewport"
+        onWheelCapture={() => {
+          // Physical scrolling is an explicit user navigation decision. A
+          // preceding Contents/deep-link jump must not retain authority over
+          // the visible page when the reader starts scrolling manually.
+          if (pendingPageRef.current !== null) {
+            pendingPageRef.current = null;
+            setNavigationTarget(null);
+            if (navigationTimerRef.current !== null) {
+              window.clearTimeout(navigationTimerRef.current);
+              navigationTimerRef.current = null;
+            }
+          }
+        }}
         onScroll={handleViewportScroll}
       >
         {loadError ? (
@@ -1690,6 +1745,25 @@ export default function PdfReaderCoreV4({
                       onAcroFormDetected?.(true);
                     }}
                     onEdited={markEdited}
+                    onPageReady={(pageNumber) => {
+                      if (navigationTarget !== pageNumber) return;
+                      // Keep the destination pinned in the bounded virtual
+                      // range until the physical viewport reaches its reading
+                      // line. PDF.js raster completion alone does not establish
+                      // a stable scroll index in a 2,000-page document.
+                      window.requestAnimationFrame(() => {
+                        virtualizer.scrollToIndex(pageNumber - 1, { align: "start", behavior: "auto" });
+                        window.requestAnimationFrame(() => {
+                          if (pendingPageRef.current !== pageNumber) return;
+                          if (!pageIsAtReadingLine(pageNumber)) {
+                            virtualizer.scrollToIndex(pageNumber - 1, { align: "start", behavior: "auto" });
+                            return;
+                          }
+                          settleNavigation(pageNumber);
+                          setNavigationTarget((target) => target === pageNumber ? null : target);
+                        });
+                      });
+                    }}
                     onTextReady={(pageNumber) => {
                       if (activeResult?.page === pageNumber) {
                         window.requestAnimationFrame(() => revealSearchResult(activeResult));

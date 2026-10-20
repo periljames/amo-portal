@@ -86,4 +86,21 @@ describe("QMS role permission boundaries", () => {
     expect(userHasQmsRolePermission(user("AMO_ADMIN", { is_amo_admin: true }), "qms.authorization.exemption.approve")).toBe(true);
     expect(userHasQmsRolePermission(user("VIEW_ONLY"), "qms.reports.attest_authority")).toBe(false);
   });
+  it("lets appointed technical and Safety managers read supplier scope without Quality decisions", () => {
+    for (const role of [
+      "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER",
+      "WORKSHOP_MANAGER", "SAFETY_MANAGER",
+    ] as const) {
+      expect(userHasQmsRolePermission(user(role), "qms.supplier.view")).toBe(true);
+      expect(userHasQmsRolePermission(user(role), "qms.supplier.manage")).toBe(false);
+      expect(userHasQmsRolePermission(user(role), "qms.audit.manage")).toBe(false);
+      expect(userHasQmsRolePermission(user(role), "qms.dashboard.view")).toBe(false);
+    }
+  });
+
+  it("honors explicit tenant module removal before granting cross-functional supplier access", () => {
+    const reviewer = user("SAFETY_MANAGER", { module_access: {} as PortalUser["module_access"] });
+    expect(userHasQmsRolePermission(reviewer, "qms.supplier.view")).toBe(false);
+  });
+
 });

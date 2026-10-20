@@ -733,7 +733,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setFindingDraft(current => current?.item.checklist_item_id === draft.item.checklist_item_id ? null : current);
       setParkedFindings((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setLocalError(null);
-      setSyncNotice("Finding saved and linked to this question.");
+      setSyncNotice("Finding, checklist response and governed CAR/task consequences committed as one authoritative transaction.");
       setPendingChoices((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setNoteDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
       setSampleDrafts((current) => { const next = { ...current }; delete next[draft.item.checklist_item_id]; return next; });
@@ -1082,6 +1082,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 }} aria-label="Close question details">Close details <X size={15} /></button>
                 <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
               </div>
+              <h3 className="qms-live-audit-focus__question-prompt">{selected.prompt}</h3>
               <div className="qms-live-audit-focus__question-subline">
                 <strong>{selected.checklist_ref || selected.requirement_ref || "Governed question"}</strong>
                 <span data-status={selected.canonical_response_status}>{statusLabel(selected.canonical_response_status)} · v{selected.entity_version}</span>
@@ -1134,7 +1135,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <details className="audit-question-history-panel"><summary>Previous evidence & corrective actions</summary>
                 <QuestionAuditHistory amoCode={amoCode} auditId={auditId} itemId={selected.checklist_item_id} checklistRef={selected.checklist_ref} requirementRef={selected.requirement_ref} />
               </details>
-              <details className="audit-question-assessment"><summary>Assessment & verification controls</summary>
+              <details open className="audit-question-assessment"><summary>Assessment & verification controls</summary>
               <section className="qms-live-audit-focus__entry" aria-label="Auditor checklist entry">
                 <div className="qms-live-audit-focus__entry-heading"><div><h3>Record assessment</h3><p>Choose the governed response, then document what was inspected or verified. NCR and observation responses open the finding composer.</p></div></div>
               <div className="qms-live-audit-focus__responses" role="group" aria-label="Governed checklist response">
@@ -1381,10 +1382,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <summary><Eye size={14} /> Auditee viewing <b>{auditeePresence.length}</b></summary>
             <small>{auditeePresence.length ? auditeePresence.map((entry) => entry.display_name).join(", ") : "No auditee guest with progress/presence scope is currently active."}</small>
           </details>
-          <details className="qms-live-audit-focus__summary-details" id="audit-occurrence-findings">
-            <summary><FileWarning size={14} /> Findings <b>{findings.length}</b></summary>
-            <ul>{findings.slice(0, 6).map((finding) => <li key={finding.id}><strong>{finding.finding_ref || finding.level}{finding.closed_at ? " · Closed" : ""}</strong><small>{finding.description}</small></li>)}</ul>
-          </details>
           <details className="qms-live-audit-focus__summary-details">
             <summary><ShieldAlert size={14} /> Auditee release boundary</summary>
             <p>Released-data boundary active. Auditees receive only server-released findings and permitted progress/evidence projections; private checklist notes remain internal.</p>
@@ -1435,7 +1432,20 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <span>Finding drafts</span>{Object.values(parkedFindings).map(draft => <button type="button" key={draft.item.checklist_item_id} onClick={() => { setLocalError(null); setFindingDraft(draft); }}>Question {draft.item.checklist_ref || itemNumberById.get(draft.item.checklist_item_id)}</button>)}
       </div> : null}
       {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
-
+      {/* Findings are governed audit records, not an internal team-presence
+          submenu. Keep their disclosure independently visible and reachable
+          after a successful atomic finding/CAR transaction. */}
+      <section className="qms-live-audit-focus__sync-notice" aria-label="Fieldwork finding records">
+        <details className="qms-live-audit-focus__summary-details" id="audit-occurrence-findings">
+          <summary><FileWarning size={14} /> Findings <b>{findings.length}</b></summary>
+          {findings.length ? (
+            <ul>{findings.slice(0, 6).map((finding) => <li key={finding.id}>
+              <strong>{finding.finding_ref || finding.level}{finding.closed_at ? " · Closed" : ""}</strong>
+              <small>{finding.description}</small>
+            </li>)}</ul>
+          ) : <p>No findings have been recorded for this occurrence.</p>}
+        </details>
+      </section>
 
       <div className={`qms-live-audit-focus__body${detailOpen && selected ? " is-detail-open" : ""}`}>
         <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">

@@ -35,6 +35,7 @@ describe("admin user workflow regressions", () => {
     expect(createPage).toContain("Standing AMO Administrator");
     expect(createPage).toContain("isSuperuser && !creatingPlatformSuperuser ? standingAmoAdmin : false");
     expect(detailPage).toContain("isPlatformSuperuser && !user.is_superuser ? profileStandingAdmin : undefined");
-    expect(detailPage).toContain("Only the platform superuser can grant or revoke");
+    expect(detailPage).toContain("The platform superuser appoints standing administrators permanently");
+    expect(detailPage).toContain("this AMO’s Accountable Executive can revoke administrator access");
   });
 });

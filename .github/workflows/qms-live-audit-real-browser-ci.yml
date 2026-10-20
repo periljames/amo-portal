@@ -58,7 +58,9 @@ jobs:
       PYTHONPATH: backend
       VITE_API_PROXY_TARGET: http://127.0.0.1:8080
       VITE_ALLOWED_HOSTS: 127.0.0.1,localhost
-      E2E_BASE_URL: http://127.0.0.1:4173
+      E2E_BASE_URL: http://localhost:4173
+      QMS_WEBAUTHN_RP_ID: localhost
+      QMS_WEBAUTHN_EXPECTED_ORIGINS: http://localhost:4173
       E2E_QMS_LIVE_FIXTURE: /tmp/qms-live-audit-real-e2e.json
     steps:
       - uses: actions/checkout@v6
@@ -110,11 +112,11 @@ jobs:
             if [ "$attempt" -eq 60 ]; then cat /tmp/qms-live-real-backend.log; exit 1; fi
             sleep 1
           done
-          (cd frontend && nohup npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/qms-live-real-frontend.log 2>&1 & echo $! > /tmp/qms-live-real-frontend.pid)
+          (cd frontend && nohup npm run preview -- --host localhost --port 4173 > /tmp/qms-live-real-frontend.log 2>&1 & echo $! > /tmp/qms-live-real-frontend.pid)
           for attempt in $(seq 1 60); do
             # Exercise the public React navigation with the same HTML Accept header
             # used by a browser. JSON APIs for this workspace live under /quality/*.
-            if curl --silent --fail -H 'Accept: text/html' http://127.0.0.1:4173/qms/audit-access >/dev/null; then break; fi
+            if curl --silent --fail -H 'Accept: text/html' http://localhost:4173/qms/audit-access >/dev/null; then break; fi
             if [ "$attempt" -eq 60 ]; then cat /tmp/qms-live-real-frontend.log; exit 1; fi
             sleep 1
           done

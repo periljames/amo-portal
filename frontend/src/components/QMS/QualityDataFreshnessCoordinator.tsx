@@ -173,6 +173,8 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       if (timer !== undefined) return;
       timer = window.setTimeout(() => {
         timer = undefined;
+        // Invalidate the request cache before refreshing the authoritative QMS occurrence.
+        clearQmsApiResponseCache();
         const events = fullRefresh ? undefined : pendingEvents;
         pendingEvents = []; fullRefresh = false;
         void invalidateOccurrence(occurrenceMarkers(), events);

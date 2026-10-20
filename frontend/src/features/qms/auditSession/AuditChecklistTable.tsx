@@ -69,7 +69,7 @@ const ChecklistRow = memo(function ChecklistRow({ item, choices, columns, value,
             </td>
             <td className="audit-checklist-table__details"><button type="button" aria-expanded={expanded}
               data-detail-item={item.checklist_item_id} aria-controls={detailsId}
-              aria-label={`Evidence and details for question ${number}`} onClick={() => actions.current.onOpenDetails(item)}><span>{expanded ? "Close" : "Details"}</span>{item.evidence_references?.length ? <span>{item.evidence_references.length}</span> : null}{expanded ? <ChevronUp size={13} aria-hidden /> : <ArrowUpRight size={13} aria-hidden />}</button></td>
+              aria-label={`Details for question ${number}`} title="Evidence and response details" onClick={() => actions.current.onOpenDetails(item)}><span>{expanded ? "Close" : "Details"}</span>{item.evidence_references?.length ? <span>{item.evidence_references.length}</span> : null}{expanded ? <ChevronUp size={13} aria-hidden /> : <ArrowUpRight size={13} aria-hidden />}</button></td>
           </tr>
           {expanded && details ? <tr className="audit-checklist-table__context-row"><td colSpan={span}>{details}</td></tr> : null}</>;
 }, (previous, next) => (Object.keys(previous) as Array<keyof RowProps>).every(key => key === "attachments" ? sameAttachment(previous.attachments, next.attachments) : previous[key] === next[key]) && Object.keys(previous).length === Object.keys(next).length);

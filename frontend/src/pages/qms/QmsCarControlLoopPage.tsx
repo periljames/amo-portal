@@ -244,7 +244,7 @@ const QmsCarControlLoopPage: React.FC = () => {
         {actionMessage ? <div className="alert alert--success" role="status">{actionMessage}</div> : null}
 
         <section className="card">
-          <div className="card__header"><div><h2>Ownership & closure readiness</h2></div></div>
+          <div className="card__header"><div><h2>Ownership & accountability</h2></div></div>
           <div className="stats-grid">
             <div><span className="muted">Health</span><strong>{humanize(control.health.state)}</strong></div>
             <div><span className="muted">Risk score</span><strong>{control.health.risk_score}/100</strong></div>

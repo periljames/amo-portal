@@ -10,7 +10,7 @@ import { saveDownloadedFile } from "../../utils/downloads";
 import { caseDate, carNextAction } from "./carCaseModel";
 import "./caseWorkspace.css";
 
-export const findingIsObservation = (finding: QMSFindingOut) => finding.level === "LEVEL_4" || finding.finding_type === "OBSERVATION";
+const findingIsObservation = (finding: QMSFindingOut) => finding.level === "LEVEL_4" || finding.finding_type === "OBSERVATION";
 
 export default function FindingCaseView({finding, car, amoCode}: {finding:QMSFindingOut;car:CAROut|null;amoCode:string}) {
   const observation=findingIsObservation(finding);

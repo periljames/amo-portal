@@ -505,3 +505,9 @@ body[data-color-scheme="light"] .pdfv4-reader .pdfv3-offline-menu summary[data-s
     transition: none;
   }
 }
+
+/* The printable control retains readable contrast even when a global
+   disabled/button style has greater specificity than reader theme styles. */
+.pdfv5-shell .pdfv4-reader .pdfv3-toolbar button[aria-label="Print PDF"] {
+  color: var(--pdfv4-toolbar-text) !important;
+}

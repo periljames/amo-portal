@@ -15,6 +15,7 @@ const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
+const ContractedWorkModule = lazy(() => import("./pages/maintenance/ContractedWorkModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -232,7 +233,7 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlReportsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlAdministrationPage /></WorkspaceRequireAuth>} />
-        <Route path="*" element={<DocumentControlFallback />} />
+        <Route path="/maintenance/:amoCode/document-control/*" element={<DocumentControlFallback />} />
       </Routes>
     </Suspense>
   );
@@ -277,6 +278,7 @@ export const AppRouter: React.FC = () => {
     qmsRoute.kind === "unknown" &&
     !isSupportedDocumentReaderPath(location.pathname)
   ) return <QmsNotFoundRouteSurface />;
+  if (pathSegments(location.pathname)[0] === "maintenance" && pathSegments(location.pathname)[2] === "contracted-work") return <Suspense fallback={<div className="page-loading" role="status">Loading contracted maintenance…</div>}><WorkspaceRequireAuth><ContractedWorkModule /></WorkspaceRequireAuth></Suspense>
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;

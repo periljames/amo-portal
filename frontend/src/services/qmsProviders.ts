@@ -68,6 +68,12 @@ export type ProviderContract = {
   renewal_terms?: string | null;
   controlled_document_id?: string | null;
   controlled_document_revision?: string | null;
+  signed_evidence_submission_id?: string | null;
+  counterparties_json?: string[] | null;
+  approved_sites_json?: string[] | null;
+  authority_acceptance_reference?: string | null;
+  supersedes_contract_id?: string | null;
+  change_reason?: string | null;
   owner_user_id?: string | null;
   approved_by_user_id?: string | null;
   approved_at?: string | null;
@@ -151,19 +157,64 @@ function write<T>(amoCode: string, suffix: string, method: "POST" | "PATCH", bod
   });
 }
 
+/** Governed QMS contracts, shared by provider, Procurement and DMS workflows. */
+export type ProviderAgreementRegisterItem = ProviderContract & {
+  supplier_code: string;
+  legal_name: string;
+  provider_status: string;
+  provider_kind: string | null;
+  renewal_notice_on: string | null;
+  days_until_expiry: number | null;
+  controlled_original_linked: boolean;
+  attention: "NONE" | "EXECUTED_EVIDENCE_REQUIRED" | "QUALITY_REVIEW_REQUIRED" | "EXPIRED" | "SUSPENDED" | "RENEWAL_DUE";
+};
+export type ProviderAgreementRegister = {
+  items: ProviderAgreementRegisterItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  as_of: string;
+};
+export function getProviderAgreementRegister(
+  amoCode: string,
+  filters: {
+    search?: string;
+    status?: string;
+    attentionOnly?: boolean;
+    days?: number;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ProviderAgreementRegister> {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.attentionOnly) params.set("attention_only", "true");
+  if (filters.days !== undefined) params.set("due_within_days", String(filters.days));
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined) params.set("offset", String(filters.offset));
+  return apiRequest<ProviderAgreementRegister>(
+    qmsPath(amoCode, `/suppliers/contracts/register?${params.toString()}`),
+    { cacheTtlMs: 0 },
+  );
+}
+
 export function getProviderGovernanceSummary(amoCode: string): Promise<ProviderGovernanceSummary> {
   return apiRequest<ProviderGovernanceSummary>(qmsPath(amoCode, "/suppliers/governance"));
 }
 
 export function getExternalProviders(
   amoCode: string,
-  filters: { search?: string; status?: string; providerKind?: string; riskLevel?: string } = {},
+  filters: { search?: string; status?: string; providerKind?: string; riskLevel?: string; limit?:number; offset?:number } = {},
 ): Promise<ProviderListResponse> {
   const params = new URLSearchParams();
   if (filters.search) params.set("search", filters.search);
   if (filters.status) params.set("status", filters.status);
   if (filters.providerKind) params.set("provider_kind", filters.providerKind);
   if (filters.riskLevel) params.set("risk_level", filters.riskLevel);
+  if (filters.limit) params.set("limit",String(filters.limit));
+  if (filters.offset) params.set("offset",String(filters.offset));
   const query = params.toString();
   return apiRequest<ProviderListResponse>(qmsPath(amoCode, `/suppliers/providers${query ? `?${query}` : ""}`));
 }

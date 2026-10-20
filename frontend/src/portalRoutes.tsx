@@ -155,6 +155,10 @@ const TechnicalRecordsPages = {
 
 
 const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
+const ExternalProviderPortalPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderPortalPage"));
+const ExternalPartnerPage = lazyDefault(() => import("./features/externalPartner/ExternalPartnerPage"));
+const ExternalProviderQualityPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderQualityPage"));
+const ExternalProviderDmsPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderDmsPage"));
 const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
 const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
 const PlatformUsersPage = lazyDefault(() => import("./pages/platform/PlatformUsersPage"));
@@ -466,6 +470,17 @@ export const AppRouter: React.FC = () => {
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+      {/* External principals are authenticated by a separate HttpOnly cookie,
+          never the staff JWT or employee RequireAuth hierarchy. */}
+      <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
+      <Route path="/partner/:tenant/*" element={<ExternalPartnerPage />} />
+      <Route path="/maintenance/:amoCode/quality/external-accounts"
+        element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
+
+      {/* Document Control retains authority for external originals, legal hold,
+          and disposition; this route is not subject to unrelated QMS audit roles. */}
+      <Route path="/maintenance/:amoCode/doc-control/provider-evidence"
+        element={<RequireAuth><ExternalProviderDmsPage /></RequireAuth>} />
 
       {/* Platform superuser control plane */}
       <Route
@@ -849,6 +864,11 @@ export const AppRouter: React.FC = () => {
 
       <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
 
+      {/* Provider scope is a governed cross-functional read surface. Technical
+          and Safety managers may inspect supplier qualification without the
+          broader QMS dashboard capability or any Quality decision rights. */}
+      <Route path="/maintenance/:amoCode/quality/suppliers/*"
+        element={<RequireAuth><RequireQmsPermission permission="qms.supplier.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />

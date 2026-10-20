@@ -375,24 +375,22 @@ export function MessagingHub() {
     },
   });
 
+  // All grouped events must be marked read before following their link.
+  // Do not swallow a failed server acknowledgement with allSettled.
+  const markNotificationGroupSeen = async (group: NotificationGroup): Promise<PortalNotification> => {
+    const items = [group.latest, ...group.earlier];
+    const unread = items.filter((item) => !item.read_at);
+    const updates = await Promise.all(unread.map((item) => messagingApi.markNotificationRead(item.id)));
+    return updates.find((item) => item.id === group.latest.id) || group.latest;
+  };
   const markNotification = useMutation({
-    mutationFn: async (group: NotificationGroup) => {
-      const unread = [group.latest, ...group.earlier].filter((notification) => !notification.read_at);
-      await Promise.all(unread.map((notification) => messagingApi.markNotificationRead(notification.id)));
-    },
+    mutationFn: markNotificationGroupSeen,
     onSuccess: () => void refreshMessaging(),
   });
   const openNotification = useMutation({
     mutationFn: async (group: NotificationGroup) => {
-      const notification = group.latest;
-      const earlierUnread = group.earlier.filter((item) => !item.read_at);
-      if (earlierUnread.length) {
-        await Promise.allSettled(earlierUnread.map((item) => messagingApi.markNotificationRead(item.id)));
-      }
-      const updated = notification.read_at
-        ? notification
-        : await messagingApi.markNotificationRead(notification.id);
-      return { notification, updated };
+      const updated = await markNotificationGroupSeen(group);
+      return { notification: group.latest, updated };
     },
     onSuccess: ({ notification, updated }) => {
       void refreshMessaging();
@@ -416,7 +414,8 @@ export function MessagingHub() {
     sendMessage.mutate({ threadId: effectiveThreadId, body, mentions: mentionUserIds });
   };
 
-  const askAi = async (notification: PortalNotification) => {
+  const askAi = async (group: NotificationGroup) => {
+    const notification = group.latest;
     const manualId = typeof notification.metadata?.manual_id === "string" ? notification.metadata.manual_id : null;
     const revisionId = typeof notification.metadata?.revision_id === "string" ? notification.metadata.revision_id : null;
     if (!tenant) return;
@@ -426,6 +425,8 @@ export function MessagingHub() {
     setAiError("");
     setAiBusy(true);
     try {
+      await markNotificationGroupSeen(group);
+      void refreshMessaging();
       const result = await assistDocumentation(tenant, {
         query: `Explain the controlled-document context for this portal notification: ${notification.title}. ${notification.body}`.slice(0, 500),
         mode: "ASSIST",
@@ -639,7 +640,7 @@ export function MessagingHub() {
                         <button type="button" onClick={() => markNotification.mutate(group)}>Mark group read</button>
                       ) : null}
                       {canAskAi ? (
-                        <button type="button" onClick={() => void askAi(notification)} disabled={aiBusy && aiOpen}><Sparkles size={13} /> {aiBusy && aiOpen ? "Checking…" : "Ask AI"}</button>
+                        <button type="button" onClick={() => void askAi(group)} disabled={aiBusy && aiOpen}><Sparkles size={13} /> {aiBusy && aiOpen ? "Checking…" : "Ask AI"}</button>
                       ) : null}
                     </div>
                     {group.earlier.length ? (

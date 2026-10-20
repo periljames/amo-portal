@@ -63,7 +63,7 @@ export function normalizePlannedAuditWindow(plannedStart: string, plannedEnd: st
     start = `${nextDay}T09:00`;
   }
   let end = window.end;
-  if (end <= start || end.slice(0, 10) < start.slice(0, 10) || end.slice(11) <= start.slice(11) || end.slice(11) > "17:00") {
+  if (end <= start || end.slice(0, 10) < start.slice(0, 10) || (end.slice(0, 10) === start.slice(0, 10) && end.slice(11) <= start.slice(11)) || end.slice(11) > "17:00") {
     end = `${start.slice(0, 10)}T17:00`;
     if (end <= start) end = new Date(Date.parse(`${start}:00Z`) + 8 * 60 * 60_000).toISOString().slice(0, 16);
   }

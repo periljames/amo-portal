@@ -64,7 +64,7 @@ const PublicAuditVerificationPage: React.FC = () => {
   if (!data) return <main className="qms-public-audit qms-public-audit--center"><section className="qms-public-audit__message" role="alert"><AlertTriangle size={28} /><h1>Verification unavailable</h1><p>{error || "This verification record could not be established."}</p></section></main>;
 
   const artifactType = data.assurance_artifact?.artifact_type.replaceAll("_", " ") || "AUDIT REPORT";
-  const verified = Boolean(data.report?.status);
+  const verified = data.valid === true && data.report?.status === "ISSUED";
 
   return (
     <main className="qms-public-audit">
@@ -75,13 +75,14 @@ const PublicAuditVerificationPage: React.FC = () => {
           <header>
             {verified ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
             <div>
-              <strong>{verified ? "Verified" : "Not verified"}</strong>
+              <strong>{verified ? "Valid governed record" : "Not verified"}</strong>
               <small>{verified ? "The verification token resolves to an issued audit record." : "The verification token could not confirm an issued record."}</small>
             </div>
           </header>
           <dl>
             <div><dt>Status</dt><dd>{verified ? "Verified" : "Not verified"}</dd></div>
             <div><dt>Report revision</dt><dd>R{data.report.revision_no} · {data.report.status}</dd></div>
+            <div><dt>Governed SHA-256</dt><dd><code>{data.report.sha256}</code></dd></div>
             <div><dt>Issued</dt><dd>{when(data.report.issued_at)}</dd></div>
             <div><dt>Artifact</dt><dd>{artifactType}</dd></div>
             <div><dt>Verification expires</dt><dd>{when(data.verification.expires_at)}</dd></div>
@@ -99,12 +100,12 @@ const PublicAuditVerificationPage: React.FC = () => {
         ) : null}
         <section className="qms-public-audit__card">
           <header><ShieldCheck size={20} /><div><strong>Optional check</strong><small>Paste a verification code from a trusted source to confirm it matches this record.</small></div></header>
-          <label><span>Verification code</span><input value={code} onChange={(event) => setCode(event.target.value)} maxLength={64} spellCheck={false} autoComplete="off" /></label>
-          <button type="button" disabled={comparing} onClick={() => void compareCode()}>{comparing ? "Checking…" : "Check code"}</button>
+          <label><span>SHA-256</span><input value={code} onChange={(event) => setCode(event.target.value)} maxLength={64} spellCheck={false} autoComplete="off" /></label>
+          <button type="button" disabled={comparing} onClick={() => void compareCode()}>{comparing ? "Checking…" : "Compare hash"}</button>
           {compare ? (
             <div className={compare.matches ? "qms-public-audit__success" : "qms-public-audit__error"} role="status">
               {compare.matches ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-              {compare.matches ? "Verified — code matches this record." : "Not verified — code does not match this record."}
+              {compare.matches ? "Hash matches the governed artifact." : "Hash does not match the governed artifact."}
             </div>
           ) : null}
         </section>
