@@ -14,7 +14,7 @@ depends_on = None
 
 TABLES = (
     "quality_car_rca_documents", "quality_car_rca_revisions",
-    "quality_car_rca_actions", "quality_car_rca_mutations",
+    "quality_car_rca_actions", "quality_car_rca_mutations", "quality_car_rca_action_events",
 )
 
 
@@ -93,8 +93,33 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("amo_id", "car_id", "mutation_key", name="uq_quality_car_rca_mutation_key"))
     op.create_index("ix_quality_car_rca_mutations", "quality_car_rca_mutations", ["amo_id", "car_id", "created_at"])
+    op.create_table("quality_car_rca_action_events",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True), *_scoped_columns(),
+        sa.Column("action_id", UUID(as_uuid=True), sa.ForeignKey("quality_car_rca_actions.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("previous_state", sa.String(24)),
+        sa.Column("next_state", sa.String(24), nullable=False),
+        sa.Column("snapshot", sa.JSON(), nullable=False),
+        sa.Column("actor_kind", sa.String(16), nullable=False),
+        sa.Column("actor_ref", sa.String(255)),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()))
+    op.create_index("ix_quality_car_rca_action_history", "quality_car_rca_action_events", ["amo_id", "car_id", "action_id", "created_at"])
     for table in TABLES:
         _enable_rls(table)
+    # Existing regulated event tables use PostgreSQL append-only triggers; keep
+    # submitted RCA and action events similarly immutable at the DB boundary.
+    if op.get_bind().dialect.name == "postgresql":
+        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events"):
+            fn = "prevent_" + table + "_mutation"
+            op.execute(sa.text(
+                "CREATE OR REPLACE FUNCTION " + fn + "() RETURNS trigger AS $ "
+                "BEGIN RAISE EXCEPTION '" + table + " is append-only'; END; "
+                "$ LANGUAGE plpgsql"
+            ))
+            op.execute(sa.text(
+                'CREATE TRIGGER trg_' + table + '_append_only BEFORE UPDATE OR DELETE ON "' +
+                table + '" FOR EACH ROW EXECUTE FUNCTION ' + fn + '()'
+            ))
 
 
 def downgrade():
@@ -102,5 +127,9 @@ def downgrade():
     for table in TABLES:
         if op.get_bind().execute(sa.text('SELECT COUNT(*) FROM "' + table + '"')).scalar():
             raise RuntimeError("Cannot downgrade: governed RCA evidence exists in " + table)
+    if op.get_bind().dialect.name == "postgresql":
+        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events"):
+            op.execute(sa.text('DROP TRIGGER IF EXISTS trg_' + table + '_append_only ON "' + table + '"'))
+            op.execute(sa.text("DROP FUNCTION IF EXISTS prevent_" + table + "_mutation()"))
     for table in reversed(TABLES):
         op.drop_table(table)
