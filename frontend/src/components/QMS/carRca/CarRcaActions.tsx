@@ -7,10 +7,11 @@ const EMPTY: CarRcaActionCreate = {
   external_owner_name: null, target_date: null, priority: "MEDIUM",
 };
 
-export default function CarRcaActions({ token, actions, disabled, onChanged, causeIds }: {
+export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds }: {
   token: string;
   actions: CarRcaAction[];
   disabled: boolean;
+  canProgress?: boolean;
   onChanged: () => Promise<void>;
   causeIds: Array<{ id: string; statement: string }>;
 }) {
@@ -67,16 +68,18 @@ export default function CarRcaActions({ token, actions, disabled, onChanged, cau
             Revise proposed action</button>}
           {action.cause_node_ids.length > 0 && <small>Causes: {action.cause_node_ids.join(", ")}</small>}</td>
         <td>{action.external_owner_name || "Not assigned"}</td><td>{action.target_date || "Not set"}</td>
-        <td>{action.state.replaceAll("_", " ")}{action.quality_review_note && <p>Quality: {action.quality_review_note}</p>}</td>
-        <td>{!disabled && ["PROPOSED", "ACCEPTED", "IN_PROGRESS", "REJECTED"].includes(action.state) &&
+        <td>{action.state.replaceAll("_", " ")}{action.quality_review_note && <p>Quality: {action.quality_review_note}</p>}
+          {action.state === "PROPOSED" && <p>Awaiting independent Quality approval.</p>}
+          {action.state === "REJECTED" && <p>Returned for revision.</p>}</td>
+        <td>{canProgress && ["ACCEPTED", "IN_PROGRESS"].includes(action.state) &&
           <button type="button" disabled={Boolean(busy)} onClick={() => { setActiveId(activeId === action.id ? null : action.id); setNote(action.completion_note || ""); setProof(action.evidence_references.join("\n")); }}>Record progress</button>}
-          {activeId === action.id && <div className="car-rca-action-progress">
+          {activeId === action.id && canProgress && <div className="car-rca-action-progress">
             <label className="car-rca-field">Completion declaration<textarea value={note} disabled={Boolean(busy)} onChange={e => setNote(e.target.value)} rows={2}/></label>
             <label className="car-rca-field">Evidence references, one per line<textarea value={proof} disabled={Boolean(busy)} onChange={e => setProof(e.target.value)} rows={2}/></label>
             <button type="button" disabled={Boolean(busy)} onClick={() => void progress(action.id, "IN_PROGRESS")}>Save in progress</button>
             <button type="button" disabled={Boolean(busy) || !note.trim() || !proof.trim()} onClick={() => void progress(action.id, "SUBMITTED")}>Submit implementation evidence</button>
           </div>}</td>
-      </tr>)}</tbody></table></div> : <p>No individually tracked actions yet. Add a specific, owned action below.</p>}
+      </tr>)}</tbody></table></div> : <p>No individually tracked actions yet. An accountable corrective action is required for a new governed CAR.</p>}
     {!disabled && <div className="car-rca-analysis">
       <h4>{editingActionId ? "Revise proposed action" : "New accountable action"}</h4>
       <div className="car-rca-grid">
