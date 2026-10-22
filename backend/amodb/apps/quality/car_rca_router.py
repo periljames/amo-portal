@@ -536,7 +536,7 @@ def _assert_action_scope(db: Session, car, payload: ActionCreate, *, public: boo
             raise HTTPException(status_code=422, detail="Owner is not an active tenant user.")
 
 
-def _add_action(db, car, payload: ActionCreate, *, public: bool):
+def _add_action(db, car, payload: ActionCreate, *, public: bool, actor_ref: str):
     _assert_action_scope(db, car, payload, public=public)
     # The CAR row is locked by the route, protecting action sequence allocation.
     existing = _actions(db, car)
@@ -555,7 +555,7 @@ def _add_action(db, car, payload: ActionCreate, *, public: bool):
     db.flush()
     _record_action_event(
         db, car, row, from_state=None, actor_kind="GUEST" if public else "EMPLOYEE",
-        actor_ref=row.external_owner_name if public else row.owner_user_id,
+        actor_ref=actor_ref,
         reason="Corrective action proposed."
     )
     db.commit()
@@ -567,7 +567,7 @@ def add_public_action(invite_token: str, payload: ActionCreate,
     db: Session = Depends(get_db)):
     car = _car_for_guest(db, invite_token, lock=True)
     _assert_guest_editable(db, car)
-    return _add_action(db, car, payload, public=True)
+    return _add_action(db, car, payload, public=True, actor_ref="Invited responder")
 
 
 @router.post("/corrective-actions", status_code=201)
@@ -578,7 +578,7 @@ def add_employee_action(car_id: uuid.UUID, payload: ActionCreate,
     car = _car_for_employee(db, ctx, car_id, lock=True)
     if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
         raise HTTPException(status_code=409, detail="CAR is locked.")
-    return _add_action(db, car, payload, public=False)
+    return _add_action(db, car, payload, public=False, actor_ref=ctx.user_id)
 
 
 @public_router.put("/{invite_token}/corrective-actions/{action_id}")
@@ -607,7 +607,7 @@ def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
     row.state = "PROPOSED"
     _record_action_event(
         db, car, row, from_state=previous, actor_kind="GUEST",
-        actor_ref=row.external_owner_name, reason="Responder revised proposed corrective action."
+        actor_ref="Invited responder", reason="Responder revised proposed corrective action."
     )
     db.commit()
     return _action_dict(row)
@@ -642,7 +642,7 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         row.completed_at = _utcnow()
     _record_action_event(
         db, car, row, from_state=previous, actor_kind="GUEST",
-        actor_ref=row.external_owner_name, reason="Respondent reported implementation progress."
+        actor_ref="Invited responder", reason="Respondent reported implementation progress."
     )
     db.commit()
     return _action_dict(row)
