@@ -380,7 +380,7 @@ def _close_control_loop_guarded(
     assert_quality_permission(db, ctx, "qms.car.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     milestones = _milestones(db, amo_id=ctx.amo_id, car_id=car_id)
     _validated_closure_evidence_ref(payload, milestones)
     # New structured RCA/actions supplement (never replace) established
