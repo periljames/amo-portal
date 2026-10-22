@@ -323,8 +323,8 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     const rca = rcaQuery.data;
     const documented = rca?.submitted_snapshot?.investigation || rca?.draft.investigation;
     if (rca) {
-      rows.push(["Structured RCA", "Current revision", rca.revision]);
-      rows.push(["Structured RCA", "Submitted revision", rca.submitted_revision || "Not submitted"]);
+      rows.push(["Structured RCA", "Current revision", String(rca.revision)]);
+      rows.push(["Structured RCA", "Submitted revision", rca.submitted_revision == null ? "Not submitted" : String(rca.submitted_revision)]);
       rows.push(["Structured RCA", "Consolidated proposed root cause", documented?.conclusion || "Not recorded"]);
       rows.push(["Structured RCA", "Conclusion evidence", (documented?.conclusion_evidence_references || []).join("; ")]);
       documented?.investigations.forEach(method => method.nodes.forEach(node =>
