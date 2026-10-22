@@ -294,6 +294,36 @@ def _action_events(db: Session, car):
     ]
 
 
+def _validate_attachment_references(db: Session, car, references: list[str]) -> None:
+    """Ensure structured CAR-ATTACHMENT references resolve to this exact CAR.
+
+    Other document references remain human-reviewable references rather than
+    being falsely certified as stored file evidence.
+    """
+    attachment_ids = set()
+    for reference in references:
+        if not reference.startswith("CAR-ATTACHMENT:"):
+            continue
+        raw_id = reference.split(":", 1)[1]
+        try:
+            attachment_ids.add(uuid.UUID(raw_id))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="A linked CAR attachment ID is invalid.") from exc
+    if not attachment_ids:
+        return
+    found = {
+        row[0] for row in db.query(models.CARAttachment.id).filter(
+            models.CARAttachment.car_id == car.id,
+            models.CARAttachment.id.in_(attachment_ids),
+        ).all()
+    }
+    if found != attachment_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="One or more linked CAR evidence files are missing or belong to a different CAR.",
+        )
+
+
 def _actions(db: Session, car):
     return db.query(QualityCarRcaAction).filter(
         QualityCarRcaAction.amo_id == str(car.amo_id),
@@ -471,6 +501,12 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None, *, respon
         raise HTTPException(status_code=422, detail="Record at least one evidence-linked fact before submitting a causal conclusion.")
     if not data.conclusion_evidence_references:
         raise HTTPException(status_code=422, detail="Reference the evidence supporting the final root cause.")
+    _validate_attachment_references(
+        db, car,
+        data.conclusion_evidence_references
+        + [reference for method in data.investigations for node in method.nodes
+           for reference in node.evidence_references],
+    )
     if (root_cause_text or "").strip() != data.conclusion.strip():
         raise HTTPException(status_code=409, detail="The CAR root-cause narrative differs from your saved investigation. Save the latest conclusion and resubmit.")
     actions = _actions(db, car)
@@ -542,6 +578,7 @@ def _assert_action_scope(db: Session, car, payload: ActionCreate, *, public: boo
         limit = car.target_closure_date or car.due_date
         if payload.target_date > limit:
             raise HTTPException(status_code=409, detail="An action date beyond the agreed CAR deadline requires a governed extension.")
+    _validate_attachment_references(db, car, payload.evidence_references)
     if payload.cause_node_ids:
         doc = _document(db, car)
         if doc is None:
