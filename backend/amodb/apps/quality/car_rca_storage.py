@@ -12,7 +12,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from amodb import storage
-from . import models
 from .car_rca_models import QualityCarRcaAction, QualityCarRcaDocument
 
 
