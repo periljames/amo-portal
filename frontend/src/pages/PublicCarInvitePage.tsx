@@ -144,6 +144,8 @@ type InviteEntry = {
   attachmentsError: string | null;
   refreshingEvidence: boolean;
   uploading: boolean;
+  uploadProgress: { total: number; completed: number; current: string | null } | null;
+  failedFiles: File[];
   submitting: boolean;
   recalling: boolean;
 };
@@ -668,6 +670,8 @@ const PublicCarInvitePage: React.FC = () => {
     attachmentsError: null,
     refreshingEvidence: false,
     uploading: false,
+    uploadProgress: null,
+    failedFiles: [],
     submitting: false,
     recalling: false,
   });
@@ -964,26 +968,34 @@ const PublicCarInvitePage: React.FC = () => {
       return;
     }
     pendingUploads.current.add(tokenValue);
-    updateEntry(tokenValue, (entry) => ({ ...entry, uploading: true, attachmentsError: rejected.length ? rejected.join(" ") : null, notice: null }));
+    updateEntry(tokenValue, (entry) => ({
+      ...entry, uploading: true, failedFiles: [], uploadProgress: { total: uploads.length, completed: 0, current: uploads[0]?.name || null },
+      attachmentsError: rejected.length ? rejected.join(" ") : null, notice: null,
+    }));
     try {
       const results: CARAttachmentOut[] = [];
+      const failures: File[] = [];
+      const errors = [...rejected];
       for (const upload of uploads) {
-        const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload);
-        results.push(uploaded);
-        updateEntry(tokenValue, (entry) => ({ ...entry, attachments: [...entry.attachments.filter((item) => item.id !== uploaded.id), uploaded] }));
+        updateEntry(tokenValue, entry => ({
+          ...entry, uploadProgress: { total: uploads.length, completed: results.length + failures.length, current: upload.name },
+        }));
+        try {
+          const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload);
+          results.push(uploaded);
+          updateEntry(tokenValue, entry => ({
+            ...entry, attachments: [...entry.attachments.filter(item => item.id !== uploaded.id), uploaded],
+          }));
+        } catch (cause) {
+          failures.push(upload);
+          errors.push(upload.name + ": " + getErrorMessage(cause, "Upload failed."));
+        }
       }
       const actions = await qmsListCarInviteActions(tokenValue).catch(() => []);
-      updateEntry(tokenValue, (entry) => ({
-        ...entry,
-        actions,
-        uploading: false,
-        notice: `${results.length} evidence file${results.length === 1 ? "" : "s"} uploaded successfully.`,
-      }));
-    } catch (error: unknown) {
-      updateEntry(tokenValue, (entry) => ({
-        ...entry,
-        uploading: false,
-        attachmentsError: getErrorMessage(error, "Failed to upload attachment."),
+      updateEntry(tokenValue, entry => ({
+        ...entry, actions, uploading: false, failedFiles: failures, uploadProgress: null,
+        attachmentsError: errors.length ? errors.join(" ") : null,
+        notice: results.length ? `${results.length} of ${uploads.length} evidence files uploaded; ${failures.length} may be retried.` : null,
       }));
     } finally { pendingUploads.current.delete(tokenValue); }
   };
@@ -1400,8 +1412,16 @@ const PublicCarInvitePage: React.FC = () => {
                                         <InviteQr value={shareUrl} />
                                       </div>
                                     </details>
-                                    {entry.uploading && <div className="car-invite-notice"><UploadCloud size={18} /> Uploading evidence…</div>}
-                                    {entry.attachmentsError && <div className="car-invite-error"><AlertTriangle size={18} /> {entry.attachmentsError}<button type="button" className="car-invite-btn" disabled={entry.refreshingEvidence || entry.uploading} onClick={() => void refreshEvidence(entry.token)}><RotateCcw size={16} /> {entry.refreshingEvidence ? "Refreshing…" : "Refresh evidence"}</button></div>}
+                                    {entry.uploading && <div className="car-invite-notice" role="status">
+                                      <UploadCloud size={18} /> Uploading file {(entry.uploadProgress?.completed || 0) + 1} of {entry.uploadProgress?.total || 1}:
+                                      {" "}{entry.uploadProgress?.current || "Preparing…"}
+                                    </div>}
+                                    {entry.attachmentsError && <div className="car-invite-error" role="alert">
+                                      <AlertTriangle size={18} /> {entry.attachmentsError}
+                                      {entry.failedFiles.length > 0 && <button type="button" className="car-invite-btn" disabled={entry.uploading}
+                                        onClick={() => void uploadFiles(entry.token, entry.failedFiles)}>Retry {entry.failedFiles.length} failed file(s)</button>}
+                                      <button type="button" className="car-invite-btn" disabled={entry.refreshingEvidence || entry.uploading} onClick={() => void refreshEvidence(entry.token)}><RotateCcw size={16} /> {entry.refreshingEvidence ? "Refreshing…" : "Refresh evidence"}</button>
+                                    </div>}
                                     {entry.attachments.length > 0 && (
                                       <div className="car-invite-evidence-list">
                                         {entry.attachments.map((attachment) => {
