@@ -393,18 +393,38 @@ def employee_actions(car_id: uuid.UUID,
     return _public_projection(db, _car_for_employee(db, ctx, car_id))["actions"]
 
 
-def _add_action(db, car, payload: ActionCreate, *, public: bool):
+def _assert_action_scope(db: Session, car, payload: ActionCreate, *, public: bool):
     if payload.owner_user_id and public:
         raise HTTPException(status_code=403, detail="Guest cannot assign internal employee privileges.")
+    if payload.target_date and (car.target_closure_date or car.due_date):
+        limit = car.target_closure_date or car.due_date
+        if payload.target_date > limit:
+            raise HTTPException(status_code=409, detail="An action date beyond the agreed CAR deadline requires a governed extension.")
+    if payload.cause_node_ids:
+        doc = _document(db, car)
+        if doc is None:
+            raise HTTPException(status_code=422, detail="Causes must be recorded in this CAR investigation first.")
+        active = {
+            node.id for investigation in InvestigationDocument.model_validate(
+                doc.draft.get("investigation") or {}
+            ).investigations for node in investigation.nodes
+        }
+        if not set(payload.cause_node_ids).issubset(active):
+            raise HTTPException(status_code=422, detail="Action references a cause outside this CAR.")
     if payload.owner_user_id:
         from amodb.apps.accounts import models as accounts
         exists = db.query(accounts.User.id).filter(
             accounts.User.id == payload.owner_user_id,
             accounts.User.amo_id == str(car.amo_id),
-            accounts.User.is_active.is_(True)
+            accounts.User.is_active.is_(True),
+            accounts.User.is_system_account.is_(False),
         ).first()
         if not exists:
             raise HTTPException(status_code=422, detail="Owner is not an active tenant user.")
+
+
+def _add_action(db, car, payload: ActionCreate, *, public: bool):
+    _assert_action_scope(db, car, payload, public=public)
     # The CAR row is locked by the route, protecting action sequence allocation.
     existing = _actions(db, car)
     row = QualityCarRcaAction(
@@ -446,6 +466,38 @@ def add_employee_action(car_id: uuid.UUID, payload: ActionCreate,
     if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
         raise HTTPException(status_code=409, detail="CAR is locked.")
     return _add_action(db, car, payload, public=False)
+
+
+@public_router.put("/{invite_token}/corrective-actions/{action_id}")
+def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: ActionCreate,
+    db: Session = Depends(get_db)):
+    car = _car_for_guest(db, invite_token, lock=True)
+    _assert_guest_editable(db, car)
+    row = db.query(QualityCarRcaAction).filter(
+        QualityCarRcaAction.amo_id == str(car.amo_id),
+        QualityCarRcaAction.car_id == car.id,
+        QualityCarRcaAction.id == action_id,
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Action does not belong to this invitation.")
+    if row.state not in {"PROPOSED", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Only proposed or returned actions can be revised.")
+    _assert_action_scope(db, car, payload, public=True)
+    previous = row.state
+    row.kind = payload.kind
+    row.description = payload.description.strip()
+    row.cause_node_ids = payload.cause_node_ids
+    row.evidence_references = payload.evidence_references
+    row.external_owner_name = payload.external_owner_name
+    row.target_date = payload.target_date
+    row.priority = payload.priority
+    row.state = "PROPOSED"
+    _record_action_event(
+        db, car, row, from_state=previous, actor_kind="GUEST",
+        actor_ref=row.external_owner_name, reason="Responder revised proposed corrective action."
+    )
+    db.commit()
+    return _action_dict(row)
 
 
 @public_router.patch("/{invite_token}/corrective-actions/{action_id}")
