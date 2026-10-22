@@ -19,7 +19,8 @@ from amodb.database import get_db, get_read_db, get_write_db
 from . import models
 from .car_rca_models import (
     QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
-    QualityCarRcaMutation, QualityCarRcaRevision, QualityCarRcaRollout
+    QualityCarRcaMutation, QualityCarRcaRevision, QualityCarRcaRollout,
+    QualityCarResponseRetainedRevision
 )
 from .tenant_security import (
     TenantContext, assert_quality_permission, require_quality_permission,
@@ -240,6 +241,29 @@ def _actions(db: Session, car):
     ).order_by(QualityCarRcaAction.sequence_no).all()
 
 
+def retain_recalled_car_response(db: Session, car, response, *, reason: str):
+    """Preserve the original response before removing it from the active queue."""
+    previous = db.query(QualityCarResponseRetainedRevision.id).filter(
+        QualityCarResponseRetainedRevision.amo_id == str(car.amo_id),
+        QualityCarResponseRetainedRevision.car_id == car.id,
+        QualityCarResponseRetainedRevision.original_response_id == str(response.id),
+    ).first()
+    if previous is not None:
+        return
+    state = {
+        column.name: getattr(response, column.name)
+        for column in response.__table__.columns
+    }
+    db.add(QualityCarResponseRetainedRevision(
+        id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+        original_response_id=str(response.id), event_type="RECALLED",
+        submitted_at=response.submitted_at,
+        snapshot=json.loads(json.dumps(state, default=str)),
+        reason=reason
+    ))
+    db.flush()
+
+
 def _public_projection(db: Session, car, *, include_history=False):
     doc = _document(db, car)
     revisions = []
@@ -248,6 +272,13 @@ def _public_projection(db: Session, car, *, include_history=False):
             QualityCarRcaRevision.amo_id == str(car.amo_id),
             QualityCarRcaRevision.car_id == car.id
         ).order_by(QualityCarRcaRevision.revision.desc()).limit(100).all()
+    recalled = (
+        db.query(QualityCarResponseRetainedRevision).filter(
+            QualityCarResponseRetainedRevision.amo_id == str(car.amo_id),
+            QualityCarResponseRetainedRevision.car_id == car.id,
+        ).order_by(QualityCarResponseRetainedRevision.retained_at.desc()).limit(100).all()
+        if include_history else []
+    )
     return {
         "car_id": str(car.id), "revision": doc.revision if doc else 0,
         "draft": doc.draft if doc else {
@@ -267,6 +298,12 @@ def _public_projection(db: Session, car, *, include_history=False):
             for item in _actions(db, car)
         ],
         "action_events": _action_events(db, car) if include_history else [],
+        "retained_responses": [
+            {"id": str(item.id), "original_response_id": item.original_response_id,
+             "event_type": item.event_type, "submitted_at": item.submitted_at,
+             "retained_at": item.retained_at, "reason": item.reason,
+             "snapshot": item.snapshot} for item in recalled
+        ],
         "history": [
             {
                 "id": str(item.id), "revision": item.revision,
