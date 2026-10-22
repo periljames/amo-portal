@@ -7,13 +7,14 @@ const EMPTY: CarRcaActionCreate = {
   external_owner_name: null, target_date: null, priority: "MEDIUM",
 };
 
-export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds }: {
+export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds, attachments = [] }: {
   token: string;
   actions: CarRcaAction[];
   disabled: boolean;
   canProgress?: boolean;
   onChanged: () => Promise<void>;
   causeIds: Array<{ id: string; statement: string }>;
+  attachments?: Array<{ id: string; filename: string }>;
 }) {
   const [draft, setDraft] = useState<CarRcaActionCreate>(EMPTY);
   const [editingActionId, setEditingActionId] = useState<string | null>(null);
