@@ -367,6 +367,39 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     const evidenceRows = attachments.map((item) => `<tr><td>${escapeHtml(item.filename)}</td><td>${escapeHtml(item.content_type || "")}</td><td>${escapeHtml(formatBytes(item.size_bytes))}</td><td>${escapeHtml(formatDateTime(item.uploaded_at))}</td></tr>`).join("");
     const eventRows = control.events.map((item) => `<tr><td>${escapeHtml(formatDateTime(item.created_at))}</td><td>${escapeHtml(humanize(item.event_type))}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(assigneeName(assignees, item.actor_user_id))}</td></tr>`).join("");
     const blockerItems = control.closure_readiness.blockers.map((item) => `<li><strong>${escapeHtml(item.code)}</strong> — ${escapeHtml(item.message)}</li>`).join("");
+    const rcaRecord = rcaQuery.data;
+    const documented = rcaRecord?.submitted_snapshot?.investigation || rcaRecord?.draft.investigation;
+    const methodRows = documented?.investigations.flatMap(method => method.nodes.map(node =>
+      `<tr><td>${escapeHtml(method.method.replaceAll("_", " "))}</td><td>${escapeHtml(node.category)}</td><td>${escapeHtml(node.statement)}</td><td>${escapeHtml(node.entry_type)}</td><td>${escapeHtml(node.parent_id || "")}</td><td>${escapeHtml(node.evidence_references.join("; "))}</td></tr>`
+    )).join("") || "";
+    const actionRows = (rcaRecord?.actions || []).map(action =>
+      `<tr><td>${escapeHtml(action.action_number)}</td><td>${escapeHtml(action.kind)}</td><td>${escapeHtml(action.description)}</td><td>${escapeHtml(action.external_owner_name || action.owner_user_id || "")}</td><td>${escapeHtml(action.target_date || "")}</td><td>${escapeHtml(action.state)}</td><td>${escapeHtml(action.evidence_references.join("; "))}</td><td>${escapeHtml(action.quality_review_note || "")}</td></tr>`
+    ).join("");
+    const rcaHistoryRows = (rcaRecord?.history || []).map(row =>
+      `<tr><td>${escapeHtml(formatDateTime(row.created_at))}</td><td>${escapeHtml(row.revision)}</td><td>${escapeHtml(row.event_type)}</td><td>${escapeHtml(row.actor_kind)}</td><td>${escapeHtml(row.actor_ref || "")}</td><td>${escapeHtml(row.reason)}</td></tr>`
+    ).join("");
+    const fishbone = documented?.investigations.find(method => method.method === "ISHIKAWA");
+    const branches = [...new Set((fishbone?.nodes || []).map(node => node.category))].slice(0, 8);
+    const fishboneSvg = branches.length ? `<svg viewBox="0 0 800 330" style="width:100%;border:1px solid #aaa;max-height:330px" role="img" aria-label="Recorded Fishbone diagram">
+      <path d="M70 165 L620 165 M620 128 L790 128 L790 200 L620 200 Z" fill="none" stroke="black" stroke-width="2"/>
+      <text x="705" y="160" font-size="12" text-anchor="middle">${escapeHtml((documented?.problem_statement || "").slice(0, 23))}</text>
+      ${branches.map((branch, index) => {
+        const x = 150 + Math.floor(index / 2) * 120;
+        const y = index % 2 === 0 ? 30 : 305;
+        const node = (fishbone?.nodes || []).find(cause => cause.category === branch);
+        return `<g><line x1="${x}" y1="165" x2="${x-60}" y2="${y}" stroke="black"/><text x="${x-57}" y="${y}" font-size="11">${escapeHtml(branch.slice(0, 17))}</text><text x="${x-57}" y="${y + (index % 2 ? -17 : 17)}" font-size="9">${escapeHtml((node?.statement || "").slice(0, 22))}</text></g>`;
+      }).join("")}</svg>` : "";
+    const paretoMethod = documented?.investigations.find(method => method.method === "PARETO");
+    const paretoSource = paretoMethod?.context?.frequencies;
+    const paretoCounts = Array.isArray(paretoSource) ? paretoSource.filter((row): row is { category: string; count: number; source_ref: string } =>
+      Boolean(row) && typeof row === "object" && typeof row.category === "string" && typeof row.count === "number" && typeof row.source_ref === "string"
+    ).sort((left, right) => right.count - left.count) : [];
+    const paretoTotal = paretoCounts.reduce((sum, row) => sum + row.count, 0);
+    let cumulative = 0;
+    const paretoRows = paretoCounts.map(row => {
+      cumulative += row.count;
+      return `<tr><td>${escapeHtml(row.category)}</td><td>${row.count}</td><td>${paretoTotal ? (100 * cumulative / paretoTotal).toFixed(1) : "0.0"}%</td><td>${escapeHtml(row.source_ref)}</td></tr>`;
+    }).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(control.car.car_number)} CAR Package</title><style>
       @page{size:A4;margin:14mm} body{font:12px Arial,sans-serif;color:#111;line-height:1.35} h1{font-size:20px;margin:0 0 4px} h2{font-size:14px;border-bottom:1px solid #222;padding-bottom:4px;margin-top:20px} h3{font-size:12px;margin:12px 0 4px}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #bbb;padding:8px}.meta div{min-width:0}.label{font-size:10px;color:#555;text-transform:uppercase}.value{font-weight:700}.box{border:1px solid #bbb;padding:8px;white-space:pre-wrap} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #aaa;padding:5px;vertical-align:top;text-align:left} th{background:#eee}.mono{font-family:monospace;word-break:break-all}.footer{margin-top:24px;border-top:1px solid #777;padding-top:8px;font-size:9px;color:#555}.no-print{margin-bottom:10px}@media print{.no-print{display:none}}
     </style></head><body><button class="no-print" onclick="window.print()">Print / Save PDF</button>
@@ -374,6 +407,17 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <div class="meta"><div><div class="label">Audit</div><div class="value">${escapeHtml(source?.audit_ref || "—")}</div></div><div><div class="label">Finding</div><div class="value">${escapeHtml(source?.finding_ref || control.car.finding_id || "—")}</div></div><div><div class="label">Status</div><div class="value">${escapeHtml(humanize(control.car.status))}</div></div><div><div class="label">Priority</div><div class="value">${escapeHtml(humanize(control.car.priority))}</div></div><div><div class="label">Accountable owner</div><div class="value">${escapeHtml(assigneeName(assignees, control.profile?.accountable_owner_user_id))}</div></div><div><div class="label">Original due</div><div class="value">${escapeHtml(formatDate(control.profile?.original_due_date || control.car.due_date))}</div></div><div><div class="label">Current due</div><div class="value">${escapeHtml(formatDate(control.profile?.current_due_date || control.car.target_closure_date || control.car.due_date))}</div></div><div><div class="label">Health</div><div class="value">${escapeHtml(humanize(control.health.state))} · ${control.health.risk_score}/100</div></div></div>
       <h2>Finding / requirement context</h2><h3>Finding</h3><div class="box">${escapeHtml(source?.finding_description || control.car.summary)}</div><h3>Next required action</h3><div class="box">${escapeHtml(control.health.next_action)}</div>
       <h2>Auditee / responsible-manager response</h2><div class="meta"><div><div class="label">Responder</div><div class="value">${escapeHtml(personDisplay(response?.submitted_by_name, "—"))}</div></div><div><div class="label">Submitted</div><div class="value">${escapeHtml(formatDateTime(response?.submitted_at))}</div></div><div><div class="label">RCA review</div><div class="value">${escapeHtml(humanize(source?.root_cause_status))}</div></div><div><div class="label">CAP review</div><div class="value">${escapeHtml(humanize(source?.capa_status))}</div></div></div><h3>Immediate / containment action</h3><div class="box">${escapeHtml(response?.containment_action || "Not recorded")}</div><h3>Root cause analysis</h3><div class="box">${escapeHtml(response?.root_cause || "Not recorded")}</div><h3>Corrective action</h3><div class="box">${escapeHtml(response?.corrective_action || "Not recorded")}</div><h3>Preventive / long-term systemic action</h3><div class="box">${escapeHtml(response?.preventive_action || "Not recorded")}</div><h3>Quality review comments</h3><div class="box">RCA: ${escapeHtml(source?.root_cause_review_note || "—")}\nCAP: ${escapeHtml(source?.capa_review_note || "—")}</div>
+      <h2>Structured RCA evidence and diagram</h2>
+      <div class="box">RCA revision: ${escapeHtml(rcaRecord?.revision ?? "Legacy only")}; Submitted revision: ${escapeHtml(rcaRecord?.submitted_revision || "Not submitted")}</div>
+      <h3>Proposed systemic root cause</h3><div class="box">${escapeHtml(documented?.conclusion || "No structured RCA recorded.")}</div>
+      <h3>Supporting evidence references</h3><div class="box">${escapeHtml((documented?.conclusion_evidence_references || []).join("; "))}</div>
+      ${fishboneSvg}
+      <table><thead><tr><th>Method</th><th>Branch</th><th>Recorded finding / Why</th><th>Evidence class</th><th>Parent cause ID</th><th>References</th></tr></thead><tbody>${methodRows || '<tr><td colspan="6">No causal nodes recorded.</td></tr>'}</tbody></table>
+      <h3>Pareto analysis — respondent-reported source counts, Quality confirmation pending</h3>
+      <div class="box">Population: ${escapeHtml(paretoMethod?.context?.population || "Not specified")}; Period: ${escapeHtml(paretoMethod?.context?.period_from || "not set")} — ${escapeHtml(paretoMethod?.context?.period_to || "not set")}; Sample total: ${paretoTotal}</div>
+      <table><thead><tr><th>Category</th><th>Count</th><th>Cumulative %</th><th>Provenance</th></tr></thead><tbody>${paretoRows || '<tr><td colspan="4">No Pareto data recorded.</td></tr>'}</tbody></table>
+      <h2>Individually controlled corrective actions</h2><table><thead><tr><th>No.</th><th>Kind</th><th>Action</th><th>Owner</th><th>Due</th><th>State</th><th>Implementation evidence</th><th>Quality decision</th></tr></thead><tbody>${actionRows || '<tr><td colspan="8">No individually governed actions.</td></tr>'}</tbody></table>
+      <h3>RCA revision history</h3><table><thead><tr><th>Time</th><th>Revision</th><th>Event</th><th>Actor kind</th><th>Attribution</th><th>Reason</th></tr></thead><tbody>${rcaHistoryRows || '<tr><td colspan="6">No structured RCA revisions.</td></tr>'}</tbody></table>
       <h2>Governed lifecycle milestones</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Owner</th><th>Original due</th><th>Current due</th><th>Evidence ref</th><th>Control note</th></tr></thead><tbody>${milestoneRows || '<tr><td colspan="7">No milestones recorded.</td></tr>'}</tbody></table>
       <h2>Dependencies and blockers</h2><table><thead><tr><th>Dependency</th><th>Type</th><th>Risk</th><th>Owner</th><th>Due</th><th>Blocks closure</th><th>Status</th><th>Description</th><th>Mitigation</th></tr></thead><tbody>${dependencyRows || '<tr><td colspan="9">No dependencies recorded.</td></tr>'}</tbody></table>
       <h2>Deadline / extension history</h2><table><thead><tr><th>Previous</th><th>Requested</th><th>Reason</th><th>Impact</th><th>Status</th><th>Decision</th></tr></thead><tbody>${extensionRows || '<tr><td colspan="6">No staged deadline changes recorded.</td></tr>'}</tbody></table>
