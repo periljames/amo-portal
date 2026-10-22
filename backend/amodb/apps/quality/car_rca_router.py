@@ -305,6 +305,10 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None):
         raise HTTPException(status_code=422, detail="Reference the evidence supporting the final root cause.")
     if (root_cause_text or "").strip() != data.conclusion.strip():
         raise HTTPException(status_code=409, detail="The CAR root-cause narrative differs from your saved investigation. Save the latest conclusion and resubmit.")
+    actions = _actions(db, car)
+    if not any(action.kind == "CORRECTIVE" and action.target_date and
+               (action.owner_user_id or action.external_owner_name) for action in actions):
+        raise HTTPException(status_code=422, detail="Add an individually owned, dated corrective action before submitting.")
     doc.revision += 1
     doc.submitted_revision = doc.revision
     doc.submitted_at = _utcnow()
