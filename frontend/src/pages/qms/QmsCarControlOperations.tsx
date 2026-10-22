@@ -383,7 +383,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 
   const exportCsv = () => {
     if (rcaQuery.isError || rcaQuery.isPending ||
-        (paretoQuery.isEnabled !== false && (paretoQuery.isError || paretoQuery.isPending))) {
+        (hasQmsRolePermission("qms.reports.view") && (paretoQuery.isError || paretoQuery.isPending))) {
       setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before exporting a complete package.");
       return;
     }
@@ -392,7 +392,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 
   const printPackage = () => {
     if (rcaQuery.isError || rcaQuery.isPending ||
-        (paretoQuery.isEnabled !== false && (paretoQuery.isError || paretoQuery.isPending))) {
+        (hasQmsRolePermission("qms.reports.view") && (paretoQuery.isError || paretoQuery.isPending))) {
       setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before printing a complete package.");
       return;
     }
