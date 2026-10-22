@@ -66,6 +66,8 @@ def _car_for_token(db: Session, invite_token: str, *, lock: bool = False) -> mod
     car = (query.with_for_update(of=models.CorrectiveActionRequest) if lock else query).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return car
 
 
