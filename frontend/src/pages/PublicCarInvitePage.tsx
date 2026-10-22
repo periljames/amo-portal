@@ -730,11 +730,20 @@ const PublicCarInvitePage: React.FC = () => {
     return null;
   };
 
-  const advanceStep = (entry: InviteEntry, stepId: InviteStepId) => {
+  const advanceStep = async (entry: InviteEntry, stepId: InviteStepId) => {
     const validationError = validateStep(entry, stepId);
     if (validationError) {
       updateEntry(entry.token, (current) => ({ ...current, error: validationError, notice: null }));
       return;
+    }
+    if ((stepId === "analysis" || stepId === "corrective") && entry.rcaLoaded) {
+      const saved = await saveRca(entry.token, true);
+      if (!saved) {
+        updateEntry(entry.token, current => ({
+          ...current, error: "Save this investigation successfully before continuing. Your unsaved work remains in this tab."
+        }));
+        return;
+      }
     }
     const next = INVITE_STEPS[stepIndex(stepId) + 1]?.id ?? "review";
     updateEntry(entry.token, (current) => ({ ...current, error: null, notice: `${INVITE_STEPS[stepIndex(stepId)].label} complete. Continue with ${INVITE_STEPS[stepIndex(next)].label}.` }));
