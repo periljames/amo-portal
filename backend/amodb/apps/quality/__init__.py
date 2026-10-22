@@ -84,6 +84,7 @@ from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycl
 from . import car_control_loop_router as _car_control_loop_router  # noqa: F401,E402
 from . import car_control_loop_guard_router as _car_control_loop_guard_router  # noqa: F401,E402
 from . import car_rca_router as _car_rca_router  # noqa: F401,E402
+from . import car_rca_pareto_router as _car_rca_pareto_router  # noqa: F401,E402
 
 # New RCA routes reuse the canonical CAR and public invitation families.
 # Their prefixes are relative to the existing parent routers; there is no
@@ -211,6 +212,7 @@ _include_once(
 )
 
 _canonical_router.router.include_router(_car_rca_router.router)
+_canonical_router.router.include_router(_car_rca_pareto_router.router)
 
 # Deadline decisions and escalation evaluation enforce sequence and stale-request
 # guards for their public control-loop operations.
