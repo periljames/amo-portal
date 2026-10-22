@@ -404,6 +404,19 @@ def _close_control_loop_guarded(
                 detail={"message": "Implementation must be independently verified before CAR closure.",
                         "pending_action_numbers": pending},
             )
+        if profile.effectiveness_required:
+            from .assurance_case_models import QualityEffectivenessPlan
+            latest = db.query(QualityEffectivenessPlan).filter(
+                QualityEffectivenessPlan.amo_id == ctx.amo_id,
+                QualityEffectivenessPlan.source_type == "CAR",
+                QualityEffectivenessPlan.source_id == str(car_id),
+                QualityEffectivenessPlan.status != "CANCELLED",
+            ).order_by(QualityEffectivenessPlan.created_at.desc()).first()
+            if latest is None or latest.status != "CONCLUDED" or latest.conclusion != "EFFECTIVE":
+                raise HTTPException(
+                    status_code=409,
+                    detail="A concluded, independently verified EFFECTIVE assurance plan is required before this structured CAR can close.",
+                )
     return _close_control_loop_base(str(car_id), payload, ctx, db)
 
 
