@@ -212,7 +212,7 @@ def _record_action_event(db: Session, car, row: QualityCarRcaAction, *,
     db.add(QualityCarRcaActionEvent(
         id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
         action_id=row.id, previous_state=from_state, next_state=row.state,
-        snapshot=_action_dict(row), actor_kind=actor_kind,
+        snapshot=json.loads(json.dumps(_action_dict(row), default=str)), actor_kind=actor_kind,
         actor_ref=actor_ref, reason=reason
     ))
 
