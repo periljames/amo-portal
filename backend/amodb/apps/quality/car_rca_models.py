@@ -148,3 +148,25 @@ class QualityCarRcaRollout(Base):
     __tablename__ = "quality_car_rca_rollout"
     id = Column(Integer, primary_key=True)
     activated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class QualityCarResponseRetainedRevision(Base):
+    """Attributable snapshot of a recalled response deleted from the active queue.
+
+    Preserves historical submissions without counting them as reviewable CAR
+    responses or consuming a fresh-submission attempt.
+    """
+    __tablename__ = "quality_car_response_retained_revisions"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
+    original_response_id = Column(String(80), nullable=False)
+    event_type = Column(String(32), nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    snapshot = Column(JSON, nullable=False)
+    reason = Column(Text, nullable=False)
+    retained_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("amo_id", "car_id", "original_response_id", name="uq_quality_car_recalled_response"),
+        Index("ix_quality_car_response_history", "amo_id", "car_id", "retained_at"),
+    )
