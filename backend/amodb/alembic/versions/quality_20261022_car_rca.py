@@ -21,7 +21,7 @@ TABLES = (
 def _scoped_columns():
     return (
         sa.Column("amo_id", sa.String(36), sa.ForeignKey("amos.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("car_id", UUID(as_uuid=True), sa.ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("car_id", UUID(as_uuid=True), sa.ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False),
     )
 
 
