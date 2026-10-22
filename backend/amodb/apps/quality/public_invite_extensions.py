@@ -190,7 +190,7 @@ def get_car_invite_with_report(
     payload["related_cars"] = []
     from .tenant_security import set_postgres_tenant_context
     from .car_rca_router import structured_rca_required
-    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
     payload["structured_rca_required"] = structured_rca_required(db, car)
     audit = _audit_for_car(car)
     report_path = _issued_report_path(db, audit)
@@ -227,7 +227,7 @@ def submit_car_invite_with_detailed_response(
     # without requiring legacy CARs to invent causal nodes retroactively.
     from .tenant_security import set_postgres_tenant_context
     from .car_rca_router import submit_rca_document
-    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
     submit_rca_document(
         db, car, payload.root_cause if payload.root_cause is not None else car.root_cause,
         responder_email=payload.submitted_by_email,
