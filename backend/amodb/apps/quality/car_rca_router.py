@@ -25,7 +25,7 @@ from .tenant_security import (
     set_postgres_tenant_context, write_tenant_context
 )
 
-public_router = APIRouter(prefix="/quality/cars/invite", tags=["Quality / Public CAR RCA"])
+public_router = APIRouter(prefix="/cars/invite", tags=["Quality / Public CAR RCA"])
 router = APIRouter(prefix="/cars/{car_id}", tags=["Quality / CAR RCA"])
 
 METHODS = {
