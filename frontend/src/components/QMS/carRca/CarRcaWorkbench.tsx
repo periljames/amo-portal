@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { CarRcaDocument, CarRcaInvestigation, CarRcaMethod, CarRcaNode, CauseEntryType } from "../../../services/qmsCarRca";
+import type { CarRcaDocument, CarRcaInvestigation, CarRcaMethod, CarRcaNode, CauseEntryType, CarRcaEffectivenessProposal } from "../../../services/qmsCarRca";
 
 const METHOD_GUIDE: Array<{ id: CarRcaMethod; title: string; description: string }> = [
   { id: "FIVE_WHYS", title: "5 Whys", description: "Explore why each condition occurred. You can branch and use more than five questions." },
@@ -133,6 +133,12 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
     .filter(group => causes.some(node => node.category === group));
   const supported = value.investigations.flatMap(item => item.nodes)
     .filter(node => node.entry_type === "CAUSAL_CONCLUSION" && node.evidence_references.length > 0);
+  const proposal: CarRcaEffectivenessProposal = value.effectiveness_proposal || {
+    expected_result: "", measurable_success_criterion: "", verification_method: "",
+    observation_period: "", proposed_review_date: null, supporting_records: [],
+  };
+  const patchProposal = (patch: Partial<CarRcaEffectivenessProposal>) =>
+    onChange({ ...value, effectiveness_proposal: { ...proposal, ...patch } });
 
   return <section className="car-rca" aria-label="Root cause investigation">
     <div className="car-rca-heading">
@@ -291,5 +297,20 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       </label>
       <p className="car-rca-note">Submission requires a supported causal entry and evidence references. An approved RCA is distinct from corrective-action implementation and effectiveness verification.</p>
     </div>
+    <section className="car-rca-conclusions" aria-label="Proposed effectiveness verification">
+      <h4>Propose an effectiveness check</h4>
+      <p>Suggest how Quality can check that the solution prevents recurrence. This is a proposal only; the responsible Quality reviewer independently sets and concludes the formal plan.</p>
+      <div className="car-rca-grid">
+        <label>Expected result<textarea rows={2} value={proposal.expected_result} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ expected_result: e.target.value })}/></label>
+        <label>Measurable success criterion<textarea rows={2} value={proposal.measurable_success_criterion} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ measurable_success_criterion: e.target.value })}/></label>
+        <label>Verification method<textarea rows={2} value={proposal.verification_method} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ verification_method: e.target.value })}/></label>
+        <label>Observation period<input value={proposal.observation_period} maxLength={255} disabled={disabled} onChange={e => patchProposal({ observation_period: e.target.value })} placeholder="e.g. next three scheduled inspections"/></label>
+        <label>Proposed independent review date<input type="date" value={proposal.proposed_review_date || ""} disabled={disabled} onChange={e => patchProposal({ proposed_review_date: e.target.value || null })}/></label>
+      </div>
+      <label className="car-rca-field">Proposed supporting records (one per line)
+        <textarea rows={2} value={proposal.supporting_records.join("\n")} disabled={disabled}
+          onChange={e => patchProposal({ supporting_records: csv(e.target.value) })}/></label>
+      {!disabled && value.effectiveness_proposal && <button type="button" onClick={() => onChange({ ...value, effectiveness_proposal: null })}>Clear proposal</button>}
+    </section>
   </section>;
 }
