@@ -137,6 +137,7 @@ type InviteEntry = {
   rcaSaving: boolean;
   rcaError: string | null;
   rcaActions: CarRcaAction[];
+  rcaLocalRecovery: InviteForm | null;
   consentAccepted: boolean;
   attachments: CARAttachmentOut[];
   actions: CARActionOut[];
@@ -657,6 +658,7 @@ const PublicCarInvitePage: React.FC = () => {
     rcaSaving: false,
     rcaError: null,
     rcaActions: [],
+    rcaLocalRecovery: null,
     consentAccepted: false,
     attachments: [],
     actions: [],
@@ -767,29 +769,40 @@ const PublicCarInvitePage: React.FC = () => {
       const savedRca = rcaResult.status === "fulfilled" ? rcaResult.value : null;
       const fallbackForm = toForm(data.value);
       const serverForm = savedRca?.revision ? savedRca.draft.form : null;
-      const selectedForm = restoredDraft || { ...fallbackForm, ...(serverForm || {}) };
+      // Never overwrite a newer server revision with stale sessionStorage on
+      // initial load. The local backup can be deliberately restored by the user.
+      const hasServerDraft = Boolean(savedRca && savedRca.revision > 0);
+      const serverSelectedForm = { ...fallbackForm, ...(serverForm || {}) };
+      const selectedForm = hasServerDraft ? serverSelectedForm : restoredDraft || serverSelectedForm;
+      const localRecovery = hasServerDraft && restoredDraft &&
+        JSON.stringify(restoredDraft) !== JSON.stringify(serverSelectedForm) ? restoredDraft : null;
       const investigation = (
         !isInviteEditable(data.value) && savedRca?.submitted_snapshot?.investigation
           ? savedRca.submitted_snapshot.investigation
           : savedRca?.draft.investigation
       ) || emptyCarRca(data.value.summary);
-      if (investigation.conclusion && !restoredDraft) selectedForm.root_cause = investigation.conclusion;
+      if (investigation.conclusion && !localRecovery) selectedForm.root_cause = investigation.conclusion;
       const nextEntry: InviteEntry = {
           ...createEntry(tokenValue),
           invite: data.value,
           form: selectedForm,
           rca: investigation,
           rcaRevision: savedRca?.revision || 0,
-          rcaSavedSignature: JSON.stringify({ form: savedRca?.revision ? savedRca.draft.form : selectedForm, investigation }),
+          rcaSavedSignature: JSON.stringify({ form: selectedForm, investigation }),
           rcaLoaded: Boolean(savedRca),
           rcaSaving: false,
           rcaError: rcaResult.status === "rejected" ? getErrorMessage(rcaResult.reason, "Structured RCA could not be loaded.") : null,
           rcaActions: savedRca?.actions || [],
+          rcaLocalRecovery: localRecovery,
           attachments: attachmentsResult.status === "fulfilled" ? attachmentsResult.value : [],
           actions: actionsResult.status === "fulfilled" ? actionsResult.value : [],
           attachmentsError: attachmentsResult.status === "rejected" ? getErrorMessage(attachmentsResult.reason, "Could not load attachments.") : null,
           state: "ready" as const,
-          notice: notice ?? (restoredDraft ? "Your unfinished response was restored from this browser tab. Review it before submitting." : null),
+          notice: notice ?? (localRecovery
+            ? "A newer server draft was loaded. An older browser-tab backup is available for deliberate recovery."
+            : restoredDraft && !hasServerDraft
+              ? "Your earlier browser-tab draft was restored. Save it to your controlled CAR record."
+              : null),
       };
       updateEntry(tokenValue, (entry) => ({ ...entry, ...nextEntry }));
       setActiveSteps((prev) => ({ ...prev, [tokenValue]: isInviteEditable(data.value) ? prev[tokenValue] ?? firstIncompleteStep(nextEntry) : "review" }));
@@ -1156,7 +1169,7 @@ const PublicCarInvitePage: React.FC = () => {
             {entries.map((entry) => {
               const invite = entry.invite;
               const dueCountdown = countdownText(invite?.due_date || invite?.target_closure_date, now);
-              const locked = !isInviteEditable(invite);
+              const locked = !isInviteEditable(invite) || entry.submitting;
               const canSubmit = canSubmitInvite(invite);
               const shareUrl = invite ? inviteShareUrl(invite, entry.token) : "";
               const activeStep = getActiveStep(entry);
@@ -1278,6 +1291,17 @@ const PublicCarInvitePage: React.FC = () => {
 
                                 {active && step.id === "analysis" && (
                                   <div className="car-invite-stage__body">
+                                    {entry.rcaLocalRecovery && <div className="car-invite-notice" role="status">
+                                      A different browser-tab backup is available. The newer server draft has been retained.
+                                      <button type="button" className="car-invite-btn" disabled={locked}
+                                        onClick={() => updateEntry(entry.token, current => ({
+                                          ...current, form: current.rcaLocalRecovery || current.form, rcaLocalRecovery: null,
+                                          rcaError: null,
+                                        }))}>Use my browser-tab response instead</button>
+                                      <button type="button" className="car-invite-btn" onClick={() => updateEntry(entry.token, current => ({
+                                        ...current, rcaLocalRecovery: null,
+                                      }))}>Keep server version</button>
+                                    </div>}
                                     {entry.rcaError && <div className="car-invite-error" role="alert">{entry.rcaError}<button type="button" onClick={() => void loadInvite(entry.token)}>Reload investigation</button></div>}
                                     <CarRcaWorkbench value={entry.rca} disabled={locked || !entry.rcaLoaded}
                                       onChange={(investigation) => updateEntry(entry.token, (current) => ({
