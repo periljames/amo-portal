@@ -172,3 +172,29 @@ export const saveCarRcaParetoSnapshot = (
   apiRequest<CarRcaParetoSnapshot>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/pareto-snapshots`), {
     method: "POST", body: JSON.stringify(payload), cacheTtlMs: 0, timeoutMs: 45000,
   });
+
+
+export type CarInviteAccessControl = {
+  expires_at: string | null;
+  revoked_at: string | null;
+  reason: string;
+  updated_by_user_id: string | null;
+  updated_at: string | null;
+};
+
+export const getCarInviteAccessControl = (amoCode: string, carId: string) =>
+  apiRequest<CarInviteAccessControl>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/invite-access`), { cacheTtlMs: 0 });
+
+export const updateCarInviteAccessControl = (
+  amoCode: string, carId: string,
+  payload: { expires_at?: string | null; revoke: boolean; reason: string },
+) =>
+  apiRequest<CarInviteAccessControl>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/invite-access`), {
+    method: "PUT", body: JSON.stringify(payload), cacheTtlMs: 0,
+  });
+
+export const rotateCarInviteAccess = (amoCode: string, carId: string, reason: string) =>
+  apiRequest<CarInviteAccessControl & { new_invite_url: string }>(
+    qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/invite-access/rotate`),
+    { method: "POST", body: JSON.stringify({ reason }), cacheTtlMs: 0 },
+  );
