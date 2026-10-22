@@ -395,8 +395,8 @@ def _close_control_loop_guarded(
             QualityCarRcaAction.amo_id == ctx.amo_id,
             QualityCarRcaAction.car_id == car_id,
         ).all()
-        if not any(action.kind == "CORRECTIVE" for action in actions):
-            raise HTTPException(status_code=409, detail="Structured CAR requires at least one corrective action before closure.")
+        if not any(action.kind == "CORRECTIVE" and action.state == "VERIFIED" for action in actions):
+            raise HTTPException(status_code=409, detail="At least one causal corrective action must be independently verified before closure. Cancelled actions do not satisfy the gate.")
         pending = [action.sequence_no for action in actions if action.state not in {"VERIFIED", "CANCELLED"}]
         if pending:
             raise HTTPException(
