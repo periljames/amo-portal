@@ -63,11 +63,12 @@ class Investigation(BaseModel):
 
 
 class EffectivenessProposal(BaseModel):
-    expected_result: str = Field(min_length=8, max_length=8000)
-    verification_method: str = Field(min_length=8, max_length=8000)
-    measurable_success_criterion: str = Field(min_length=8, max_length=8000)
-    observation_period: str = Field(min_length=3, max_length=255)
-    proposed_review_date: date
+    # Partial drafts are valid. Adoption requires complete measured criteria.
+    expected_result: str = Field(default="", max_length=8000)
+    verification_method: str = Field(default="", max_length=8000)
+    measurable_success_criterion: str = Field(default="", max_length=8000)
+    observation_period: str = Field(default="", max_length=255)
+    proposed_review_date: date | None = None
     supporting_records: list[str] = Field(default_factory=list, max_length=40)
 
 
@@ -606,6 +607,14 @@ def adopt_car_effectiveness_proposal(
     proposal = investigation.effectiveness_proposal
     if proposal is None:
         raise HTTPException(status_code=422, detail="Responder has not supplied an effectiveness proposal.")
+    if not all((
+        len(proposal.expected_result.strip()) >= 8,
+        len(proposal.verification_method.strip()) >= 8,
+        len(proposal.measurable_success_criterion.strip()) >= 8,
+        len(proposal.observation_period.strip()) >= 3,
+        proposal.proposed_review_date is not None,
+    )):
+        raise HTTPException(status_code=422, detail="Complete the expected result, measurement, verification method, observation period and review date.")
     if proposal.proposed_review_date < date.today():
         raise HTTPException(status_code=422, detail="Update the expired proposed review date through controlled rework.")
     if payload.responsible_reviewer_user_id in {car.assigned_to_user_id} | {
