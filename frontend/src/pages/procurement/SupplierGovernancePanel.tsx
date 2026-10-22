@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 
@@ -299,7 +300,7 @@ export default function SupplierGovernancePanel({ amoCode, supplier, canQuality,
     }));
   }
 
-  if (loading && !detail) return <aside className="supplier-gov"><p>Loading governed supplier evidence…</p></aside>;
+  if (loading && !detail) return <aside className="supplier-gov"><p><InlineLoading label={"Loading governed supplier evidence…"}/></p></aside>;
 
   return (
     <aside className="supplier-gov" aria-label={`Supplier governance for ${supplier.legal_name}`}>

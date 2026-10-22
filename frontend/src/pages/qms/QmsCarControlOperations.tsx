@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { caseDate } from "../qualityAudits/carCaseModel";
 import { personDisplay } from "../../utils/personDisplay";
 import React, { useEffect, useMemo, useState } from "react";
@@ -396,7 +397,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
 
       <section className="card" aria-labelledby="car-response-heading">
         <div className="card__header"><div><h2 id="car-response-heading">Corrective action response</h2><p>Auditee/responsible-manager submission retained separately from Quality review and staged governance.</p></div><button className="btn btn--small" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${carId}`)}>Open CAR review</button></div>
-        {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted">Loading response history…</p> : null}
+        {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted"><InlineLoading label={"Loading response history…"}/></p> : null}
         {latestResponse || inviteQuery.data ? (
           <div className="stack">
             <div className="stats-grid"><div><span className="muted">Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted">Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted">RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted">CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>

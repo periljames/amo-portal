@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React from "react";
 
 type DashboardCardProps = {
@@ -34,7 +35,7 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
       </header>
 
       <div className={`qms-dashboard-card__body ${bodyClassName ?? ""}`.trim()}>
-        {isLoading ? <div className="qms-dashboard-card__state">Loading…</div> : null}
+        {isLoading ? <div className="qms-dashboard-card__state"><InlineLoading label={"Loading…"}/></div> : null}
         {!isLoading && isEmpty ? <div className="qms-dashboard-card__state">{emptyMessage}</div> : null}
         {!isLoading && !isEmpty ? children : null}
       </div>

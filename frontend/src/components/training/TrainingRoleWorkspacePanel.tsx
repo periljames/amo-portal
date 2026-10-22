@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getCachedUser } from "../../services/auth";
@@ -152,7 +153,7 @@ const TrainingRoleWorkspacePanel = () => {
                 </div>
               ) : <p className="text-muted">No governed Training actions are currently waiting in this workspace.</p>}
             </div>
-          ) : loading ? <p>Loading team Training workspace…</p> : null}
+          ) : loading ? <p><InlineLoading label={"Loading team Training workspace…"}/></p> : null}
         </div>
       </section>
       <TrainingPerson360Drawer userId={person360UserId} isOpen={Boolean(person360UserId)} onClose={() => setPerson360UserId(null)} />

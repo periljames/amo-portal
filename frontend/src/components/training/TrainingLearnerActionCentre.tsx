@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -459,7 +460,7 @@ const TrainingLearnerActionCentre = () => {
           <button type="button" className="secondary-chip-btn" onClick={() => void load()} disabled={loading}>Refresh</button>
         </div>
 
-        {loading ? <p>Loading learner workflow actions…</p> : null}
+        {loading ? <p><InlineLoading label={"Loading learner workflow actions…"}/></p> : null}
         {error ? <div className="card card--error"><p>{error}</p></div> : null}
         {success ? <div className="card card--success"><p>{success}</p></div> : null}
 

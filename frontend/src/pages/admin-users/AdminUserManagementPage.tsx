@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { sanitizeDownloadFilename } from "../../utils/downloads";
 import { isTenantAdmin } from "../../utils/tenantAccess";
 import React, { useEffect, useMemo, useState } from "react";
@@ -391,7 +392,7 @@ export default function AdminUserManagementPage() {
   if (!currentUser || !canAccessAdmin) {
     return (
       <DepartmentLayout amoCode={amoCode ?? ctx.amoCode ?? "UNKNOWN"} activeDepartment="admin-users">
-        <div className="aum2-shell"><div className="aum2-empty">Loading user management…</div></div>
+        <div className="aum2-shell"><div className="aum2-empty"><InlineLoading label={"Loading user management…"}/></div></div>
       </DepartmentLayout>
     );
   }
@@ -644,7 +645,7 @@ export default function AdminUserManagementPage() {
           <><section className="aum2-panel">
             <div className="aum2-section-heading"><div><h2>Organisation appointments</h2><p>Maintain actual positions, reporting lines and effective-dated appointments in Workforce. The access profiles below define portal permissions.</p></div></div>
             <Link className="aum2-primary-action" to={`/maintenance/${amoCode}/rostering/settings?section=workforce&workforce_view=governance`}>Open Workforce structure and appointments</Link>
-          </section><React.Suspense fallback={<section className="aum2-panel">Loading roles and structure…</section>}>
+          </section><React.Suspense fallback={<section className="aum2-panel"><InlineLoading label={"Loading roles and structure…"}/></section>}>
             <AccessRolesPanel amoId={effectiveAmoId} />
           </React.Suspense></>
         ) : null}
@@ -666,7 +667,7 @@ export default function AdminUserManagementPage() {
                 {groups.map((group: AdminUserGroupRead) => (
                   <div key={group.id}><div><strong>{group.name}</strong><span>{group.member_count} members · {group.code}</span></div>{!group.is_system_managed ? <IconButton label={`Delete ${group.name}`} danger onClick={() => { if (window.confirm(`Delete ${group.name}?`)) deleteGroupMutation.mutate(group.id); }}><Trash2 size={15} /></IconButton> : null}</div>
                 ))}
-                {groupsQuery.isPending ? <div role="status" className="aum2-empty">Loading groups…</div> : groupsQuery.isError ? <div role="alert" className="aum2-empty">Unable to load groups. <button type="button" onClick={() => void groupsQuery.refetch()}>Retry groups</button></div> : !groups.length ? <div className="aum2-empty">No groups configured.</div> : null}
+                {groupsQuery.isPending ? <div className="aum2-empty"><InlineLoading label={"Loading groups…"}/></div> : groupsQuery.isError ? <div role="alert" className="aum2-empty">Unable to load groups. <button type="button" onClick={() => void groupsQuery.refetch()}>Retry groups</button></div> : !groups.length ? <div className="aum2-empty">No groups configured.</div> : null}
               </div>
             </article>
           </section>

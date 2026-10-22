@@ -1,3 +1,5 @@
+import { qmsPageLoaders } from "./app/qmsRouteLoaders";
+import WorkspaceLoading from "./components/shared/WorkspaceLoading";
 import { isTenantAdmin } from "./utils/tenantAccess";
 // src/router.tsx
 // App routing
@@ -197,10 +199,10 @@ const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/Publ
 const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 
 const QualityAuditAssuranceDashboardPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditAssuranceDashboardPage"));
-const QualityAuditsWorkspacePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditsWorkspacePage"));
-const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditPlanSchedulePage"));
-const QualityAuditScopesPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditScopesPage"));
-const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
+const QualityAuditsWorkspacePage = lazyDefault(qmsPageLoaders.auditWorkspace);
+const QualityAuditPlanSchedulePage = lazyDefault(qmsPageLoaders.auditPlan);
+const QualityAuditScopesPage = lazyDefault(qmsPageLoaders.auditScopes);
+const QualityAuditRegisterPage = lazyDefault(qmsPageLoaders.auditRegister);
 const QualityFindingDetailPage = lazyDefault(() => import("./pages/qualityAudits/QualityFindingDetailPage"));
 const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
 const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
@@ -388,14 +390,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   return children;
 };
 
-const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
-  <div className="page-loading" role="status" aria-live="polite">
-    <div className="page-loading__card">
-      <div className="page-loading__spinner" />
-      <div className="page-loading__label">{label}</div>
-    </div>
-  </div>
-);
+const PageRouteLoading: React.FC<{ label?: string }> = ({ label }) => <WorkspaceLoading label={label} />;
 
 type PortalRouteErrorBoundaryInnerProps = {
   children: React.ReactNode;

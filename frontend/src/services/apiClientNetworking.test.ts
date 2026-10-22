@@ -42,6 +42,41 @@ describe("portal networking queue", () => {
     await Promise.all(active);
     expect(state.fetch).toHaveBeenCalledTimes(6);
   });
+  it("opens fresh cached data even when every network slot is occupied", async () => {
+    state.fetch.mockResolvedValueOnce(response());
+    await apiRequest("/fast-cache/records");
+    const release: Array<(value: Response) => void> = [];
+    state.fetch.mockImplementation(() => new Promise<Response>((resolve) => release.push(resolve)));
+    const active = Array.from({ length: 6 }, (_, index) => apiRequest(`/fast-cache/slow/${index}`, { cacheTtlMs: 0 }));
+    await vi.waitFor(() => expect(state.fetch).toHaveBeenCalledTimes(7));
+    await expect(apiRequest("/fast-cache/records")).resolves.toEqual({});
+    expect(state.fetch).toHaveBeenCalledTimes(7);
+    release.forEach((resolve) => resolve(response()));
+    await Promise.all(active);
+  });
+  it("bounds queue waiting by the request deadline without sending an expired request", async () => {
+    const release: Array<(value: Response) => void> = [];
+    state.fetch.mockImplementation(() => new Promise<Response>((resolve) => release.push(resolve)));
+    const active = Array.from({ length: 6 }, (_, index) => apiRequest(`/network-deadline/${index}`, { cacheTtlMs: 0 }));
+    await vi.waitFor(() => expect(state.fetch).toHaveBeenCalledTimes(6));
+    await expect(apiRequest("/network-deadline/expired", { cacheTtlMs: 0, timeoutMs: 20 })).rejects.toThrow("waiting for a network slot");
+    release.forEach((resolve) => resolve(response()));
+    await Promise.all(active);
+    expect(state.fetch).toHaveBeenCalledTimes(6);
+  });
+  it("deducts time spent queued from the transport timeout", async () => {
+    const release: Array<(value: Response) => void> = [];
+    state.fetch.mockImplementation(() => new Promise<Response>((resolve) => release.push(resolve)));
+    const active = Array.from({ length: 6 }, (_, index) => apiRequest(`/network-budget/${index}`, { cacheTtlMs: 0 }));
+    await vi.waitFor(() => expect(state.fetch).toHaveBeenCalledTimes(6));
+    const waiting = apiRequest("/network-budget/waiting", { cacheTtlMs: 0, timeoutMs: 1000 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    release.forEach((resolve) => resolve(response()));
+    await vi.waitFor(() => expect(state.fetch).toHaveBeenCalledTimes(7));
+    expect(state.fetch.mock.calls[6][1].timeoutMs).toBeLessThan(1000);
+    release[6](response());
+    await Promise.all([...active, waiting]);
+  });
   it("does not send an old account's waiting request after account switching", async () => {
     const release: Array<(value: Response) => void> = [];
     state.fetch.mockImplementation(() => new Promise<Response>((resolve) => release.push(resolve)));

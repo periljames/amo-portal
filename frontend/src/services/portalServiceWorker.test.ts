@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const source = readFileSync(new URL("../../public/portal-sw.js", import.meta.url), "utf8");
 
+const workerVersion = /const VERSION = "([^"]+)"/.exec(source)![1];
+
 function worker(fetch: typeof globalThis.fetch) {
   const stores = new Map<string, Map<string, Response>>();
   const handlers = new Map<string, (event: unknown) => void>();
@@ -40,6 +42,16 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("serves content-addressed chunks without re-downloading them on a weak link", async () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    const { context } = worker(fetch);
+    context.caches.open = vi.fn().mockResolvedValue({ match: vi.fn(async () => new Response("cached immutable code")), put: vi.fn() });
+    const sandbox = { ...context, request: new Request("https://portal.test/assets/workspace-Ab12_Cd3.js") };
+    const result = await runInNewContext("cacheFirstAsset(request)", sandbox) as Response;
+    expect(await result.text()).toBe("cached immutable code");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("serves precached public code when a module reload adds an Origin header", async () => {
     const { context } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
     const response = new Response("cached module", { headers: { Vary: "Origin" } });
@@ -106,7 +118,7 @@ describe("QMS service-worker caching", () => {
       vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })),
     );
     stores.set(
-      "amo-portal-shell-v11",
+      `amo-portal-shell-${workerVersion}`,
       new Map([["/", new Response("offline shell", { headers: { "Content-Type": "text/html" } })]]),
     );
     const sandbox = { ...context, waitUntil };
@@ -116,7 +128,7 @@ describe("QMS service-worker caching", () => {
     )) as Response;
     expect(await result.text()).toBe("offline shell");
     await Promise.all(background);
-    expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("offline shell");
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.clone().text()).toBe("offline shell");
   });
 
   it("acknowledges browser-only audit readiness only after QMS chunks are cached", async () => {
@@ -151,6 +163,12 @@ describe("QMS service-worker caching", () => {
     }
   });
 
+  it("prefers current HTML over a saved shell when the server responds promptly", async () => {
+    const { context, stores, waitUntil } = worker(vi.fn(async () => new Response("current shell", { headers: { "Content-Type": "text/html" } })));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("old shell")]]));
+    const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })", { ...context, waitUntil }) as Response;
+    expect(await response.text()).toBe("current shell");
+  });
   it("returns the cached shell without waiting for a slow network refresh", async () => {
     vi.useFakeTimers();
     try {
@@ -159,17 +177,18 @@ describe("QMS service-worker caching", () => {
         finish = resolve;
       });
       const { context, stores, background, waitUntil } = worker(vi.fn().mockReturnValue(pending));
-      stores.set("amo-portal-shell-v11", new Map([["/", new Response("saved shell")]]));
+      stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("saved shell")]]));
       const sandbox = { ...context, waitUntil };
       const result = runInNewContext(
         "cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })",
         sandbox,
       ) as Promise<Response>;
-      // No timers or network completion are needed for a cached navigation.
+      // The stale-shell fallback is bounded, even if the server never responds.
+      await vi.advanceTimersByTimeAsync(350);
       expect(await (await result).text()).toBe("saved shell");
       finish(new Response("fresh shell", { headers: { "Content-Type": "text/html" } }));
       await Promise.all(background);
-      expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("fresh shell");
+      expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.clone().text()).toBe("fresh shell");
     } finally {
       vi.useRealTimers();
     }

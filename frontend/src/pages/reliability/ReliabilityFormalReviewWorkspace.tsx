@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 
 import {
@@ -346,7 +347,7 @@ const ReliabilityFormalReviewWorkspace: React.FC = () => {
   }
 
   if (loading) {
-    return <div className="rfw-loading" role="status">Loading controlled Reliability reporting…</div>;
+    return <div className="rfw-loading"><InlineLoading label={"Loading controlled Reliability reporting…"}/></div>;
   }
 
   return (

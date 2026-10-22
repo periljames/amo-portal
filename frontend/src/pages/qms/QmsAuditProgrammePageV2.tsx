@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
@@ -2109,9 +2110,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                   </label>
                 </div>
                 {universeQuery.isLoading || standardAreasQuery.isLoading ? (
-                  <p className="qms-audit-programme-flow__empty">
-                    Loading audit areas…
-                  </p>
+                  <p className="qms-audit-programme-flow__empty"><InlineLoading label={"Loading audit areas…"}/></p>
                 ) : !visibleUniverseItems.length ? (
                   <div className="qms-audit-programme-flow__empty qms-audit-programme-flow__empty--portfolio">
                     <div>
@@ -2157,9 +2156,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                 <p>Select a programme revision.</p>
               </div>
             ) : detailQuery.isLoading ? (
-              <p className="qms-audit-programme-flow__empty">
-                Loading programme…
-              </p>
+              <p className="qms-audit-programme-flow__empty"><InlineLoading label={"Loading programme…"}/></p>
             ) : !selected ? (
               <p className="qms-audit-programme-flow__empty">
                 Programme not available.
@@ -3697,9 +3694,7 @@ const QmsAuditProgrammePageV2: React.FC = () => {
                     </span>
                   </div>
                 ) : aircraftQuery.isLoading ? (
-                  <p className="qms-audit-programme-flow__drawer-note is-wide">
-                    Loading active Fleet aircraft…
-                  </p>
+                  <p className="qms-audit-programme-flow__drawer-note is-wide"><InlineLoading label={"Loading active Fleet aircraft…"}/></p>
                 ) : !(aircraftQuery.data || []).length ? (
                   <p className="qms-audit-programme-flow__drawer-note is-wide">
                     No active aircraft are available. Add the aircraft to the

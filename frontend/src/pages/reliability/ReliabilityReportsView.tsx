@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -123,7 +124,7 @@ const ReliabilityReportsView: React.FC = () => {
     </div>
     <section className="reliability-v2__section">
       <div className="reliability-v2__section-heading"><div><p className="reliability-v2__eyebrow">Retained outputs</p><h2>Report register</h2></div><span>{reports.length} reports</span></div>
-      {loading ? <p>Loading reports…</p> : <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>ID</th><th>Window</th><th>Status</th><th>Created</th><th>Output</th></tr></thead><tbody>
+      {loading ? <p><InlineLoading label={"Loading reports…"}/></p> : <div className="reliability-v2__table-wrap"><table className="reliability-v2__table"><thead><tr><th>ID</th><th>Window</th><th>Status</th><th>Created</th><th>Output</th></tr></thead><tbody>
         {reports.map((report) => <tr key={report.id}><td>{report.id}</td><td>{report.window_start} → {report.window_end}</td><td>{report.status}</td><td>{new Date(report.created_at).toLocaleString()}</td><td><button type="button" className="btn btn-secondary" disabled={report.status !== "READY"} onClick={() => void download(report)}>Download</button>{downloadProgress?.reportId === report.id && <small>{downloadProgress.progress.percent?.toFixed(0) ?? 0}%</small>}</td></tr>)}
         {reports.length === 0 && <tr><td colSpan={5}>No reports have been generated.</td></tr>}
       </tbody></table></div>}

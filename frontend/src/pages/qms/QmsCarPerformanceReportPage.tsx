@@ -1,8 +1,12 @@
-import React, { useMemo, useState } from "react";
+import { Eye } from "lucide-react";
+import InlineLoading from "../../components/shared/InlineLoading";
+import { readCompleteRegister } from "../../services/qmsCompleteRegister";
+import { caseDate } from "../qualityAudits/carCaseModel";
+import React, { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { AgGridReact } from "ag-grid-react";
+import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-alpine.css";
 import { hasQmsRolePermission } from "../../app/routeGuards";
@@ -40,9 +44,8 @@ import {
   QMS_CLOSURE_TARGET,
 } from "./qmsCarPerformanceCharts";
 
-/** Single bounded page keeps Analysis under portal request timeouts. */
+/** Bounded requests keep analysis cancellable while reading the complete population. */
 const ANALYSIS_PAGE_SIZE = 100;
-const ANALYSIS_MAX_PAGES = 1;
 
 type ReportScope = "ALL" | "OPEN" | "OVERDUE" | "REVIEW" | "CLOSED";
 
@@ -65,10 +68,9 @@ const DEFAULT_CHART_KIND: Record<AnalysisMetricId, AnalysisChartKind> = {
 type LoadedReport = {
   items: CAROut[];
   total: number;
-  truncated: boolean;
 };
 
-type LoadedFindings = { rows: QMSAuditRegisterRowOut[]; total: number; truncated: boolean };
+type LoadedFindings = { rows: QMSAuditRegisterRowOut[]; total: number };
 
 type DepartmentMetric = {
   department: string;
@@ -90,10 +92,7 @@ function dateOnly(value: string | null | undefined): string | null {
 function formatDate(value: string | null | undefined): string {
   const clean = dateOnly(value);
   if (!clean) return "—";
-  const parsed = new Date(`${clean}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime())
-    ? clean
-    : parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  return caseDate(clean);
 }
 
 function humanize(value: string | null | undefined): string {
@@ -110,7 +109,8 @@ function ownerLabel(car: CAROut): string {
 }
 
 function csvCell(value: unknown): string {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const raw = String(value ?? "");
+  return `"${(/^[=+@-]/.test(raw) ? "'" + raw : raw).replaceAll('"', '""')}"`;
 }
 
 function escapeHtml(value: unknown): string {
@@ -122,84 +122,17 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-function asFiniteCount(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
-  return Math.floor(value);
-}
-
-/** Missing/partial paging metadata: empty rows or absent has_more means stop. */
-function pageIsExhausted(rowCount: number, hasMore: unknown, loaded: number, total: number | null): boolean {
-  if (rowCount === 0) return true;
-  if (hasMore === false || hasMore == null) return true;
-  if (total != null && loaded >= total) return true;
-  return false;
-}
-
-function resolveReportedTotal(reported: unknown, loaded: number, hasMore: unknown): number {
-  const total = asFiniteCount(reported);
-  if (total != null) return total;
-  if (hasMore === true) return loaded + 1;
-  return loaded;
-}
-
 async function loadAnalysisCars(amoCode: string, signal: AbortSignal): Promise<LoadedReport> {
-  const items: CAROut[] = [];
-  let offset = 0;
-  let total: number | null = null;
-  let hasMore: unknown = false;
-
-  for (let pageIndex = 0; pageIndex < ANALYSIS_MAX_PAGES; pageIndex += 1) {
-    const page = await qmsGetCarRegisterPage({
-      amoCode,
-      scope: "all",
-      limit: ANALYSIS_PAGE_SIZE,
-      offset,
-      signal,
-    });
-    const batch = Array.isArray(page?.items) ? page.items : [];
-    hasMore = page?.has_more;
-    total = resolveReportedTotal(page?.total, items.length + batch.length, hasMore);
-    items.push(...batch);
-    if (pageIsExhausted(batch.length, hasMore, items.length, asFiniteCount(page?.total))) break;
-    offset += asFiniteCount(page?.limit) || batch.length || ANALYSIS_PAGE_SIZE;
-  }
-
-  const resolvedTotal = total ?? items.length;
-  return {
-    items,
-    total: resolvedTotal,
-    truncated: hasMore === true || resolvedTotal > items.length,
-  };
+  const items = await readCompleteRegister(offset => qmsGetCarRegisterPage({ amoCode, scope: "all", limit: ANALYSIS_PAGE_SIZE, offset, signal }), signal);
+  return { items, total: items.length };
 }
 
 async function loadAnalysisFindings(amoCode: string, signal: AbortSignal): Promise<LoadedFindings> {
-  const rows: QMSAuditRegisterRowOut[] = [];
-  let offset = 0;
-  let total: number | null = null;
-  let hasMore: unknown = false;
-
-  for (let pageIndex = 0; pageIndex < ANALYSIS_MAX_PAGES; pageIndex += 1) {
-    const page = await qmsGetAuditRegisterPage({
-      amoCode,
-      domain: "AMO",
-      limit: ANALYSIS_PAGE_SIZE,
-      offset,
-      signal,
-    });
-    const batch = Array.isArray(page?.rows) ? page.rows : [];
-    hasMore = page?.has_more;
-    total = resolveReportedTotal(page?.total, rows.length + batch.length, hasMore);
-    rows.push(...batch);
-    if (pageIsExhausted(batch.length, hasMore, rows.length, asFiniteCount(page?.total))) break;
-    offset += asFiniteCount(page?.limit) || batch.length || ANALYSIS_PAGE_SIZE;
-  }
-
-  const resolvedTotal = total ?? rows.length;
-  return {
-    rows,
-    total: resolvedTotal,
-    truncated: hasMore === true || resolvedTotal > rows.length,
-  };
+  const rows = await readCompleteRegister(async offset => {
+    const page = await qmsGetAuditRegisterPage({ amoCode, limit: ANALYSIS_PAGE_SIZE, offset, signal });
+    return { ...page, items: page.rows.map(row => ({ ...row, id: row.finding.id })) };
+  }, signal);
+  return { rows, total: rows.length };
 }
 
 const QmsCarPerformanceReportPage: React.FC = () => {
@@ -270,9 +203,8 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     [allCars],
   );
 
-  const filteredCars = useMemo(() => {
+  const matchesCar = useCallback((car: CAROut) => {
     const needle = search.trim().toLowerCase();
-    return allCars.filter((car) => {
       if (scope === "OPEN" && !isOpen(car)) return false;
       if (scope === "OVERDUE" && !isOverdue(car, today)) return false;
       if (scope === "REVIEW" && !isInReview(car)) return false;
@@ -298,8 +230,24 @@ const QmsCarPerformanceReportPage: React.FC = () => {
         if (!haystack.includes(needle)) return false;
       }
       return true;
-    });
-  }, [allCars, department, issuedFrom, issuedTo, priority, scope, search, today]);
+  }, [department, issuedFrom, issuedTo, priority, scope, search, today]);
+  const filteredCars = useMemo(() => allCars.filter(matchesCar), [allCars, matchesCar]);
+  const filteredFindings = useMemo(() => allFindings.filter(row => {
+    const finding = row.finding;
+    const recorded = dateOnly(finding.created_at);
+    if (issuedFrom && (!recorded || recorded < issuedFrom)) return false;
+    if (issuedTo && (!recorded || recorded > issuedTo)) return false;
+    const needle = search.trim().toLowerCase();
+    if (needle && ![finding.finding_ref, finding.description, finding.requirement_ref, row.audit.audit_ref, row.audit.title, ...row.linked_cars.map(car => `${car.car_number} ${car.responsible_personnel || ""}`)].filter(Boolean).join(" ").toLowerCase().includes(needle)) return false;
+    if (department || priority || scope !== "ALL") {
+      if (row.linked_cars.length) return row.linked_cars.some(matchesCar);
+      if (department || priority) return false;
+      if (scope === "OPEN") return !finding.closed_at;
+      if (scope === "CLOSED") return Boolean(finding.closed_at);
+      return false;
+    }
+    return true;
+  }), [allFindings, matchesCar, department, priority, scope, search, issuedFrom, issuedTo]);
 
   const metrics = useMemo(() => {
     const total = filteredCars.length;
@@ -307,14 +255,15 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     const overdue = filteredCars.filter((car) => isOverdue(car, today)).length;
     const review = filteredCars.filter(isInReview).length;
     const closed = filteredCars.filter(isClosed).length;
+    const overdueReview = filteredCars.filter(car => isInReview(car) && isOverdue(car, today)).length;
     const measurable = filteredCars.filter(isMeasurableClosure);
     const onTime = measurable.filter(isOnTimeClosure).length;
     const late = measurable.length - onTime;
     const onTimePercent = measurable.length ? (onTime / measurable.length) * 100 : null;
-    const observations = allFindings.filter(isObservationFinding).length;
-    const withoutCar = allFindings.filter((row) => row.linked_cars.length === 0 && !isObservationFinding(row)).length;
-    return { total, open, overdue, review, closed, measurable: measurable.length, onTime, late, onTimePercent, totalFindings: allFindings.length, observations, withoutCar };
-  }, [allFindings, filteredCars, today]);
+    const observations = filteredFindings.filter(isObservationFinding).length;
+    const withoutCar = filteredFindings.filter((row) => row.linked_cars.length === 0 && !isObservationFinding(row)).length;
+    return { total, open, overdue, review, overdueReview, closed, measurable: measurable.length, onTime, late, onTimePercent, totalFindings: filteredFindings.length, observations, withoutCar };
+  }, [filteredFindings, filteredCars, today]);
 
   const departmentMetrics = useMemo<DepartmentMetric[]>(() => {
     const grouped = new Map<string, DepartmentMetric>();
@@ -344,11 +293,11 @@ const QmsCarPerformanceReportPage: React.FC = () => {
 
   const qpiChart = useMemo(() => buildQpiChartData(metrics.onTimePercent), [metrics.onTimePercent]);
   const workloadChart = useMemo(
-    () => buildWorkloadChartData({ open: metrics.open, overdue: metrics.overdue, review: metrics.review, closed: metrics.closed }),
-    [metrics.closed, metrics.open, metrics.overdue, metrics.review],
+    () => buildWorkloadChartData({ open: metrics.open, overdue: metrics.overdue, review: metrics.review, overdueReview: metrics.overdueReview, closed: metrics.closed }),
+    [metrics.closed, metrics.open, metrics.overdue, metrics.review, metrics.overdueReview],
   );
   const departmentExposure = useMemo(() => buildDepartmentExposureData(filteredCars, today), [filteredCars, today]);
-  const findingConversion = useMemo(() => buildFindingConversionData(allFindings), [allFindings]);
+  const findingConversion = useMemo(() => buildFindingConversionData(filteredFindings), [filteredFindings]);
   const overdueAging = useMemo(
     () => buildOverdueAgingData(filteredCars, today).map((row) => ({
       name: row.bucket,
@@ -406,7 +355,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     { headerName: "Agreed due", flex: .8, minWidth: 105, valueGetter: ({ data }) => formatDate(data ? agreedDue(data) : null) },
     { headerName: "Timeliness", flex: .75, minWidth: 100, valueGetter: ({ data }) => !data ? "" : isMeasurableClosure(data) ? (isOnTimeClosure(data) ? "On time" : "Late") : isOverdue(data, today) ? "Overdue" : "—" },
     { headerName: "RCA / CAP", flex: .85, minWidth: 115, valueGetter: ({ data }) => data ? `${humanize(data.root_cause_status)} · ${humanize(data.capa_status)}` : "" },
-    { headerName: "", pinned: "right", width: 54, minWidth: 54, maxWidth: 54, sortable: false, cellRenderer: ({ data }: ICellRendererParams<CAROut>) => data ? <button type="button" className="qms-checklist-library__icon" title="Open corrective action" aria-label={`Open ${data.car_number}`} onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${encodeURIComponent(data.id)}`)}>Open</button> : null },
+    { headerName: "", pinned: "right", width: 54, minWidth: 54, maxWidth: 54, sortable: false, cellRenderer: ({ data }: ICellRendererParams<CAROut>) => data ? <button type="button" className="qms-car-perf-row-action" title="Open corrective action" aria-label={`Open ${data.car_number}`} onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${encodeURIComponent(data.id)}`)}><Eye size={15} aria-hidden /></button> : null },
   ], [amoCode, navigate, today]);
 
   const activeFilterLabel = useMemo(() => {
@@ -477,7 +426,8 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     const onTimeText = metrics.onTimePercent == null ? "N/A" : `${metrics.onTimePercent.toFixed(1)}%`;
     const targetPosition = metrics.onTimePercent == null ? "Insufficient measurable closures" : metrics.onTimePercent >= QMS_CLOSURE_TARGET ? "Target achieved" : "Below target";
     popup.document.open();
-    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>QMS CAR Performance</title><style>@page{size:A4 landscape;margin:12mm}body{font:11px Arial,sans-serif;color:#111}h1{font-size:20px;margin:0 0 3px}h2{font-size:14px;border-bottom:1px solid #333;padding-bottom:4px;margin-top:18px}.meta{margin:6px 0 14px;color:#444}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}.kpi{border:1px solid #aaa;padding:7px}.kpi span{display:block;color:#555;font-size:9px;text-transform:uppercase}.kpi strong{font-size:16px}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:9px}th,td{border:1px solid #aaa;padding:4px;vertical-align:top;text-align:left}th{background:#eee}.note{border:1px solid #aaa;padding:7px;margin:8px 0}.no-print{margin-bottom:8px}@media print{.no-print{display:none}}</style></head><body><button class="no-print" onclick="window.print()">Print / Save PDF</button><h1>QMS CAR Performance Report</h1><div class="meta">Generated ${escapeHtml(generatedAt.toLocaleString())}<br>Filters: ${escapeHtml(activeFilterLabel)}</div><div class="note"><strong>QMSM 2.5 — Quality Performance Indicator 3:</strong> 80% closure of findings within the agreed timeframe. This report measures closed CARs where both an agreed/current due date and a closure date are recorded.</div><div class="kpis"><div class="kpi"><span>Total</span><strong>${metrics.total}</strong></div><div class="kpi"><span>Open</span><strong>${metrics.open}</strong></div><div class="kpi"><span>Overdue</span><strong>${metrics.overdue}</strong></div><div class="kpi"><span>Quality review</span><strong>${metrics.review}</strong></div><div class="kpi"><span>Closed</span><strong>${metrics.closed}</strong></div><div class="kpi"><span>On-time closure</span><strong>${escapeHtml(onTimeText)}</strong><div>${escapeHtml(targetPosition)}</div></div></div><h2>Department performance</h2><table><thead><tr><th>Department</th><th>Total</th><th>Open</th><th>Overdue</th><th>Review</th><th>Closed</th><th>On-time %</th></tr></thead><tbody>${departmentRows || '<tr><td colspan="7">No matching CARs.</td></tr>'}</tbody></table><h2>CAR detail</h2><table><thead><tr><th>CAR</th><th>Title</th><th>Department</th><th>Owner</th><th>Priority</th><th>Status</th><th>Agreed due</th><th>Closed</th><th>Timeliness</th></tr></thead><tbody>${carRows || '<tr><td colspan="9">No matching CARs.</td></tr>'}</tbody></table>${reportQuery.data?.truncated || findingsQuery.data?.truncated ? `<div class="note"><strong>Data warning:</strong> analysis is capped to the first ${ANALYSIS_PAGE_SIZE.toLocaleString()} rows per source. The printable detail should not be treated as a full historical extract.</div>` : ""}</body></html>`);
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>QMS CAR Performance</title><style>@page{size:A4 landscape;margin:12mm}body{font:11px Arial,sans-serif;color:#111}h1{font-size:20px;margin:0 0 3px}h2{font-size:14px;border-bottom:1px solid #333;padding-bottom:4px;margin-top:18px}.meta{margin:6px 0 14px;color:#444}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}.kpi{border:1px solid #aaa;padding:7px}.kpi span{display:block;color:#555;font-size:9px;text-transform:uppercase}.kpi strong{font-size:16px}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:9px}th,td{border:1px solid #aaa;padding:4px;vertical-align:top;text-align:left}th{background:#eee}.note{border:1px solid #aaa;padding:7px;margin:8px 0}.no-print{margin-bottom:8px}@media print{.no-print{display:none}}</style></head><body><button class="no-print" onclick="window.print()">Print / Save PDF</button><h1>QMS CAR Performance Report</h1><div class="meta">Generated ${escapeHtml(generatedAt.toLocaleString())}<br>Filters: ${escapeHtml(activeFilterLabel)}</div><div class="note"><strong>QMSM 2.5 — Quality Performance Indicator 3:</strong> 80% closure of findings within the agreed timeframe. This report measures closed CARs where both an agreed/current due date and a closure date are recorded.</div><div class="kpis"><div class="kpi"><span>Total</span><strong>${carsReady ? metrics.total : "—"}</strong></div><div class="kpi"><span>Open</span><strong>${carsReady ? metrics.open : "—"}</strong></div><div class="kpi"><span>Overdue</span><strong>${carsReady ? metrics.overdue : "—"}</strong></div><div class="kpi"><span>Quality review</span><strong>${carsReady ? metrics.review : "—"}</strong></div><div class="kpi"><span>Closed</span><strong>${metrics.closed}</strong></div><div class="kpi"><span>On-time closure</span><strong>${escapeHtml(onTimeText)}</strong><div>${escapeHtml(targetPosition)}</div></div></div><h2>Department performance</h2><table><thead><tr><th>Department</th><th>Total</th><th>Open</th><th>Overdue</th><th>Review</th><th>Closed</th><th>On-time %</th></tr></thead><tbody>${departmentRows || '<tr><td colspan="7">No matching CARs.</td></tr>'}</tbody></table><h2>CAR detail</h2><table><thead><tr><th>CAR</th><th>Title</th><th>Department</th><th>Owner</th><th>Priority</th><th>Status</th><th>Agreed due</th><th>Closed</th><th>Timeliness</th></tr></thead><tbody>${carRows || '<tr><td colspan="9">No matching CARs.</td></tr>'}</tbody></table></body></html>`);
+    popup.addEventListener("load", () => { popup.focus(); popup.print(); }, { once: true });
     popup.document.close();
   };
 
@@ -490,7 +440,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
   }
 
   if (!anyReady && (reportQuery.isLoading || findingsQuery.isLoading)) {
-    return <QualityAuditsSectionLayout title="Analysis" subtitle="Finding conversion, corrective-action exposure and closure effectiveness."><div className="card">Loading analysis…</div></QualityAuditsSectionLayout>;
+    return <QualityAuditsSectionLayout title="Analysis" subtitle="Finding conversion, corrective-action exposure and closure effectiveness."><div className="card"><InlineLoading label={"Loading analysis…"}/></div></QualityAuditsSectionLayout>;
   }
 
   if (!anyReady) {
@@ -512,8 +462,8 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     <div className="qms-car-perf-actions">
       <button className="btn" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register`)}>Findings</button>
       <button className="btn" type="button" onClick={refreshAnalysis} disabled={reportQuery.isFetching || findingsQuery.isFetching}>Refresh</button>
-      <button className="btn" type="button" onClick={exportCsv} disabled={!carsReady}>Export CSV</button>
-      <button className="btn btn--primary" type="button" onClick={printReport} disabled={!carsReady}>Print report</button>
+      <button className="btn" type="button" onClick={exportCsv} disabled={!carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Export CSV</button>
+      <button className="btn btn--primary" type="button" onClick={printReport} disabled={!carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Print report</button>
     </div>
   );
 
@@ -523,18 +473,15 @@ const QmsCarPerformanceReportPage: React.FC = () => {
       subtitle="Finding conversion, corrective-action exposure, ownership and closure effectiveness."
     >
       <main className="page qms-car-performance-report">
+        {issuedFrom && issuedTo && issuedFrom > issuedTo ? <p role="alert">Choose an end date on or after the start date.</p> : null}
         {outputError ? <div className="alert alert--danger" role="alert">{outputError}</div> : null}
         {partialLoadError ? (
           <div className="alert alert--warning qms-car-perf-banner" role="status">
-            {partialLoadError} Charts use whichever source loaded successfully.{" "}
+            {partialLoadError} Available sources remain visible.{" "}
             <button className="btn" type="button" onClick={refreshAnalysis}>Retry failed source</button>
           </div>
         ) : null}
-        {reportQuery.data?.truncated || findingsQuery.data?.truncated ? (
-          <div className="alert alert--warning qms-car-perf-banner">
-            Analysis capped to first {ANALYSIS_PAGE_SIZE.toLocaleString()} rows per source. Refresh to reload, or use archival export for full history.
-          </div>
-        ) : null}
+
 
         <section className="card qms-car-perf-filters" aria-label="Report filters">
           <div className="qms-car-perf-filters-head">
@@ -544,24 +491,24 @@ const QmsCarPerformanceReportPage: React.FC = () => {
             {pageActions}
           </div>
           <div className="form-grid">
-            <label>Scope<select className="input" value={scope} onChange={(event) => setScope(event.target.value as ReportScope)}><option value="ALL">All CARs</option><option value="OPEN">Open / active</option><option value="OVERDUE">Overdue</option><option value="REVIEW">Awaiting Quality review</option><option value="CLOSED">Closed</option></select></label>
-            <label>Dept<select className="input" value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">All departments</option>{departments.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <label>Priority<select className="input" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select></label>
-            <label>From<input className="input" type="date" value={issuedFrom} onChange={(event) => setIssuedFrom(event.target.value)} /></label>
-            <label>To<input className="input" type="date" value={issuedTo} onChange={(event) => setIssuedTo(event.target.value)} /></label>
-            <label>Search<input className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="CAR, audit, finding, owner…" /></label>
+            <label>Scope<select aria-label="Scope" className="input" value={scope} onChange={(event) => setScope(event.target.value as ReportScope)}><option value="ALL">All CARs</option><option value="OPEN">Open / active</option><option value="OVERDUE">Overdue</option><option value="REVIEW">Awaiting Quality review</option><option value="CLOSED">Closed</option></select></label>
+            <label>Department<select aria-label="Department" className="input" value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">All departments</option>{departments.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label>Priority<select aria-label="Priority" className="input" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">All priorities</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select></label>
+            <label>From<input aria-label="From" className="input" type="date" value={issuedFrom} onChange={(event) => setIssuedFrom(event.target.value)} /></label>
+            <label>To<input aria-label="To" className="input" type="date" value={issuedTo} onChange={(event) => setIssuedTo(event.target.value)} /></label>
+            <label>Search<input aria-label="Search" className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="CAR, audit, finding, owner…" /></label>
           </div>
         </section>
 
         <section className="card qms-car-perf-kpis" aria-label="Key performance indicators">
           <div className="stats-grid">
-            <div><span className="muted">Findings</span><strong>{metrics.totalFindings}</strong></div>
-            <div><span className="muted">Observations</span><strong>{metrics.observations}</strong></div>
-            <div><span className="muted">NC w/o CAR</span><strong>{metrics.withoutCar}</strong></div>
-            <div><span className="muted">CARs</span><strong>{metrics.total}</strong></div>
-            <div><span className="muted">Open</span><strong>{metrics.open}</strong></div>
-            <div><span className="muted">Overdue</span><strong>{metrics.overdue}</strong></div>
-            <div><span className="muted">Review</span><strong>{metrics.review}</strong></div>
+            <div><span className="muted">Findings</span><strong>{findingsQuery.data ? metrics.totalFindings : "—"}</strong></div>
+            <div><span className="muted">Observations</span><strong>{findingsQuery.data ? metrics.observations : "—"}</strong></div>
+            <div><span className="muted">NC w/o CAR</span><strong>{findingsQuery.data ? metrics.withoutCar : "—"}</strong></div>
+            <div><span className="muted">CARs</span><strong>{carsReady ? metrics.total : "—"}</strong></div>
+            <div><span className="muted">Open</span><strong>{carsReady ? metrics.open : "—"}</strong></div>
+            <div><span className="muted">Overdue</span><strong>{carsReady ? metrics.overdue : "—"}</strong></div>
+            <div><span className="muted">Review</span><strong>{carsReady ? metrics.review : "—"}</strong></div>
             <div
               className={
                 metrics.onTimePercent == null
@@ -589,6 +536,13 @@ const QmsCarPerformanceReportPage: React.FC = () => {
               aria-selected={activeTab === tab.id}
               aria-controls={`qms-car-perf-panel-${tab.id}`}
               tabIndex={activeTab === tab.id ? 0 : -1}
+              onKeyDown={event => {
+                const index = ANALYSIS_TABS.findIndex(item => item.id === tab.id);
+                const next = event.key === "ArrowRight" ? (index + 1) % ANALYSIS_TABS.length : event.key === "ArrowLeft" ? (index + ANALYSIS_TABS.length - 1) % ANALYSIS_TABS.length : event.key === "Home" ? 0 : event.key === "End" ? ANALYSIS_TABS.length - 1 : -1;
+                if (next < 0) return;
+                event.preventDefault(); setActiveTab(ANALYSIS_TABS[next].id);
+                document.getElementById(`qms-car-perf-tab-${ANALYSIS_TABS[next].id}`)?.focus();
+              }}
               className={`qms-car-perf-tab${activeTab === tab.id ? " is-active" : ""}`}
               onClick={() => setActiveTab(tab.id)}
             >
@@ -641,13 +595,13 @@ const QmsCarPerformanceReportPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="qms-car-perf-canvas__chart" aria-label={`${activeMetricMeta.label} ${chartKind} chart`}>
-                  <AnalysisFlexibleChart
+                  {(chartMetric === "conversion" ? !findingsQuery.data : !carsReady) ? <p role="status">This source is unavailable. Retry to display the chart.</p> : chartMetric === "qpi" && !metrics.measurable ? <p className="qms-car-perf-chart-empty">No measured closures in this scope yet.</p> : <AnalysisFlexibleChart
                     metric={chartMetric}
                     chartKind={chartKind}
                     series={activeSeries}
                     stacked={chartMetric === "exposure" ? departmentExposure : undefined}
                     percentScale={chartMetric === "qpi"}
-                  />
+                  />}
                 </div>
               </article>
             </section>
@@ -718,7 +672,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
                   className="qa-register-grid-page__grid ag-theme-alpine qms-car-perf-register-grid qms-car-perf-register-grid--dept"
                   style={{ minHeight: 100, height: Math.max(100, Math.min(220, 36 + departmentMetrics.length * 36)) }}
                 >
-                  <AgGridReact<DepartmentMetric>
+                  <QmsWorkspaceGrid<DepartmentMetric>
                     rowData={departmentMetrics}
                     columnDefs={departmentColumns}
                     defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }}
@@ -726,8 +680,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
                     rowHeight={36}
                     headerHeight={32}
                     animateRows={false}
-                    suppressCellFocus
-                    overlayNoRowsTemplate='<span class="muted">No corrective actions match the active filters.</span>'
+                                        overlayNoRowsTemplate='<span class="muted">No corrective actions match the active filters.</span>'
                   />
                 </div>
               </article>
@@ -741,7 +694,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
                   <span className="badge badge--neutral">{filteredCars.length} row{filteredCars.length === 1 ? "" : "s"}</span>
                 </div>
                 <div className="qa-register-grid-page__grid ag-theme-alpine qms-car-perf-register-grid qms-car-perf-register-grid--detail">
-                  <AgGridReact<CAROut>
+                  <QmsWorkspaceGrid<CAROut>
                     rowData={filteredCars}
                     columnDefs={carColumns}
                     defaultColDef={{ resizable: true, sortable: true, suppressMovable: true }}
@@ -749,8 +702,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
                     rowHeight={44}
                     headerHeight={32}
                     animateRows={false}
-                    suppressCellFocus
-                    pagination
+                                        pagination
                     paginationPageSize={25}
                     paginationPageSizeSelector={[25, 50, 100]}
                     overlayNoRowsTemplate='<span class="muted">No corrective actions match the active filters.</span>'

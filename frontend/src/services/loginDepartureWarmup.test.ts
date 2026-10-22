@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { departureLabel, departurePhaseForPercent, waitForLoginPreloads } from "./loginDepartureWarmup";
+import { departureLabel, departurePhaseForPercent, waitForLoginPreloads, runLoginDepartureWarmup } from "./loginDepartureWarmup";
 
 describe("login departure phases", () => {
   it("maps takeoff progress to aviation phases", () => {
@@ -35,4 +35,13 @@ describe("authenticated landing warmup", () => {
       waitForLoginPreloads([Promise.reject(new Error("optional prefetch failed"))], 250),
     ).resolves.toBeUndefined();
   });
+});
+
+vi.mock("../app/routePreload", () => ({ preloadRoute: vi.fn(() => new Promise(() => {})) }));
+vi.mock("./auth", () => ({ getContext: () => ({}) }));
+vi.mock("./loginHomeHint", () => ({ rememberLoginHome: vi.fn() }));
+it("returns the authenticated destination while its module download is still pending", async () => {
+ const path = "/maintenance/test/quality";
+ const pending = runLoginDepartureWarmup({ user: {} as import("./auth").PortalUser, amoSlug: "test", landingPath: path, onProgress: vi.fn(), takeoffStartedAt: 0 });
+ expect(await Promise.race([pending, Promise.resolve("blocked")])).toBe(path);
 });

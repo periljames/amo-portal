@@ -8,6 +8,7 @@ type PortalErrorBoundaryState = {
 
 type Props = React.PropsWithChildren<{
   inline?: boolean;
+  resetKey?: string;
   title?: string;
   exitHref?: string;
   exitLabel?: string;
@@ -24,6 +25,13 @@ export default class PortalErrorBoundary extends React.Component<Props, PortalEr
     // Retain diagnostics for support without showing JavaScript internals or a
     // second global error overlay over the recovery controls below.
     console.error("[PortalErrorBoundary]", error, info.componentStack);
+  }
+
+  componentDidUpdate(previous: Props): void {
+    // Keep healthy shared controls mounted; retry a failed surface on navigation.
+    if (this.state.error && previous.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   private reload = (): void => {

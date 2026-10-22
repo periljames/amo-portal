@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React from "react";
 import FindingCaseView from "./FindingCaseView";
 import { useQuery } from "@tanstack/react-query";
@@ -54,7 +55,7 @@ const QualityFindingDetailPage: React.FC = () => {
         </button>
 
         {detailQuery.isLoading ? (
-          <div className="audit-panel qa-finding-detail__state" role="status">Loading finding…</div>
+          <div className="audit-panel qa-finding-detail__state"><InlineLoading label={"Loading finding…"}/></div>
         ) : unauthorized ? (
           <div className="audit-panel qa-finding-detail__state" role="alert">
             <AlertTriangle size={20} />

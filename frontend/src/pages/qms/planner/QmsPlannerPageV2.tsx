@@ -1,3 +1,4 @@
+import InlineLoading from "../../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -1484,7 +1485,7 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
                 <CalendarClock size={14} />
               </header>
               {schedulingQueueQuery.isLoading ? (
-                <p className="qms-planner-queue-empty">Loading programme requirements…</p>
+                <p className="qms-planner-queue-empty"><InlineLoading label={"Loading programme requirements…"}/></p>
               ) : schedulingQueueQuery.isError ? (
                 <p className="qms-planner-queue-empty">Queue could not be loaded.</p>
               ) : !schedulingQueue.length ? (

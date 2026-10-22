@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock3, RefreshCw, ShieldCheck, ShieldX, UserRoundCog } from "lucide-react";
@@ -230,7 +231,7 @@ export default function AdminAccessGovernancePage() {
               </div>
 
               {!canListGrants ? <div className="aag-empty"><UserRoundCog size={24} /><p>Activate Admin Profile to request and inspect administrator grants.</p></div> : null}
-              {grantsQuery.isLoading ? <div className="aag-empty"><Clock3 size={24} /><p>Loading governed requests…</p></div> : null}
+              {grantsQuery.isLoading ? <div className="aag-empty"><Clock3 size={24} /><p><InlineLoading label={"Loading governed requests…"}/></p></div> : null}
               {grantsQuery.isError ? <div className="aag-empty" role="alert"><ShieldX size={24} /><p>{grantsQuery.error instanceof Error ? grantsQuery.error.message : "Administrator requests could not be loaded."}</p></div> : null}
               {canListGrants && !grantsQuery.isLoading && !visibleGrants.length ? <div className="aag-empty"><ShieldCheck size={24} /><p>No {statusFilter === "ALL" ? "" : statusFilter.toLowerCase()} administrator grants.</p></div> : null}
 

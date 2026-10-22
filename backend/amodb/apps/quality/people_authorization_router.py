@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import or_, cast, String
 from sqlalchemy.orm import Session, noload, selectinload
 
 from amodb.apps.accounts import models as account_models
@@ -43,7 +43,7 @@ CaseStatus = Literal[
     "NOMINATED", "UNDER_REVIEW", "DEVELOPMENT", "AWAITING_EVIDENCE",
     "READY_FOR_DECISION", "RETURNED", "APPROVED", "REJECTED", "CANCELLED",
 ]
-CaseDecision = Literal["APPROVE", "REJECT", "RETURN"]
+CaseDecision = Literal["APPROVE", "REJECT", "RETURN", "CANCEL"]
 LifecycleDecision = Literal["SUSPEND", "REVOKE", "REINSTATE", "RENEW"]
 ReviewOutcome = Literal["CONTINUE", "CONTINUE_WITH_CONDITIONS", "SUSPEND", "REVOKE", "REQUIRES_ACTION"]
 EvidenceType = Literal[
@@ -199,7 +199,7 @@ def _case(db: Session, *, amo_id: str, case_id: str, lock: bool = False) -> Qual
         QualityAuthorizationCase.id == case_id,
     )
     if lock:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityAuthorizationCase)
     row = query.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Authorization case not found.")
@@ -215,7 +215,7 @@ def _privilege(db: Session, *, amo_id: str, privilege_id: str, lock: bool = Fals
         QualityPrivilege.id == privilege_id,
     )
     if lock:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityPrivilege)
     row = query.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Quality authorization not found.")
@@ -810,6 +810,7 @@ def authorization_people(
     search: str | None = Query(default=None, max_length=100),
     include_inactive: bool = False,
     limit: int = Query(default=250, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
@@ -831,7 +832,8 @@ def authorization_people(
             account_models.User.email.ilike(pattern),
             account_models.User.staff_code.ilike(pattern),
         ))
-    users = query.order_by(account_models.User.full_name.asc()).limit(limit).all()
+    total = query.count()
+    users = query.order_by(account_models.User.full_name.asc(), account_models.User.id).offset(offset).limit(limit).all()
     user_ids = [str(row.id) for row in users]
     privileges = (
         db.query(QualityPrivilege, QualityPrivilegeRule)
@@ -882,7 +884,7 @@ def authorization_people(
             "authorizations": active_auths,
             "open_cases": case_count.get(str(user.id), 0),
         })
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "has_more": offset + len(items) < total}
 
 
 @router.get("/authorization-control/people/{user_id}")
@@ -954,6 +956,7 @@ def list_authorization_cases(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=250, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     ctx: TenantContext = Depends(require_quality_permission("qms.people.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
@@ -965,15 +968,11 @@ def list_authorization_cases(
         query = query.filter(QualityAuthorizationCase.user_id == ctx.user_id)
     if status_filter:
         query = query.filter(QualityAuthorizationCase.status == status_filter.upper())
-    rows = query.order_by(QualityAuthorizationCase.updated_at.desc()).limit(limit).all()
     if search and search.strip():
-        term = search.strip().lower()
-        rows = [
-            row for row in rows
-            if term in str((row.person_snapshot or {}).get("name") or "").lower()
-            or term in str((row.requested_authorization_snapshot or {}).get("authorization") or "").lower()
-            or term in str(row.status or "").lower()
-        ]
+        pattern = f"%{search.strip()}%"
+        query = query.filter(or_(cast(QualityAuthorizationCase.person_snapshot, String).ilike(pattern), cast(QualityAuthorizationCase.requested_authorization_snapshot, String).ilike(pattern), QualityAuthorizationCase.status.ilike(pattern)))
+    total = query.count()
+    rows = query.order_by(QualityAuthorizationCase.updated_at.desc(), QualityAuthorizationCase.id).offset(offset).limit(limit).all()
     actor_ids = {
         str(value)
         for row in rows
@@ -981,7 +980,7 @@ def list_authorization_cases(
         if value
     }
     names = _actor_names(db, amo_id=ctx.amo_id, ids=actor_ids)
-    return {"items": [_case_summary(db, amo_id=ctx.amo_id, row=row, names=names) for row in rows], "total": len(rows)}
+    return {"items": [_case_summary(db, amo_id=ctx.amo_id, row=row, names=names) for row in rows], "total": total, "limit": limit, "offset": offset, "has_more": offset + len(rows) < total}
 
 
 @router.post("/authorization-control/cases", status_code=status.HTTP_201_CREATED)
@@ -1559,6 +1558,20 @@ def decide_authorization_case(
     if row.status in TERMINAL_CASE_STATUSES:
         raise HTTPException(status_code=409, detail="This authorization case already has a final decision.")
     previous = row.status
+    if payload.decision == "CANCEL":
+        row.status = "CANCELLED"
+        row.decision = "CANCELLED"
+        row.decision_reason = payload.reason.strip()
+        row.decided_by_user_id = ctx.user_id
+        row.decided_at = _utcnow()
+        row.updated_by_user_id = ctx.user_id
+        row.updated_at = _utcnow()
+        _case_event(db, ctx=ctx, row=row, action="CANCELLED", previous_status=previous,
+                    reason=payload.reason, after={"status": row.status, "decision": row.decision},
+                    source_references=payload.source_references)
+        db.commit()
+        return {"status": row.status}
+
     if payload.decision == "RETURN":
         row.status = "RETURNED"
         row.decision = "RETURNED"

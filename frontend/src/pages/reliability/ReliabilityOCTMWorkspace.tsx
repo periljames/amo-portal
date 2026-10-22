@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -347,7 +348,7 @@ export default function ReliabilityOCTMWorkspace(): React.ReactElement {
       </nav>
       {error && <p className="octm__error" role="alert">{error}</p>}
       {message && <p className="octm__message" role="status">{message}</p>}
-      {loading ? <p>Loading OCTM records…</p> : <>
+      {loading ? <p><InlineLoading label={"Loading OCTM records…"}/></p> : <>
         {view === "techlog" && <ReliabilityTechlogPageEntry aircraftOptions={aircraftOptions}
           canCreate={has("reliability.ingest") || (!!editingPage && has("reliability.data_quality.resolve"))}
           editPage={editingPage} onExitEdit={() => { setEditingPage(null); setView("register"); navigate(home + "/octm/register"); }}

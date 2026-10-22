@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -427,7 +428,7 @@ export default function AdminSaaSSettingsPage() {
             <a href={checkoutLink}>Continue to secure Stripe checkout</a>
           </div>
         ) : null}
-        {loading ? <div className="saas-admin__loading">Loading current backend configuration…</div> : null}
+        {loading ? <div className="saas-admin__loading"><InlineLoading label={"Loading current backend configuration…"}/></div> : null}
 
         <nav className="saas-admin__tabs" aria-label="SaaS administration sections">
           {(["providers", "modules", "billing", "pipeline", "readiness"] as Tab[]).map((item) => (

@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -200,7 +201,7 @@ const EmailLogsPage: React.FC = () => {
         </Panel>
 
         <Panel title="Email activity" className="admin-page__panel">
-          {loading && <p>Loading email logs…</p>}
+          {loading && <p><InlineLoading label={"Loading email logs…"}/></p>}
           {error && (
             <InlineAlert tone="danger" title="Error">
               <span>{error}</span>

@@ -327,12 +327,13 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
           const value = await response.clone().json().catch(() => undefined);
           assertRequestScope(requestScope);
           if (value !== undefined) {
-            await writeApiCache(
+            // Read-model cache persistence is optional; durable command writes remain awaited.
+            void writeApiCache(
               cachePath,
               value,
               offline?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
               requestScope,
-            );
+            ).catch(() => undefined);
             assertRequestScope(requestScope);
           }
         }

@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v11";
+const VERSION = "v13";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
@@ -226,10 +226,16 @@ async function cachedShellNavigation(request, preloadResponsePromise, event) {
     }
   })();
   if (!fallback) return network;
-  // Weak connectivity must not strand an already-cached workspace on a blank
-  // navigation. Keep the refresh alive after delivering the offline shell.
+  // Prefer a healthy server's current HTML so a prior release cannot keep
+  // booting removed chunks. Fall back promptly on slow/disconnected networks.
   event.waitUntil(network.then(() => undefined, () => undefined));
-  return fallback;
+  let deadline;
+  try {
+    return await Promise.race([
+      network,
+      new Promise(resolve => { deadline = setTimeout(() => resolve(fallback), 350); }),
+    ]);
+  } finally { clearTimeout(deadline); }
 }
 
 async function cacheFirstAsset(request) {
@@ -238,6 +244,12 @@ async function cacheFirstAsset(request) {
   // not distinguish a precache fetch from a module/CSS request after reload.
   // API and controlled-document requests never enter this handler.
   const cached = await cache.match(request, { ignoreVary: true });
+  const pathname = new URL(request.url, self.location.origin).pathname;
+  // A content hash (or PDF.js version) identifies immutable bytes. Re-fetching
+  // these on every cached navigation competes with API calls on weak links.
+  const immutable = /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.(?:m?js|css|woff2?|svg|png|webp)$/.test(pathname)
+    || /^\/pdfjs\/[^/]+\//.test(pathname);
+  if (cached && immutable) return cached;
   const networkPromise = fetch(request)
     .then(async (response) => {
       if (response.ok) await cache.put(request, response.clone());

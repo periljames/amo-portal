@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Move, Search, TriangleAlert } from "lucide-react";
 
@@ -319,7 +320,7 @@ const GoogleBaseLocationPicker: React.FC<Props> = ({
             <span>The map preview will centre on the saved point.</span>
           </div>
         ) : null}
-        {status === "loading" ? <div className="setup-google-map__loading">Loading Google Maps…</div> : null}
+        {status === "loading" ? <div className="setup-google-map__loading"><InlineLoading label={"Loading Google Maps…"}/></div> : null}
         {status === "error" ? (
           <div className="setup-google-map__error" role="alert">
             <TriangleAlert size={18} />

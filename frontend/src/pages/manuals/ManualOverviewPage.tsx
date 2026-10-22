@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { useEffect, useMemo, useState } from "react";
 import { BookOpen, GitCompareArrows, Send, Workflow } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -46,7 +47,7 @@ export default function PublicationOverviewPage() {
       subtitle={publication ? `${publication.code} · ${publication.manual_type}` : "Controlled publication and revision history"}
       actions={currentPublished ? <Link className="manuals-primary-btn" to={`${basePath}/${manualId}/rev/${currentPublished.id}/read`}><BookOpen size={16} /> Read current issue</Link> : undefined}
     >
-      {loading ? <div className="publication-record-empty">Loading publication record…</div> : null}
+      {loading ? <div className="publication-record-empty"><InlineLoading label={"Loading publication record…"}/></div> : null}
       {!loading && !publication ? <div className="publication-record-empty">Publication record not found.</div> : null}
       {publication ? (
         <>

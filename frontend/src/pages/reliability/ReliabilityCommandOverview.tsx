@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, Database, ExternalLink, RefreshCw, ShieldAlert } from "lucide-react";
@@ -36,7 +37,7 @@ export default function ReliabilityCommandOverview(): React.ReactElement {
         setLoading(true); setReload((v) => v + 1);
       }} disabled={loading}><RefreshCw size={15} aria-hidden="true" /> Refresh sources</button>
     </div>
-    {loading && <p role="status">Loading operational priorities and source freshness…</p>}
+    {loading && <p><InlineLoading label={"Loading operational priorities and source freshness…"}/></p>}
     {error && <div role="alert" className="rel-command__error">
       <ShieldAlert size={17} aria-hidden="true" /> Operational source data unavailable: {error}.
       Dashboard calculations do not replace operational source verification.

@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -446,7 +447,7 @@ export default function ReliabilityOperationalControl(): React.ReactElement {
       {message && <div className="reliability-v2__success" role="status">{message}</div>}
     </div>}
 
-    {pageLoading && <div className="reliability-v2__loading" role="status">Loading Reliability source controls…</div>}
+    {pageLoading && <div className="reliability-v2__loading"><InlineLoading label={"Loading Reliability source controls…"}/></div>}
     {!pageLoading && viewLoading && <div className="rel-ops__view-loading" role="status">Loading {activeDefinition.label.toLowerCase()}…</div>}
 
     {!pageLoading && view === "overview" && <Overview summary={summary} readiness={readiness} onNavigate={navigateView} />}

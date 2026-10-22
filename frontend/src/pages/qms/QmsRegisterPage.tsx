@@ -1,5 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import Pagination from "../../components/shared/Pagination";
+import RecordTable from "../../components/shared/RecordTable";
+import { useQuery } from "@tanstack/react-query";
+import { apiBlob } from "../../services/typedApi";
+import { saveDownloadedFile } from "../../utils/downloads";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, ExternalLink, LoaderCircle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { hasQmsRolePermission, isPlatformSuperuser } from "../../app/routeGuards";
@@ -7,8 +12,9 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import PageHeader from "../../components/shared/PageHeader";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
-import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
-import QmsPersonalTasks from "./inbox/QmsPersonalTasks";
+import type { AgGridReactProps } from "ag-grid-react";
+import InlineLoading from "../../components/shared/InlineLoading";
+const QmsPersonalTasks = lazy(()=>import("./inbox/QmsPersonalTasks"));
 import QmsCalendarSyncDialog from "../../components/QMS/QmsCalendarSyncDialog";
 import type { ColDef } from "ag-grid-community";
 import type { QmsSourceError } from "../../types/qms";
@@ -17,6 +23,10 @@ import "../../styles/qms/register.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type QmsRow = Record<string, unknown>;
+const QmsWorkspaceGrid = lazy(async()=>{
+ const {default:Grid}=await import("./components/QmsWorkspaceGrid");
+ return {default:(props:AgGridReactProps<QmsRow>)=><Grid<QmsRow> {...props}/>};
+});
 type QmsRegisterPageProps = { embedded?: boolean };
 
 type QmsRegisterResponse = {
@@ -29,6 +39,7 @@ type QmsRegisterResponse = {
   offset?: number;
   next_offset?: number | null;
   has_more?: boolean;
+  total?: number;
   table_missing?: boolean;
   warning?: string | null;
   source_errors?: QmsSourceError[];
@@ -169,10 +180,12 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const [searchParams, setSearchParams] = useSearchParams();
   const abortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<number | null>(null);
-  const [state, setState] = useState<LoadState>("idle");
-  const [data, setData] = useState<QmsRegisterResponse | null>(null);
+  const [legacyState, setState] = useState<LoadState>("idle");
+  const [legacyData, setData] = useState<QmsRegisterResponse | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [legacyError, setError] = useState<string | null>(null);
 
   const query = searchParams.get("q") || "";
   const status = searchParams.get("status") || "";
@@ -180,6 +193,23 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const requestedOffset = Number(searchParams.get("offset") || 0);
   const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
   const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
+  const isEvidence = context?.module.id === "evidence-vault";
+  const evidenceQuery = useQuery({
+    queryKey: ["qms-evidence-vault", context?.amoCode, context?.view, query, status, limit, offset],
+    enabled: Boolean(isEvidence && !controlledNew),
+    staleTime: 10_000,
+    queryFn: ({ signal }) => {
+      if (!context) throw new Error("Quality context is unavailable.");
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      if (query.trim()) params.set("q", query.trim());
+      if (status) params.set("status", status);
+      return apiRequest<QmsRegisterResponse>(`${qmsPath(context.amoCode, `/${context.module.segment}/${context.view}`)}?${params}`, { signal, cacheTtlMs: 0, timeoutMs: 15_000 });
+    },
+  });
+  const { refetch: refetchEvidence } = evidenceQuery;
+  const data = isEvidence ? evidenceQuery.data ?? null : legacyData;
+  const state: LoadState = isEvidence ? evidenceQuery.isFetching ? "loading" : evidenceQuery.isError ? "error" : "ready" : legacyState;
+  const error = isEvidence ? evidenceQuery.isError ? friendlyError(evidenceQuery.error) : null : legacyError;
 
   const updateSearch = useCallback((updates: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -204,6 +234,7 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
   const load = useCallback(async (fresh = false) => {
     if (!context || controlledNew) return;
+    if (isEvidence) { await refetchEvidence(); return; }
     abortRef.current?.abort(new DOMException("Superseded by a newer Quality register request", "AbortError"));
     const controller = new AbortController();
     abortRef.current = controller;
@@ -225,18 +256,19 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
       setError(friendlyError(loadError));
       setState("error");
     }
-  }, [context, controlledNew, limit, offset, query, status]);
+  }, [context, controlledNew, limit, offset, query, status, isEvidence, refetchEvidence]);
 
   useEffect(() => {
+    if (isEvidence) return;
     const timer = window.setTimeout(() => void load(), 0);
     return () => {
       window.clearTimeout(timer);
       abortRef.current?.abort(new DOMException("Quality register unmounted", "AbortError"));
     };
-  }, [load]);
+  }, [load, isEvidence]);
 
   const rows = useMemo(() => data?.items || [], [data?.items]);
-  const columns = useMemo(() => deriveColumns(rows, data?.columns), [data?.columns, rows]);
+  const columns = useMemo(() => context?.module.id === "evidence-vault" && data?.columns ? data.columns : deriveColumns(rows, data?.columns), [context?.module.id, data?.columns, rows]);
   const currentUser = getCachedUser();
   const diagnosticsAuthorized = Boolean(currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_OFFICER" || currentUser?.role === "QUALITY_INSPECTOR");
 
@@ -248,45 +280,61 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const responseLimit = data?.limit ?? limit;
   const responseOffset = data?.offset ?? offset;
   const page = Math.floor(responseOffset / Math.max(1, responseLimit)) + 1;
-  const startRow = rows.length ? responseOffset + 1 : 0;
-  const endRow = responseOffset + rows.length;
   const hasFilters = Boolean(query || status);
   const isInbox = module.id === "inbox";
   const sourceErrors = data?.source_errors || [];
 
-  const openRoute = (row: QmsRow) => isInbox ? taskRoute(row) : module.allowRecordDetails && rowId(row) ? recordRoute(amoCode, module, rowId(row)!) : null;
+  const openRoute = (row: QmsRow) => (isInbox || module.id === "evidence-vault") ? taskRoute(row) : module.allowRecordDetails && rowId(row) ? recordRoute(amoCode, module, rowId(row)!) : null;
+  const downloadEvidence = async (row: QmsRow) => {
+    const url = typeof row.download_url === "string" && row.download_url.startsWith("/api/") ? row.download_url : null;
+    if (!url) return;
+    setDownloadingId(rowId(row)); setDownloadError(null);
+    try {
+      const file = await apiBlob(url);
+      if (typeof row.sha256 === "string" && /^[a-f0-9]{64}$/i.test(row.sha256)) {
+        const digest = await crypto.subtle.digest("SHA-256", await file.blob.arrayBuffer());
+        const actual = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+        if (actual !== row.sha256.toLowerCase()) throw new Error("The file differs from its retained checksum. Nothing was saved.");
+      }
+      saveDownloadedFile(file.blob, file.filename || String(row.filename || "evidence"));
+    }
+    catch (cause) { setDownloadError(friendlyError(cause)); }
+    finally { setDownloadingId(null); }
+  };
   const gridColumns: ColDef<QmsRow>[] = isInbox ? [
     { headerName: "Assignment", valueGetter: ({ data: row }) => row ? taskTitle(row) : "", minWidth: 280, flex: 2 },
     { headerName: "Type", valueGetter: ({ data: row }) => row ? taskKind(row) : "" },
     { headerName: "Status", valueGetter: ({ data: row }) => row ? humanise(firstValue(row, ["status", "state", "severity"])) : "" },
     { colId: "due", headerName: "Due", valueGetter: ({ data: row }) => row ? taskDue(row) : null, valueFormatter: ({ value }) => formatValue(value), cellClass: ({ data: row }) => taskDueClass(row) },
     { colId: "received", headerName: "Received", valueGetter: ({ data: row }) => row ? taskReceived(row) : null, valueFormatter: ({ value }) => formatValue(value) },
-  ] : columns.map(column => ({ field: column, headerName: humanise(column), valueFormatter: ({ value }) => formatValue(value) }));
-  gridColumns.push({ headerName: "Action", sortable: false, filter: false, minWidth: 130, cellRenderer: ({ data: row }: { data?: QmsRow }) => {
+  ] : columns.map(column => ({ field: column, headerName: column === "filename" ? "File" : column === "created_at" ? "Uploaded" : column === "size_bytes" ? "Size" : humanise(column), minWidth: column === "filename" ? 260 : 140, valueFormatter: ({ value }) => column === "size_bytes" && typeof value === "number" ? `${(value / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB` : formatValue(value) }));
+  gridColumns.push({ headerName: "Action", sortable: false, filter: false, minWidth: module.id === "evidence-vault" ? 200 : 130, cellRenderer: ({ data: row }: { data?: QmsRow }) => {
     const route = row ? openRoute(row) : null;
-    return route ? <Link className="qms-register-open" to={route}>Open record <ArrowRight size={14} /></Link> : "—";
+    return row?.download_url ? <div className="qms-evidence-row-actions"><button type="button" className="qms-evidence-row-action" title={`Download ${String(row.filename || "evidence")}`} aria-label={`Download ${String(row.filename || "evidence")}`} disabled={downloadingId === rowId(row)} onClick={() => void downloadEvidence(row)}>{downloadingId === rowId(row) ? <LoaderCircle size={16} className="is-spinning"/> : <Download size={16}/>}</button>{route ? <Link className="qms-evidence-row-action" title="Open source record" aria-label="Open source record" to={route}><ExternalLink size={16}/></Link> : null}</div> : route ? <Link className="qms-register-open" to={route}>Open record <ArrowRight size={14} /></Link> : "—";
   } });
 
   const content = (
     <div className={`qms-register-page qms-register-page--${module.id}`}>
       {!embedded ? <PageHeader compact eyebrow="Quality Management System" title={module.label} subtitle={isInbox ? `${viewLabel(view)}. Prioritise your assigned approvals, reviews, verifications and assurance work.` : `${viewLabel(view)} workspace. Results are server-bounded; open the governed record to investigate or act.`} breadcrumbs={[{ label: "Quality", to: qmsBasePath(amoCode) }, { label: module.navigationLabel }, { label: viewLabel(view) }]} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
 
-      {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></> : null}
+      {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></> : null}
       {controlledNew ? (
         <section className="qms-register-controlled" role="status"><ShieldCheck size={24} aria-hidden="true" /><div><span>Controlled workflow</span><h2>Creation belongs to the governed source workflow</h2><p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership and approval controls. This register does not manufacture a reduced duplicate form.</p><Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Open {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link></div></section>
       ) : (
         <>
           <section className="qms-register-workspace" aria-label={`${module.label} ${viewLabel(view)}`}>
-            <div className="qms-register-toolbar"><label className="qms-register-search"><span>Search</span><Search size={16} aria-hidden="true" /><input key={query} defaultValue={query} onChange={(event) => scheduleSearch(event.target.value)} placeholder={`Search ${module.navigationLabel.toLowerCase()}`} aria-label={`Search ${module.navigationLabel}`} /></label><label><span>View</span><select value={view} onChange={(event) => navigate(qmsModulePath(amoCode, module.id, event.target.value))}>{module.validViews.filter((candidate) => candidate !== "new").map((candidate) => <option key={candidate} value={candidate}>{viewLabel(candidate)}</option>)}</select></label><label><span>Status</span><select value={status} onChange={(event) => updateSearch({ status: event.target.value, offset: null })}><option value="">All statuses</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label><label><span>Rows</span><select value={limit} onChange={(event) => updateSearch({ limit: event.target.value, offset: null })}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}</select></label><div className="qms-register-toolbar__state"><strong>Page {page}</strong><small>{rows.length ? `${startRow.toLocaleString()}–${endRow.toLocaleString()}` : "No rows"}{data?.has_more ? " · more available" : ""}</small></div>{hasFilters ? <button type="button" className="qms-register-clear" onClick={() => updateSearch({ q: null, status: null, offset: null })}><X size={14} aria-hidden="true" /> Clear</button> : null}</div>
+            <div className="qms-register-toolbar"><label className="qms-register-search"><span>Search</span><Search size={16} aria-hidden="true" /><input key={query} defaultValue={query} onChange={(event) => scheduleSearch(event.target.value)} placeholder={`Search ${module.navigationLabel.toLowerCase()}`} aria-label={`Search ${module.navigationLabel}`} /></label><label><span>View</span><select value={view} onChange={(event) => navigate(qmsModulePath(amoCode, module.id, event.target.value))}>{module.validViews.filter((candidate) => candidate !== "new").map((candidate) => <option key={candidate} value={candidate}>{viewLabel(candidate)}</option>)}</select></label><label><span>Status</span><select value={status} onChange={(event) => updateSearch({ status: event.target.value, offset: null })}><option value="">All statuses</option>{module.id === "evidence-vault" ? <option value="AVAILABLE">Available</option> : <><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></>}</select></label>{isEvidence ? <button type="button" className="qms-register-refresh" aria-label="Refresh evidence" disabled={state === "loading"} onClick={() => void load(true)}><RefreshCw size={16}/></button> : null}{hasFilters ? <button type="button" className="qms-register-clear" onClick={() => updateSearch({ q: null, status: null, offset: null })}><X size={14} aria-hidden="true" /> Clear</button> : null}</div>
 
             {data?.warning || data?.table_missing || sourceErrors.length ? <div className="qms-register-warning" role="status"><AlertTriangle size={18} aria-hidden="true" /><div><span>{data?.warning || (data?.table_missing ? "The configured Quality data source is unavailable." : "Some source reads failed; available rows are shown.")}</span>{sourceErrors.length ? <details><summary>Review {sourceErrors.length} affected authoritative source{sourceErrors.length === 1 ? "" : "s"}</summary><ul>{sourceErrors.map((sourceError, index) => <li key={`${sourceError.label}-${index}`}><strong>{sourceError.label}</strong>{sourceError.type ? ` · ${humanise(sourceError.type)}` : ""}<br />{sourceError.message}</li>)}</ul></details> : null}</div></div> : null}
             {error ? <div className="qms-register-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><div><strong>Unable to load this register</strong><p>{error}</p></div><button type="button" onClick={() => void load(true)}>Retry</button></div> : null}
             {state === "loading" && !data ? <div className="qms-register-loading" role="status"><RefreshCw size={18} className="is-spinning" /> Loading {module.navigationLabel.toLowerCase()}…</div> : null}
-            {state !== "loading" && !error && rows.length === 0 ? <div className="qms-register-empty"><CheckCircle2 size={20} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status and search filters.</p></div></div> : null}
+            {state !== "loading" && !error && !sourceErrors.length && rows.length === 0 ? <div className="qms-register-empty"><CheckCircle2 size={20} aria-hidden="true" /><div><strong>No records in this view</strong><p>No row matched the current tenant, view, status and search filters.</p></div></div> : null}
 
-            <QmsWorkspaceGrid<QmsRow> rowData={rows} columnDefs={gridColumns} loading={state === "loading"} onRowDoubleClicked={({ data: row }) => { if (row) { const route = openRoute(row); if (route) navigate(route); } }} />
+            {downloadError ? <p className="qms-register-error" role="alert">Download failed: {downloadError}</p> : null}
+            {module.id === "evidence-vault" ? <div className="qms-evidence-mobile">{rows.map(row => <article key={rowId(row)}><strong>{String(row.filename || "Evidence file")}</strong><p>{String(row.source || "")} · {String(row.reference || "")}</p><small>{formatValue(row.created_at)}{typeof row.size_bytes === "number" ? ` · ${(row.size_bytes / 1024).toFixed(1)} KB` : ""}</small><footer>{row.download_url ? <button type="button" disabled={downloadingId === rowId(row)} onClick={() => void downloadEvidence(row)}>{downloadingId === rowId(row) ? "Downloading…" : <><Download size={16}/> Download</>}</button> : null}{openRoute(row) ? <Link to={openRoute(row)!}>Open source</Link> : null}</footer></article>)}</div> : null}
+            {isEvidence ? <div className="qms-register-records"><RecordTable<QmsRow> label="Evidence files" rows={rows} columns={gridColumns} getRowId={(row)=>String(rowId(row) || row.download_url || `${row.filename}:${row.created_at}:${row.source}`)} loading={state === "loading"} onRowDoubleClick={(row)=>{const route=openRoute(row);if(route)navigate(route);}} /></div> : (<Suspense fallback={<InlineLoading label="Opening register"/>}><QmsWorkspaceGrid rowData={rows} columnDefs={gridColumns} loading={state === "loading"} onRowDoubleClicked={({ data: row }) => { if (row) { const route = openRoute(row); if (route) navigate(route); } }} /></Suspense>)}
 
-            <footer className="qms-register-pagination"><button type="button" disabled={responseOffset <= 0 || state === "loading"} onClick={() => updateSearch({ offset: String(Math.max(0, responseOffset - responseLimit)) })}>Previous</button><span>{rows.length ? `Showing ${startRow.toLocaleString()}–${endRow.toLocaleString()}` : "No results"}{data?.has_more ? " · additional results available" : " · end of results"}</span><button type="button" disabled={!data?.has_more || state === "loading"} onClick={() => updateSearch({ offset: String(data?.next_offset ?? responseOffset + responseLimit) })}>Next</button></footer>
+            <Pagination label={module.navigationLabel} page={page} pageSize={responseLimit} visibleCount={rows.length} total={data ? data.total ?? (data.has_more ? undefined : responseOffset + rows.length) : undefined} hasNext={Boolean(data?.has_more)} busy={state === "loading"} onPageChange={(value)=>updateSearch({offset:String((value-1)*responseLimit)})} onPageSizeChange={(value)=>updateSearch({limit:String(value),offset:null})} pageSizes={PAGE_SIZES} />
           </section>
 
 

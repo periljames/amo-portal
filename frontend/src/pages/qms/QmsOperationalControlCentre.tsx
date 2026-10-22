@@ -1,3 +1,4 @@
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 import React, { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -92,9 +93,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
       </header>
 
       {dashboardQuery.isLoading && !dashboard ? (
-        <section className="qms-assurance-room__loading" role="status">
-          <RefreshCw size={18} className="is-spinning" aria-hidden="true" /> Loading current Quality work…
-        </section>
+        <WorkspaceLoading label="Loading current Quality work" />
       ) : null}
 
       {dashboardQuery.error ? (

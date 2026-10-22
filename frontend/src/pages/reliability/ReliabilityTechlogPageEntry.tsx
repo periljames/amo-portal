@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../../services/apiClient";
 import ReliabilityTechlogEvidence from "./ReliabilityTechlogEvidence";
@@ -251,7 +252,7 @@ export default function ReliabilityTechlogPageEntry({ aircraftOptions, canCreate
 
   return <section className="octm__panel">
     <h2>{editPage ? "Correct SL/MCM/1 source page" : "Technical Logbook page entry — SL/MCM/1"}</h2>
-    {sourceLoading && <p>Loading original page and engine records…</p>}
+    {sourceLoading && <p><InlineLoading label={"Loading original page and engine records…"}/></p>}
     {editPage && <p className="octm__hint">All linked engine records will be returned to draft
       if this page is corrected, including an engine with unchanged oil values.</p>}
     <p>Copy the original paper page. Its flight legs have individual engine <strong>oil LEVEL</strong> fields,

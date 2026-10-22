@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import TrainingImportSupport from "./components/TrainingImportSupport";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -490,7 +491,7 @@ export default function PlatformOperationsPage() {
       <div className="platform-tabs" role="tablist" aria-label="Operations views">
         {sections.map((item) => <button key={item} className={section === item ? "active" : ""} onClick={() => setSection(item)}>{item}</button>)}
       </div>
-      {detailLoading ? <section className="platform-card"><p>Loading bounded operations data…</p></section> : null}
+      {detailLoading ? <section className="platform-card"><p><InlineLoading label={"Loading bounded operations data…"}/></p></section> : null}
 
       {section === "NOC" && <>
         <div className="platform-metric-grid">
@@ -610,7 +611,7 @@ export default function PlatformOperationsPage() {
         </section>
         {selectedTenant && <section className="platform-card">
           <h2>Tenant 360</h2>
-          {selectedTenant.loading ? <p>Loading tenant…</p> : <>
+          {selectedTenant.loading ? <p><InlineLoading label={"Loading tenant…"}/></p> : <>
             <p><strong>{selectedTenant.overview?.name || selectedTenant.overview?.amo_code}</strong> · {selectedTenant.overview?.country || "—"} · <StatusBadge value={selectedTenant.health?.lifecycle || (selectedTenant.overview?.is_active ? "ACTIVE" : "INACTIVE")} /></p>
             <div className="platform-metric-grid">
               <MetricCard label="Health" value={<StatusBadge value={selectedTenant.health?.health?.status || "UNKNOWN"} />} />

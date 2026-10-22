@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listTrainingEvents } from "../../services/training";
@@ -60,7 +61,7 @@ const TrainingSessionSelfService: React.FC = () => {
   return <section className="page-section" id="training-session-self-service">
     <div className="card">
       <div className="card-header"><h2>Upcoming sessions & waitlist</h2><p className="text-muted">Check schedule conflicts before enrollment. Full sessions use the governed waitlist and first-available promotion flow.</p></div>
-      {loading ? <p>Loading upcoming sessions…</p> : null}
+      {loading ? <p><InlineLoading label={"Loading upcoming sessions…"}/></p> : null}
       {error ? <div className="card card--error"><p>{error}</p><button type="button" className="secondary-chip-btn" onClick={() => void load()}>Retry</button></div> : null}
       {!loading && !error && !upcoming.length ? <p className="text-muted">No upcoming Training sessions are currently published.</p> : null}
       <div style={{ display: "grid", gap: 8 }}>

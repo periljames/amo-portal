@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -527,7 +528,7 @@ export function MessagingHub() {
                         </article>
                       );
                     })}
-                    {messagesQuery.isLoading ? <p className="messaging-empty">Loading conversation…</p> : null}
+                    {messagesQuery.isLoading ? <p className="messaging-empty"><InlineLoading label={"Loading conversation…"}/></p> : null}
                   </div>
                   <form className="messaging-composer" onSubmit={submit}>
                     {mentionCandidates.length ? (
@@ -680,7 +681,7 @@ export function MessagingHub() {
                 </article>
               );
             })}
-            {notificationsQuery.isLoading ? <p className="messaging-empty">Loading notifications…</p> : null}
+            {notificationsQuery.isLoading ? <p className="messaging-empty"><InlineLoading label={"Loading notifications…"}/></p> : null}
             {!notificationsQuery.isLoading && notificationGroups.length === 0 ? (
               <div className="messaging-empty-state">
                 {notificationView === "for-you" ? <CheckCircle2 size={22} /> : <Bell size={22} />}
@@ -727,7 +728,7 @@ function DirectoryPicker({ data, loading, activeTab, onTab, onSelect }: {
             </button>
           );
         })}
-        {loading ? <p className="messaging-empty">Loading directory…</p> : null}
+        {loading ? <p className="messaging-empty"><InlineLoading label={"Loading directory…"}/></p> : null}
         {!loading && entries.length === 0 ? <p className="messaging-empty">Nothing available here.</p> : null}
       </div>
     </div>

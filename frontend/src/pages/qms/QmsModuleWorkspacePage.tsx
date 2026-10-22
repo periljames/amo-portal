@@ -1,3 +1,5 @@
+import Pagination from "../../components/shared/Pagination";
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 // src/pages/qms/QmsModuleWorkspacePage.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -81,6 +83,7 @@ type ModuleMeta = {
 type QmsSourceError = { label: string; message: string; type?: string };
 
 type QmsModuleResponse = {
+  total?: number;
   module?: string;
   view?: string;
   table?: string;
@@ -945,12 +948,7 @@ function CreateRecordPanel({ amoCode, module, view, onCreated }: { amoCode: stri
 }
 
 function LoadingPanel({ label }: { label: string }): React.ReactElement {
-  return (
-    <div className="qms-ops-loading-card">
-      <RefreshCw size={18} />
-      <span>{label}</span>
-    </div>
-  );
+  return <WorkspaceLoading label={label} compact />;
 }
 
 function SourceErrorsNotice({ errors }: { errors?: QmsSourceError[] }): React.ReactElement | null {
@@ -1552,7 +1550,7 @@ function WorkspacePanel({
   onStatusChange: (value: string) => void;
   onPageSizeChange: (value: number) => void;
   onRetry: () => void;
-  onPage: (direction: "next" | "prev") => void;
+  onPage: (direction: "next" | "prev" | number) => void;
   calendarDateKey: string;
   onCalendarDateChange: (value: string) => void;
 }): React.ReactElement {
@@ -1611,11 +1609,7 @@ function WorkspacePanel({
             {state !== "loading" && !error ? <RecordTable amoCode={amoCode} module={module} rows={rows} response={data} /> : null}
           </>
         )}
-        <div className="qms-ops-pagination">
-          <Button variant="secondary" size="sm" disabled={offset <= 0 || state === "loading"} onClick={() => onPage("prev")}>Previous</Button>
-          <span>{data?.elapsed_ms != null ? `${data.elapsed_ms} ms backend` : "Backend timing pending"}</span>
-          <Button variant="secondary" size="sm" disabled={!data?.has_more || state === "loading"} onClick={() => onPage("next")}>Next</Button>
-        </div>
+        <Pagination label={module.sourceLabel} page={currentPage} pageSize={limit} visibleCount={rows.length} total={data?.total ?? (data?.has_more ? undefined : offset+rows.length)} hasNext={Boolean(data?.has_more)} busy={state === "loading"} onPageChange={onPage} />
       </SectionCard>
 
       <SectionCard title="Workflow runway" subtitle="Stepwise work pans horizontally. Pick the next task without scrolling through dead content." variant="subtle">
@@ -1809,8 +1803,8 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
     void loadModule({ force: true });
   };
 
-  const page = (direction: "next" | "prev") => {
-    const nextOffset = direction === "next" ? (moduleData?.next_offset ?? offset + pageSize) : Math.max(0, offset - pageSize);
+  const page = (direction: "next" | "prev" | number) => {
+    const nextOffset = typeof direction === "number" ? (direction-1)*pageSize : direction === "next" ? (moduleData?.next_offset ?? offset + pageSize) : Math.max(0, offset - pageSize);
     setParam("offset", String(nextOffset));
   };
 

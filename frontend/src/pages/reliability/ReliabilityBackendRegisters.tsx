@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { sanitizeDownloadFilename } from "../../utils/downloads";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -152,7 +153,7 @@ export default function ReliabilityBackendRegisters({ view }: { view: View }): R
       There is no inferred total record count.</p>
     {error && <div className="rel-backend-register__error" role="alert">{error}
       <button type="button" onClick={() => { startLoading(); setRefresh((v) => v + 1); }}>Retry</button></div>}
-    {loading && <p role="status" className="rel-backend-register__loading">Loading source records…</p>}
+    {loading && <p className="rel-backend-register__loading"><InlineLoading label={"Loading source records…"}/></p>}
     {!loading && !error && <>
       <div className="rel-backend-register__viewport" role="region" aria-label={"Scrollable " + names[view]} tabIndex={0}>
         <table><thead><tr>{columns.map((column, index) => {

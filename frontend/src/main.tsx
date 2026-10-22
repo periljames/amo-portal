@@ -11,7 +11,7 @@ import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRo
 import PortalAuxiliaryBoundary from "./components/feedback/PortalAuxiliaryBoundary";
 import { ToastProvider } from "./components/feedback/ToastProvider";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
-import { MessagingHub } from "./components/messaging/MessagingHub";
+const MessagingHub = React.lazy(() => import("./components/messaging/MessagingHub").then((module) => ({ default: module.MessagingHub })));
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
 import { clearApiResponseCache } from "./services/apiClient";
 import { queryMatchesRealtimeMarkers, realtimeQueryMarkers } from "./services/portalRealtimeInvalidation";
@@ -209,7 +209,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             <App />
             <QualityEnhancementsRouteGate />
             <PortalAuxiliaryBoundary surface="Messaging controls">
-              <MessagingHub />
+              <React.Suspense fallback={null}><MessagingHub /></React.Suspense>
             </PortalAuxiliaryBoundary>
           </BrowserRouter>
           <PortalAuxiliaryBoundary surface="Connection and sync controls">

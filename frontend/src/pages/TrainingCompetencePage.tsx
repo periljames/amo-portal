@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarClock, CheckSquare, ClipboardSignature, Download, ExternalLink, FileSpreadsheet, GraduationCap, RefreshCw, ScanLine, Search, ShieldCheck, Upload, Users } from "lucide-react";
@@ -1520,7 +1521,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
           </div>
         </section>
 
-        {loading ? <section className="tc-panel"><p className="tc-empty">Loading training data…</p></section> : null}
+        {loading ? <section className="tc-panel"><p className="tc-empty"><InlineLoading label={"Loading training data…"}/></p></section> : null}
 
         {!loading && tab === "overview" ? (
           <div className="tc-content-grid">

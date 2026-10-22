@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useEffect, useRef, useState } from "react";
 import { listTrainingWorkbookImportRows } from "../../services/trainingWorkbookImport";
 import type { TrainingWorkbookImportJob, TrainingWorkbookImportRowPage } from "../../types/trainingWorkbookImport";
@@ -167,7 +168,7 @@ export default function TrainingImportRowsPanel({
       </div>
       {error ? <p role="alert">{error}</p> : null}
       {loading ? (
-        <p role="status">Loading records…</p>
+        <p><InlineLoading label={"Loading records…"}/></p>
       ) : (
         <>
           <div className="training-import-table-wrap">

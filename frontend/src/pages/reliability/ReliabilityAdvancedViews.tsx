@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -235,7 +236,7 @@ function PageHeading({ eyebrow, title, detail, actions }: { eyebrow: string; tit
 }
 
 function RequestState({ loading, error }: { loading: boolean; error: string | null }) {
-  if (loading) return <div className="reliability-v2__loading" role="status">Loading controlled Reliability records…</div>;
+  if (loading) return <div className="reliability-v2__loading"><InlineLoading label={"Loading controlled Reliability records…"}/></div>;
   if (error) return <div className="reliability-v2__error" role="alert">{error}</div>;
   return null;
 }

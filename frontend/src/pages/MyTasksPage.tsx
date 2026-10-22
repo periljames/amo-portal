@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import { isTenantAdmin } from "../utils/tenantAccess";
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -146,7 +147,7 @@ const MyTasksPage: React.FC = () => {
           columnToggles={[{ id: "assignee", label: "Assignee", checked: showAssignee, onToggle: () => setShowAssignee((v) => !v) }]}
         />
 
-        {loading ? <p>Loading tasks…</p> : null}
+        {loading ? <p><InlineLoading label={"Loading tasks…"}/></p> : null}
         {error ? <p className="error-text">{error}</p> : null}
 
         {!loading && tab === "others" && !canViewOthers ? <p className="text-muted">Assigned to others is available for Quality Manager, AMO Admin, and Superuser roles.</p> : null}

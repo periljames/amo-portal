@@ -13,7 +13,7 @@ describe("findings and corrective-action workspace", () => {
     expect(register).toContain("registerQuery.isLoading");
     expect(register).toContain("registerQuery.isError");
     expect(register).toContain(") : rows.length ? (");
-    expect(register).toContain("Showing {firstVisible}–{lastVisible} of {total}");
+    expect(register).toContain('<Pagination label="Findings"');
   });
 
   it("keeps the finding and corrective action in one visible lifecycle", () => {
@@ -37,11 +37,13 @@ describe("findings and corrective-action workspace", () => {
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/cars/abc", "")).toBe(false);
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/assurance/cases", "")).toBe(true);
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/audits/register", "?workspace=assurance")).toBe(true);
+    expect(isEffectivenessResponseRoute("/maintenance/test/quality/cars/register", "")).toBe(false);
   });
 
   it("keeps Assurance pages full-height with efficient main scrolling", () => {
     expect(workspaceCss).not.toContain("--qa-assurance-chrome-offset");
-    expect(workspaceCss).toContain(".qa-workspace-main > *");
+    expect(workspaceCss).toContain(".qa-workspace-main > :not(.qa-workspace-page-title)");
+    expect(workspaceCss).toContain(".qa-workspace-main > .qa-workspace-page-title { flex: 0 0 auto; }");
     expect(workspaceCss).toContain("min-height: 0");
     expect(workspaceCss).toContain("overscroll-behavior: contain");
   });

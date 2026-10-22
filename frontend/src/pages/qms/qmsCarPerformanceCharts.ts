@@ -52,11 +52,10 @@ export function isOpen(car: CAROut): boolean {
 }
 
 export function isInReview(car: CAROut): boolean {
-  return (
+  return isOpen(car) && (
     car.status === "PENDING_VERIFICATION"
     || car.root_cause_status === "SUBMITTED"
     || car.capa_status === "SUBMITTED"
-    || car.capa_status === "NEEDS_EVIDENCE"
   );
 }
 
@@ -91,11 +90,12 @@ export function buildWorkloadChartData(metrics: {
   open: number;
   overdue: number;
   review: number;
+  overdueReview?: number;
   closed: number;
 }): ChartDatum[] {
   return [
-    { name: "Open", value: metrics.open, fill: "var(--accent-primary, #2563eb)" },
-    { name: "Overdue", value: metrics.overdue, fill: "var(--accent-danger, #dc2626)" },
+    { name: "Open within due date", value: Math.max(0, metrics.open - metrics.overdue - metrics.review + (metrics.overdueReview || 0)), fill: "var(--accent-primary, #2563eb)" },
+    { name: "Overdue action", value: Math.max(0, metrics.overdue - (metrics.overdueReview || 0)), fill: "var(--accent-danger, #dc2626)" },
     { name: "Review", value: metrics.review, fill: "var(--accent-warning, #d97706)" },
     { name: "Closed", value: metrics.closed, fill: "var(--accent-success, #15803d)" },
   ];

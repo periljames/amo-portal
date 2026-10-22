@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -1133,7 +1134,7 @@ export const PacksPage: React.FC = () => {
         }
       >
         {!data ? (
-          <p className="text-muted">Loading pack metadata…</p>
+          <p className="text-muted"><InlineLoading label={"Loading pack metadata…"}/></p>
         ) : (
           <div className="technical-records-pack-grid">
             <div className="technical-records-pack-card"><strong>Pack type</strong><span>{data.pack_type}</span></div>

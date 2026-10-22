@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CheckCircle2, CircleAlert, ExternalLink, MailCheck, RefreshCw, Send, ShieldCheck } from "lucide-react";
@@ -113,7 +114,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
 
         {error && <div className="qms-mail__message qms-mail__message--error" role="alert">{error}</div>}
         {notice && <div className="qms-mail__message" role="status">{notice}</div>}
-        {loading && <p role="status">Loading the tenant's current mail configuration…</p>}
+        {loading && <p><InlineLoading label={"Loading the tenant's current mail configuration…"}/></p>}
 
         {settings && !loading && (
           <>

@@ -163,8 +163,14 @@ def _apply_transaction_guards(session: Session, transaction, connection) -> None
 
     if getattr(connection.dialect, "name", "") != "postgresql":
         return
-    connection.exec_driver_sql(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}")
-    connection.exec_driver_sql(f"SET LOCAL idle_in_transaction_session_timeout = {IDLE_IN_TRANSACTION_TIMEOUT_MS}")
+    # Both transaction-local settings in one round trip; keep the guards even
+    # through transaction-pooled connections. Never disable durability for speed.
+    connection.exec_driver_sql(
+        "SELECT set_config('statement_timeout', "
+        f"'{STATEMENT_TIMEOUT_MS}', true), "
+        "set_config('idle_in_transaction_session_timeout', "
+        f"'{IDLE_IN_TRANSACTION_TIMEOUT_MS}', true)"
+    )
     if READ_ONLY_TRANSACTIONS and isinstance(session, ReadOnlySession):
         connection.exec_driver_sql("SET TRANSACTION READ ONLY")
 

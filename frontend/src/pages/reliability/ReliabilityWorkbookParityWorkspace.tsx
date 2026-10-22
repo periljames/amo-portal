@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -91,7 +92,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
           </button>)}
         </nav>
 
-        {loading && <div className="rel-wp__loading" role="status">Loading controlled workbook definitions…</div>}
+        {loading && <div className="rel-wp__loading"><InlineLoading label={"Loading controlled workbook definitions…"}/></div>}
         {error && <div className="rel-wp__error" role="alert">{error}</div>}
         {!loading && !error && <>
           {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}

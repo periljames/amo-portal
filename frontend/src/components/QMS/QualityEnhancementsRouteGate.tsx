@@ -3,7 +3,7 @@ import { scheduleQmsOfflineWarmup } from "../../services/qmsOfflineWarmup";
 import { useLocation } from "react-router-dom";
 
 import { ModalTopLayerGuard } from "../shared/ModalTopLayerGuard";
-import QmsCommandPalette from "./QmsCommandPalette";
+const QmsCommandPalette = lazy(() => import("./QmsCommandPalette"));
 import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 
 const QualityEnhancementsHost = lazy(
@@ -23,10 +23,10 @@ const QualityEnhancementsRouteGate: React.FC = () => {
   return (
     <>
       <ModalTopLayerGuard />
-      {commandPaletteRelevant ? <QmsCommandPalette /> : null}
+      {commandPaletteRelevant ? <Suspense fallback={null}><QmsCommandPalette /></Suspense> : null}
       {relevant ? (
-        <PortalErrorBoundary key={location.pathname}>
-          <Suspense fallback={<div role="status" className="qms-audit-stage-suspense">Loading workspace…</div>}>
+        <PortalErrorBoundary resetKey={location.pathname} inline title="Quality controls could not be displayed">
+          <Suspense fallback={null}>
             <QualityEnhancementsHost />
           </Suspense>
         </PortalErrorBoundary>

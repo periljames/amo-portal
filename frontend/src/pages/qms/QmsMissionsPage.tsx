@@ -1,3 +1,4 @@
+import Pagination from "../../components/shared/Pagination";
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -276,7 +277,7 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
           { headerName: "Open hard gates", valueGetter: ({ data }) => data ? data.readiness.hard_gates.total - data.readiness.hard_gates.passed : 0 },
           { headerName: "Action", filter: false, sortable: false, cellRenderer: ({ data }: { data?: QmsMission }) => data ? <button type="button" onClick={() => openMission(data.id)}>Manage project</button> : null },
         ]} />
-        <footer className="qms-workspace-actions"><button type="button" disabled={!offset || listQuery.isFetching} onClick={() => setOffset(value => Math.max(0, value - 25))}>Previous</button><span>Page {Math.floor(offset / 25) + 1} · {listQuery.data?.total ?? 0} projects</span><button type="button" disabled={!listQuery.data?.has_more || listQuery.isFetching} onClick={() => setOffset(value => value + 25)}>Next</button></footer>
+        <Pagination label="Projects" page={Math.floor(offset/25)+1} pageSize={25} total={listQuery.data?.total} visibleCount={listQuery.data?.items?.length || 0} hasNext={Boolean(listQuery.data?.has_more)} busy={listQuery.isFetching} onPageChange={value=>setOffset((value-1)*25)} />
       </section>
     </main>
   );

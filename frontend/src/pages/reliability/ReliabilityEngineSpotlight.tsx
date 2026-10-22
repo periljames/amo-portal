@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useState } from "react";
 import { ArrowUpRight, RefreshCw } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
@@ -34,7 +35,7 @@ export default function ReliabilityEngineSpotlight(): React.ReactElement {
         <RefreshCw size={15} aria-hidden="true" /> Refresh</button>
       <Link to={root + "/engines"}>Full engine register <ArrowUpRight size={15} aria-hidden="true" /></Link></div>
     </div>
-    {loading && <p role="status">Loading engine status…</p>}
+    {loading && <p><InlineLoading label={"Loading engine status…"}/></p>}
     {error && <p role="alert">Engine status could not be retrieved: {error}</p>}
     {!loading && !error && <div className="rel-engine-spotlight__viewport" role="region" tabIndex={0} aria-label="Scrollable engine status table">
       <table><thead><tr><th>Aircraft</th><th>Engine position</th><th>Physical engine serial</th>

@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -941,7 +942,7 @@ const QmsAuditProgrammeSchedulePanel: React.FC<
         </section>
       ) : programmeQuery.isLoading ? (
         <div className="qms-audit-programme__detail">
-          <p className="is-empty">Loading programme requirement…</p>
+          <p className="is-empty"><InlineLoading label={"Loading programme requirement…"}/></p>
         </div>
       ) : null}
 

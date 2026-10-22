@@ -21,6 +21,7 @@ def test_canonical_finding_register_read_owns_paged_url():
 
 @pytest.mark.parametrize("status,rc,cap,expected", [
     ("OPEN", "SUBMITTED", "PENDING", "needs_review"),
+    ("CANCELLED", "PENDING", "PENDING", "needs_review"),
     ("PENDING_VERIFICATION", "SUBMITTED", "SUBMITTED", "needs_review"),
     ("IN_PROGRESS", "REJECTED", "ACCEPTED", "with_auditee"),
     ("IN_PROGRESS", "ACCEPTED", "ACCEPTED", "implementation"),

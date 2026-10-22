@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -247,7 +248,7 @@ const AdminUserDetailPage: React.FC = () => {
   if (workspaceQuery.isPending) {
     return (
       <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
-        <div className="admin-user-profile"><div className="aum-panel"><div className="aum-empty">Loading user workspace…</div></div></div>
+        <div className="admin-user-profile"><div className="aum-panel"><div className="aum-empty"><InlineLoading label={"Loading user workspace…"}/></div></div></div>
       </DepartmentLayout>
     );
   }

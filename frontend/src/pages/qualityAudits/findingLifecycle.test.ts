@@ -23,8 +23,8 @@ describe("finding lifecycle projection", () => {
 
   it("keeps unlinked findings in RCA/CAP (needs_review)", () => {
     expect(findingLifecycleView(finding, [])).toBe("needs_review");
-    expect(findingLifecycleLabel("needs_review")).toBe("RCA/CAP");
-    expect(findingNextAction("needs_review", false)).toBe("Create corrective action");
+    expect(findingLifecycleLabel("needs_review")).toBe("Quality review");
+    expect(findingNextAction("needs_review", false)).toBe("Review finding and corrective action requirement");
   });
 
   it.each([
@@ -51,4 +51,11 @@ describe("finding lifecycle projection", () => {
     expect(findingLifecycleView(finding, [car("OPEN")])).not.toBe("needs_review");
     expect(findingLifecycleView(finding, [car("OPEN")])).toBe("with_auditee");
   });
+});
+
+it("keeps an observation out of corrective-action queues", () => {
+ const observation = { ...finding, finding_type: "OBSERVATION", level: "LEVEL_4" } as QMSFindingOut;
+ expect(findingLifecycleView(observation, [])).toBe("observation");
+ expect(findingNextAction("observation", false)).toBe("Review observation and supporting evidence");
+ expect(findingLifecycleView({ ...observation, closed_at: "2026-10-18T00:00:00Z" }, [])).toBe("closed");
 });

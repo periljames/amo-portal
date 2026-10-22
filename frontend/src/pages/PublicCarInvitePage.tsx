@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -1060,7 +1061,7 @@ const PublicCarInvitePage: React.FC = () => {
 
               return (
                 <article key={entry.token || "missing-token"} id={invite ? `car-${invite.car_number}` : undefined} className={`car-invite-card ${entry.state === "ready" ? "is-active" : ""}`}>
-                  {entry.state === "loading" && <p className="car-invite-subtitle">Loading invite…</p>}
+                  {entry.state === "loading" && <p className="car-invite-subtitle"><InlineLoading label={"Loading invite…"}/></p>}
                   {entry.state === "error" && <div className="car-invite-error" role="alert">{entry.error}{entry.token ? <button type="button" className="car-invite-btn" onClick={() => void loadInvite(entry.token)}>Retry loading response</button> : null}</div>}
 
                   {entry.state === "ready" && invite && (

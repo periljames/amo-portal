@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1083,7 +1084,7 @@ const QualityCarsPage: React.FC = () => {
                   Manage evidence
                 </button>
               </div>
-              {reviewAttachmentsLoading ? <p>Loading evidence…</p> : reviewAttachments.length === 0 ? <p className="text-muted">No evidence attachments submitted.</p> : (
+              {reviewAttachmentsLoading ? <p><InlineLoading label={"Loading evidence…"}/></p> : reviewAttachments.length === 0 ? <p className="text-muted">No evidence attachments submitted.</p> : (
                 <div className="qms-list">
                   {reviewAttachments.map((attachment) => (
                     <div className="qms-list__item" key={attachment.id}>

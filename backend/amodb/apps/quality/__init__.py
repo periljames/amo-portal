@@ -226,6 +226,15 @@ from . import car_control_loop_route_order as _car_control_loop_route_order  # n
 from . import car_operational_route_order as _car_operational_route_order  # noqa: F401,E402
 from . import audit_personnel_route_order as _audit_personnel_route_order  # noqa: F401,E402
 
+# Evidence search reads retained source records; the old metadata table alone is incomplete.
+from . import assurance_evidence_register as _assurance_evidence_register  # noqa: E402
+from .route_ordering import promote_route_family as _promote_evidence_family  # noqa: E402
+_canonical_router.router.include_router(_assurance_evidence_register.router)
+_promote_evidence_family(_canonical_router.router,
+    predicate=lambda item: getattr(item, "endpoint", None) in {
+        _assurance_evidence_register.evidence_files, _assurance_evidence_register.archive_packages,
+    }, label="QMS Evidence Vault")
+
 # Finish composition once every focused read/write adapter is registered.
 # Legacy module actions can otherwise intercept an exact POST such as issuing
 # preparation even when that route was promoted ahead of the path catch-all.

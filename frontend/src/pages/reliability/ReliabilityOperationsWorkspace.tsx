@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
@@ -147,7 +148,7 @@ const ReliabilityWorkspacePage: React.FC = () => {
           </div>
         </header>
 
-        {loading && <div className="reliability-v2__loading" role="status">Loading authoritative reliability data…</div>}
+        {loading && <div className="reliability-v2__loading"><InlineLoading label={"Loading authoritative reliability data…"}/></div>}
         {error && <div className="reliability-v2__error" role="alert">{error}</div>}
         {!loading && !error && renderView({
           route,

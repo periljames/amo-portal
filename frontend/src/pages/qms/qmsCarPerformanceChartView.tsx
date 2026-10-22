@@ -64,7 +64,7 @@ function fillFor(index: number, explicit?: string): string {
 export function exposureToSeries(rows: DepartmentExposureDatum[]): ChartDatum[] {
   return rows.map((row, index) => ({
     name: row.department,
-    value: row.open + row.overdue,
+    value: row.open,
     fill: fillFor(index),
   }));
 }
@@ -110,7 +110,7 @@ const AnalysisFlexibleChart: React.FC<Props> = ({
     return (
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
-          data={stacked}
+          data={stacked.map(row => ({ ...row, open: Math.max(0, row.open - row.overdue) }))}
           layout={horizontal ? "vertical" : "horizontal"}
           margin={{ top: 8, right: 16, left: horizontal ? 8 : 0, bottom: 4 }}
         >
@@ -128,7 +128,7 @@ const AnalysisFlexibleChart: React.FC<Props> = ({
           )}
           <Tooltip />
           <Legend />
-          <Bar dataKey="open" name="Open" stackId="exposure" maxBarSize={horizontal ? 22 : 48} fill="var(--accent-primary, #2563eb)" />
+          <Bar dataKey="open" name="Open within due date" stackId="exposure" maxBarSize={horizontal ? 22 : 48} fill="var(--accent-primary, #2563eb)" />
           <Bar dataKey="overdue" name="Overdue" stackId="exposure" maxBarSize={horizontal ? 22 : 48} fill="var(--accent-danger, #dc2626)" radius={horizontal ? [0, 5, 5, 0] : [5, 5, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>

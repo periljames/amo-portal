@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 // src/pages/AdminUsageSettingsPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -462,7 +463,7 @@ const AdminUsageSettingsPage: React.FC = () => {
               title="Per-user throttling"
               subtitle="Apply per-user budgets to keep heavy calendar usage under control."
             >
-              {loading && <p className="text-muted">Loading users…</p>}
+              {loading && <p className="text-muted"><InlineLoading label={"Loading users…"}/></p>}
 
               {!loading && users.length === 0 && (
                 <p className="text-muted">No users found for this AMO.</p>
@@ -809,7 +810,7 @@ const AdminUsageSettingsPage: React.FC = () => {
 
                     <div className="admin-panel" style={{ marginTop: 16 }}>
                       <h4 style={{ marginTop: 0 }}>ACME / Let’s Encrypt status</h4>
-                      {platformLoading && <p className="text-muted">Loading status…</p>}
+                      {platformLoading && <p className="text-muted"><InlineLoading label={"Loading status…"}/></p>}
                       {!platformLoading && (
                         <dl style={{ display: "grid", gap: 8, margin: 0 }}>
                           <div>

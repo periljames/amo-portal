@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 
@@ -242,7 +243,7 @@ const ReliabilityFormalGovernanceWorkspace: React.FC = () => {
     });
   }
 
-  if (loading) return <div className="rfg-loading" role="status">Loading Reliability Programme governance…</div>;
+  if (loading) return <div className="rfg-loading"><InlineLoading label={"Loading Reliability Programme governance…"}/></div>;
 
   return (
     <main className="rfg-shell" data-testid="reliability-formal-governance">

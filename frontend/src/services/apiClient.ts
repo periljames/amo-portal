@@ -63,19 +63,27 @@ let observedScope = "";
 let activeApiRequests = 0;
 const apiRequestWaiters: Array<() => void> = [];
 
-function acquireApiSlot(signal?: AbortSignal | null): Promise<void> {
+function acquireApiSlot(signal: AbortSignal | null | undefined, timeoutMs: number): Promise<void> {
   if (signal?.aborted) return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
   if (activeApiRequests < MAX_PARALLEL_API_REQUESTS) {
     activeApiRequests += 1;
     return Promise.resolve();
   }
   return new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      const index = apiRequestWaiters.indexOf(enter);
+      if (index >= 0) apiRequestWaiters.splice(index, 1);
+      signal?.removeEventListener("abort", cancel);
+      reject(new Error("Request timed out while waiting for a network slot. Please retry."));
+    }, timeoutMs);
     const cancel = () => {
+      window.clearTimeout(timeout);
       const index = apiRequestWaiters.indexOf(enter);
       if (index >= 0) apiRequestWaiters.splice(index, 1);
       reject(new DOMException("Request was cancelled", "AbortError"));
     };
     const enter = () => {
+      window.clearTimeout(timeout);
       signal?.removeEventListener("abort", cancel);
       activeApiRequests += 1;
       resolve();
@@ -363,17 +371,19 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }
 
   const requestPromise = (async () => {
-    await acquireApiSlot(signal);
+    const deadline = Date.now() + timeoutMs;
+    await acquireApiSlot(signal, timeoutMs);
     try {
       if (scope !== currentApiCacheScope()) throw new DOMException("Account or AMO context changed", "AbortError");
       let lastError: unknown;
       for (let index = 0; index < urls.length; index += 1) {
         const url = urls[index];
         try {
+          if (Date.now() >= deadline) throw new Error("Request timed out before an alternate connection could start.");
           const { response, body: responseBody } = await fetchOnce<T>(
             url,
             { ...rest, method, body, headers: finalHeaders },
-            timeoutMs,
+            Math.max(1, deadline - Date.now()),
             signal,
             {
               // Zero freshness requests still need a durable copy for offline

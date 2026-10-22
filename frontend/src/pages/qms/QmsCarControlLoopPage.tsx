@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { caseDate } from "../qualityAudits/carCaseModel";
 import "../qualityAudits/caseWorkspace.css";
 import { personDisplay } from "../../utils/personDisplay";
@@ -206,7 +207,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   }
 
   if (controlQuery.isLoading) {
-    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="page"><div className="card">Loading CAR control loop…</div></main></DepartmentLayout>;
+    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="page"><div className="card"><InlineLoading label={"Loading CAR control loop…"}/></div></main></DepartmentLayout>;
   }
 
   if (controlQuery.isError || !control) {

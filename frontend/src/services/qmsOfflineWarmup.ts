@@ -2,7 +2,7 @@
 function scheduleOfflineWarmup(type: "PRECACHE_QMS" | "PRECACHE_PORTAL"): () => void {
   if (typeof navigator === "undefined" || !navigator.serviceWorker) return () => undefined;
   const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-  if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || "")) return () => undefined;
+  if (connection?.saveData || /^(slow-2g|2g|3g)$/.test(connection?.effectiveType || "")) return () => undefined;
   let stopped = false;
   let timer: number | null = null;
   const schedule = () => {
