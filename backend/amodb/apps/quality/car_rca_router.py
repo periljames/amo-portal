@@ -20,7 +20,7 @@ from . import models
 from .car_rca_models import (
     QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
     QualityCarRcaMutation, QualityCarRcaRevision, QualityCarRcaRollout,
-    QualityCarResponseRetainedRevision
+    QualityCarResponseRetainedRevision, QualityCarInviteAccessControl
 )
 from .tenant_security import (
     TenantContext, assert_quality_permission, require_quality_permission,
@@ -178,6 +178,34 @@ class ActionReview(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
 
 
+def _control_for_car(db: Session, car):
+    return db.query(QualityCarInviteAccessControl).filter(
+        QualityCarInviteAccessControl.amo_id == str(car.amo_id),
+        QualityCarInviteAccessControl.car_id == car.id,
+    ).first()
+
+
+def assert_invite_access(db: Session, car) -> None:
+    """Reject expired/revoked guest capabilities regardless of CAR edit status."""
+    # A token is first resolved against the indexed, unique quality_cars token;
+    # tenant RLS is set from the resolved row, never from a caller-supplied ID.
+    set_postgres_tenant_context(
+        db, amo_id=str(car.amo_id),
+        user_id="00000000-0000-0000-0000-000000000000",
+    )
+    control = _control_for_car(db, car)
+    if control is None:
+        return  # Preserve links issued before governance activation.
+    if control.revoked_at is not None:
+        raise HTTPException(status_code=410, detail="This CAR invitation was revoked by Quality.")
+    if control.expires_at is not None:
+        expires_at = control.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= _utcnow():
+            raise HTTPException(status_code=410, detail="This CAR invitation has expired. Contact Quality.")
+
+
 def _car_for_guest(db: Session, token: str, *, lock=False):
     if not token or len(token) > 64:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
@@ -187,7 +215,7 @@ def _car_for_guest(db: Session, token: str, *, lock=False):
     car = (query.with_for_update() if lock else query).first()
     if car is None:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
-    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
+    assert_invite_access(db, car)
     return car
 
 
@@ -688,6 +716,71 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
     )
     db.commit()
     return _action_dict(row)
+
+class InviteAccessChange(BaseModel):
+    expires_at: datetime | None = None
+    revoke: bool = False
+    reason: str = Field(min_length=8, max_length=4000)
+
+
+def _invite_control_dict(control):
+    return {
+        "expires_at": control.expires_at if control else None,
+        "revoked_at": control.revoked_at if control else None,
+        "reason": control.reason if control else "",
+        "updated_by_user_id": control.updated_by_user_id if control else None,
+        "updated_at": control.updated_at if control else None,
+    }
+
+
+@router.get("/invite-access")
+def read_invite_access_control(
+    car_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.car.view")),
+    db: Session = Depends(get_read_db),
+):
+    car = _car_for_employee(db, ctx, car_id)
+    return _invite_control_dict(_control_for_car(db, car))
+
+
+@router.put("/invite-access")
+def update_invite_access_control(
+    car_id: uuid.UUID, payload: InviteAccessChange,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    control = _control_for_car(db, car)
+    if control is not None and control.revoked_at is not None:
+        raise HTTPException(status_code=409, detail="A revoked token cannot be reactivated. Issue a new controlled invitation.")
+    if payload.expires_at is not None:
+        expiry = payload.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry <= _utcnow() and not payload.revoke:
+            raise HTTPException(status_code=422, detail="Future expiry must be after the current time.")
+    if control is None:
+        control = QualityCarInviteAccessControl(
+            id=uuid.uuid4(), amo_id=ctx.amo_id, car_id=car.id,
+            reason=payload.reason.strip(), updated_by_user_id=ctx.user_id,
+        )
+        db.add(control)
+    if "expires_at" in payload.model_fields_set:
+        control.expires_at = payload.expires_at
+    if payload.revoke:
+        control.revoked_at = _utcnow()
+    control.reason = payload.reason.strip()
+    control.updated_by_user_id = ctx.user_id
+    from .service import add_car_action
+    add_car_action(
+        db=db, car=car, action_type=models.CARActionType.COMMENT,
+        message=("CAR invitation revoked: " if payload.revoke else "CAR invitation expiry revised: ") + payload.reason.strip(),
+        actor_user_id=ctx.user_id,
+    )
+    db.commit()
+    return _invite_control_dict(control)
+
 
 class AdoptEffectivenessProposal(BaseModel):
     responsible_reviewer_user_id: str = Field(min_length=1, max_length=36)
