@@ -6924,6 +6924,10 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     # the same CAR from appearing twice.
     latest_existing = _car_invite_latest_response(db, car.id)
     if latest_existing is not None and _car_response_was_recalled(db, car.id, latest_existing) and not _car_submission_was_opened(db, car.id, latest_existing):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest_existing, reason="Earlier recalled submission superseded by a replacement.")
         db.delete(latest_existing)
         db.flush()
 
@@ -7017,6 +7021,10 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
 
     latest = _car_invite_latest_response(db, car.id)
     if latest is not None and not _car_submission_was_opened(db, car.id, latest):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest, reason="Respondent recalled submitted CAR before Quality opened the review.")
         db.delete(latest)
         db.flush()
 
