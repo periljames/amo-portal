@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CarRcaDocument, CarRcaInvestigation, CarRcaMethod, CarRcaNode, CauseEntryType, CarRcaEffectivenessProposal } from "../../../services/qmsCarRca";
 
 const METHOD_GUIDE: Array<{ id: CarRcaMethod; title: string; description: string }> = [
@@ -25,10 +25,10 @@ const blankNode = (category: string, parent_id: string | null = null): CarRcaNod
   id: nextId(), parent_id, statement: "", category, entry_type: "HYPOTHESIS",
   evidence_references: [], rationale: "",
 });
-const paths = (nodes: CarRcaNode[], parent_id: string | null = null, depth = 0): Array<{ node: CarRcaNode; depth: number }> =>
-  nodes.filter(node => node.parent_id === parent_id).flatMap(node => [
+const paths = (nodes: CarRcaNode[], parent_id: string | null = null, depth = 0, seen = new Set<string>()): Array<{ node: CarRcaNode; depth: number }> =>
+  depth >= 100 ? [] : nodes.filter(node => node.parent_id === parent_id && !seen.has(node.id)).flatMap(node => [
     { node, depth },
-    ...paths(nodes, node.id, depth + 1),
+    ...paths(nodes, node.id, depth + 1, new Set([...seen, node.id])),
   ]);
 const csv = (text: string) => text.split("\n").map(s => s.trim()).filter(Boolean);
 const labelFor = (id: CarRcaMethod) => METHOD_GUIDE.find(m => m.id === id)?.title || id;
@@ -51,6 +51,7 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
   const [rationale, setRationale] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+  const fishboneRef = useRef<SVGSVGElement | null>(null);
   const [paretoCategory, setParetoCategory] = useState("");
   const [paretoCount, setParetoCount] = useState("1");
   const [paretoSource, setParetoSource] = useState("");
@@ -101,10 +102,41 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       entry_type: kind, evidence_references: csv(evidence), rationale: rationale.trim(),
     };
     if (updated.entry_type === "CAUSAL_CONCLUSION" && !updated.evidence_references.length) return;
-    updateMethod({ ...base, nodes: editingId
+    const next = { ...base, nodes: editingId
       ? base.nodes.map(node => node.id === editingId ? updated : node)
-      : [...base.nodes, updated] });
+      : [...base.nodes, updated] };
+    const supported_cause_ids = updated.entry_type === "CAUSAL_CONCLUSION"
+      ? value.supported_cause_ids
+      : value.supported_cause_ids.filter(id => id !== updated.id);
+    onChange({
+      ...value, supported_cause_ids,
+      investigations: current
+        ? value.investigations.map(item => item.id === current.id ? next : item)
+        : [...value.investigations, next],
+    });
     resetEdit();
+  };
+  const descendantsOf = (id: string): Set<string> => {
+    const found = new Set([id]);
+    for (let i = 0; i <= nodes.length; i++) {
+      const before = found.size;
+      nodes.forEach(node => { if (node.parent_id && found.has(node.parent_id)) found.add(node.id); });
+      if (found.size === before) break;
+    }
+    return found;
+  };
+  const exportFishboneSvg = () => {
+    if (!fishboneRef.current) return;
+    const markup = new XMLSerializer().serializeToString(fishboneRef.current);
+    const blob = new Blob([markup], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "car-fishbone-diagram.svg";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
   const deleteNode = (id: string) => {
     if (!window.confirm("Remove this draft cause and its descendants? Revision history will retain earlier saved versions.")) return;
@@ -168,10 +200,11 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
         <span>{Math.round(zoom * 100)}%</span>
         <button type="button" onClick={() => setZoom(z => Math.min(2, z + .15))}>+</button>
         <button type="button" onClick={() => setZoom(1)}>Fit</button>
-        <button type="button" onClick={() => window.print()}>Print</button>
+        <button type="button" onClick={() => window.print()}>Print / save PDF</button>
+        <button type="button" onClick={exportFishboneSvg}>Export SVG</button>
       </div>
       <div className="car-rca-diagram-scroller" tabIndex={0} aria-label="Scroll the Fishbone diagram">
-        <svg role="img" aria-label={`Fishbone diagram with ${causes.length} recorded causes`} width={1000 * zoom} height={460 * zoom} viewBox="0 0 1000 460">
+        <svg ref={fishboneRef} xmlns="http://www.w3.org/2000/svg" role="img" aria-label={`Fishbone diagram with ${causes.length} recorded causes`} width={1000 * zoom} height={460 * zoom} viewBox="0 0 1000 460">
           <line x1={85} y1={235} x2={770} y2={235} stroke="currentColor" strokeWidth={4} />
           <path d="M770 195 L950 195 L950 275 L770 275 Z" stroke="currentColor" fill="none" strokeWidth={2} />
           <text x={860} y={226} textAnchor="middle" fontSize={14} fill="currentColor">Finding</text>
@@ -257,7 +290,7 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
         {(selected === "FIVE_WHYS" || selected === "CAUSAL_FACTOR" || selected === "ISHIKAWA") && <label>Caused by / preceding question
           <select value={parentId} onChange={e => setParentId(e.target.value)} disabled={disabled}>
             <option value="">Problem statement / main branch</option>
-            {nodes.filter(node => node.id !== editingId).map(node => <option key={node.id} value={node.id}>{node.statement.slice(0, 90)}</option>)}
+            {nodes.filter(node => !editingId || !descendantsOf(editingId).has(node.id)).map(node => <option key={node.id} value={node.id}>{node.statement.slice(0, 90)}</option>)}
           </select>
         </label>}
         <label>Evidence classification
