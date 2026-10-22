@@ -170,3 +170,20 @@ class QualityCarResponseRetainedRevision(Base):
         UniqueConstraint("amo_id", "car_id", "original_response_id", name="uq_quality_car_recalled_response"),
         Index("ix_quality_car_response_history", "amo_id", "car_id", "retained_at"),
     )
+
+
+class QualityCarInviteAccessControl(Base):
+    """Optional, per-CAR guest capability limits; old issued links are not expired."""
+    __tablename__ = "quality_car_invite_access_controls"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    reason = Column(Text, nullable=False)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        UniqueConstraint("amo_id", "car_id", name="uq_quality_car_invite_access_control"),
+        Index("ix_quality_car_invite_access_expiry", "amo_id", "expires_at", "revoked_at"),
+    )
