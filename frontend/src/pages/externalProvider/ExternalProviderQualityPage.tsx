@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
 import ExternalPartnerQualityReview from "./ExternalPartnerQualityReview";
@@ -96,12 +97,16 @@ export default function ExternalProviderQualityPage() {
   };
   const filtered=items.filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
     .toLowerCase().includes(search.toLowerCase()));
-  return <main className="vendor-portal">
+  return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="vendor-portal vendor-quality-workspace">
     <div className="vendor-shell">
       <header className="vendor-header">
         <div><span className="vendor-eyebrow">QUALITY DEPARTMENT · EXTERNAL ACCOUNT GOVERNANCE</span>
           <h1>External provider access</h1>
           <p>Portal account decisions do not approve suppliers commercially or authorize maintenance work.</p>
+          <nav aria-label="Provider management">
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers register</Link>
+            <a href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Open vendor sign in</a>
+          </nav>
         </div>
         <button type="button" disabled={busy} onClick={() => void refresh().catch((e) => setError(String(e)))}>Refresh access register</button>
       </header>
@@ -227,5 +232,5 @@ export default function ExternalProviderQualityPage() {
         </table></div>
       </section>
     </div>
-  </main>;
+  </main></DepartmentLayout>;
 }

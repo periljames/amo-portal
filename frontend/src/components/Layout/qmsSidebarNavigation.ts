@@ -103,7 +103,7 @@ export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
     id: "controls",
     label: "System controls",
     description: "Processes, documents, competence and operational controls",
-    moduleIds: ["system", "documents", "suppliers", "equipment-calibration", "external-interface"],
+    moduleIds: ["system", "documents", "suppliers", "provider-access", "equipment-calibration", "external-interface"],
   },
   {
     id: "review",

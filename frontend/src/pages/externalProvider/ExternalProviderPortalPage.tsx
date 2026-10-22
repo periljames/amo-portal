@@ -67,7 +67,7 @@ export default function ExternalProviderPortalPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [amoSlug, setAmoSlug] = useState("");
+  const [amoSlug, setAmoSlug] = useState(() => new URLSearchParams(location.search).get("amo") || "");
   const [vendorKey, setVendorKey] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -208,6 +208,7 @@ export default function ExternalProviderPortalPage() {
               () => vendorFetch("/logout", {}, account!.csrf), "Signed out.", true,
             )}>Sign out</button>
           </> : <Link to={pathFor("login")}>Sign in</Link>}
+          <Link to={amoSlug ? `/maintenance/${encodeURIComponent(amoSlug)}/login` : "/login"}>Staff / QMS sign in</Link>
         </nav>
       </header>
       {error ? <div role="alert" className="vendor-error">{error}</div> : null}
@@ -215,6 +216,7 @@ export default function ExternalProviderPortalPage() {
       {showForm && <section className="vendor-card vendor-auth" aria-label="External provider authentication">
         <h2>{mode === "login" ? "Sign in" : mode === "invite" ? "Accept invitation" :
           mode === "forgot" ? "Recover account" : mode === "verify" ? "Verify your account" : "Reset password"}</h2>
+        {mode === "login" && <p>Use the AMO code and email address from your invitation. Your AMO Quality Manager issues and activates vendor accounts.</p>}
         <form onSubmit={submit}>
           {["login", "forgot"].includes(mode) && <>
             <Field title="AMO tenant code" value={amoSlug} onChange={setAmoSlug} required />

@@ -469,7 +469,7 @@ export const AppRouter: React.FC = () => {
           never the staff JWT or employee RequireAuth hierarchy. */}
       <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
       <Route path="/partner/:tenant/*" element={<ExternalPartnerPage />} />
-      <Route path="/maintenance/:amoCode/quality/external-accounts"
+      <Route path="/maintenance/:amoCode/quality/external-accounts/*"
         element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
 
       {/* Document Control retains authority for external originals, legal hold,

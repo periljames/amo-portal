@@ -69,7 +69,7 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   if (parts.length > 2) return false;
   const view = parts[1] || route.module.defaultView;
 
-  if (route.module.id === "calendar" || route.module.id === "evidence-vault" || route.module.id === "aerodoc") return false;
+  if (["calendar", "evidence-vault", "aerodoc", "provider-access"].includes(route.module.id)) return false;
   // Programme/programme are governed specialist Audit Operations routes owned by
   // PortalRouteSurface. Only the remaining shallow audit registers stay on the
   // generic register shortcut.

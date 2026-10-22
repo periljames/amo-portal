@@ -186,6 +186,17 @@ const MODULES: readonly QmsModuleRoute[] = [
     recordRoutes: [{ allowBare: true, allowedTails: PROVIDER_WORKSPACE_TAILS }],
   },
   {
+    id: "provider-access",
+    segment: "external-accounts",
+    label: "Vendor Accounts & Access",
+    navigationLabel: "Vendor Accounts & Access",
+    permission: "qms.audit.manage",
+    section: "control",
+    defaultView: "register",
+    validViews: ["register"],
+    componentType: "specialist",
+  },
+  {
     id: "equipment-calibration",
     segment: "equipment-calibration",
     label: "Equipment and Calibration",

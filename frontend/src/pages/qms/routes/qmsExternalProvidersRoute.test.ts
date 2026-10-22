@@ -4,6 +4,14 @@ import { classifyQmsPath, qmsModulePath, qmsNavigationItems } from "./qmsRouteRe
 
 
 describe("External Providers QMS route ownership", () => {
+  it("registers vendor account governance so the outer router does not reject it", () => {
+    for (const tail of ["", "/register"]) {
+      expect(classifyQmsPath(`/maintenance/SAF/quality/external-accounts${tail}`)).toMatchObject({
+        kind: "known", module: { id: "provider-access", componentType: "specialist", permission: "qms.audit.manage" },
+      });
+    }
+    expect(classifyQmsPath("/maintenance/SAF/quality/external-accounts/unknown").kind).toBe("unknown");
+  });
   it("uses the governed provider register as the canonical supplier workspace", () => {
     expect(qmsModulePath("SAF", "suppliers")).toBe("/maintenance/SAF/quality/suppliers/register");
     const item = qmsNavigationItems("SAF").find((candidate) => candidate.id === "suppliers");

@@ -10,7 +10,7 @@ Public DNS-over-HTTPS resolved three Funnel ingress addresses. All three returne
 
 ## Data preservation and recovery
 
-The original failed data directory `/var/lib/postgresql/16/main` was retained. Its data, configuration and PostgreSQL log were archived at:
+The original failed data directory `/var/lib/postgresql/16/main` was initially retained, then deleted at the user's explicit request after recovery verification. Its data, configuration and PostgreSQL log remain archived at:
 
 - VM: `/var/backups/amo-recovery/incident-20261022/failed-cluster-and-config.tar`
 - Windows: `%LOCALAPPDATA%/AMO-Portal/recovery/incident-20261022/failed-cluster-and-config.tar`
@@ -27,9 +27,11 @@ TLS connections using the application's existing database credentials were verif
 
 A fresh logical backup completed after migration and was copied and verified on Windows at `%LOCALAPPDATA%/AMO-Portal/backups/postgres/20261022T061003284975Z.tar`. The six-hour VM backup timer remains active.
 
-The forensic copies brought the VM root filesystem to 93% usage. Its ext4 filesystem and logical volume were grown online by 8 GiB from the volume group's existing free space. Root usage fell to 74%, with approximately 9.6 GiB available. No recovery evidence was deleted.
+The forensic copies brought the VM root filesystem to 93% usage. Its ext4 filesystem and logical volume were grown online by 8 GiB from the volume group's existing free space. Root usage fell to 74%, with approximately 9.6 GiB available.
 
-**Recovery limitation:** a successful dump, clean restore, constraint creation and integrity checks do not prove that every transaction immediately preceding WAL corruption survived. The precise cause of the WAL damage was not established. The guest journal also showed an unclean prior shutdown. The preserved original remains available for further investigation. PostgreSQL's [WAL recovery guidance](https://www.postgresql.org/docs/16/app-pgresetwal.html) explains why a reset copy must be exported and rebuilt rather than used as the live database.
+After explicit user-requested cleanup, the stopped damaged directory `/var/lib/postgresql/16/main` (431 MiB) and stopped reset-WAL working copy `/var/lib/postgresql/16/incident_salvage` (367 MiB) were deleted. Before deletion, the active SQL data directory and postmaster process were verified to use `incident_clean`, neither target had a postmaster PID file, the preserved archive hash matched, and the fresh logical backup passed all checksums. The healthy older-backup verification cluster and both archive copies were retained. PostgreSQL and the backup timer remained active afterward, with 72 users and about 11 GiB filesystem space available. Further investigation can use the archived original.
+
+**Recovery limitation:** a successful dump, clean restore, constraint creation and integrity checks do not prove that every transaction immediately preceding WAL corruption survived. The precise cause of the WAL damage was not established. The guest journal also showed an unclean prior shutdown. The archived original remains available for further investigation. PostgreSQL's [WAL recovery guidance](https://www.postgresql.org/docs/16/app-pgresetwal.html) explains why a reset copy must be exported and rebuilt rather than used as the live database.
 
 ## Network and runtime changes
 
@@ -54,8 +56,18 @@ Start and stop the managed runtime with:
 
 Logs and ownership records are under `.artifacts/portal-runtime`. Do not run duplicate unmanaged API/worker fleets. A shared frontend restart publishes the current built `frontend/dist` into a release snapshot.
 
+## Vendor and Quality entry points
+
+- Vendors sign in at `/vendor/login`; `?amo=safarilink` prefills the AMO code from a Quality-issued link. Invitations and Quality Manager activation govern access.
+- Staff and QMS sign in at `/maintenance/safarilink/login` (substitute the tenant login slug).
+- Quality → Control → External Providers opens `/maintenance/safarilink/quality/suppliers/register` for provider approval, agreements, qualification, evidence and oversight.
+- Quality → Control → Vendor Accounts & Access opens `/maintenance/safarilink/quality/external-accounts` for invitations, account activation, access scopes and partner submissions. Navigation follows the existing `qms.audit.manage` route permission; account-changing controls remain Quality Manager-only.
+- The provider register now exposes account administration and the vendor sign-in link directly. Account administration retains the tenant layout, and the Maintenance Provider Quality link points to the actual register. Vendor and partner pages no longer mount the employee idle-session controller or redirect on employee session expiration.
+- Root cause: the outer QMS route classifier did not register `external-accounts`, so it rendered the Quality route-not-found page before the existing protected account page could run. The route is now registered as a specialist workspace with its existing access permission and dedicated preload owner.
+
 ## Verification
 
+- Vendor/QMS follow-up: 68 route, navigation, preload and permission tests passed. Three Chromium checks passed against the deployed production build: public vendor entry and tenant prefill, employee-expiry isolation, staff-login entry, and Quality account governance at both bare and canonical register URLs. The Quality rendering check uses isolated mocked API responses; no invitations or business records were created. Screenshots are under `.artifacts/vendor-login-interface.png` and `.artifacts/qms-vendor-accounts-interface.png`. The final production build and public-ingress HTTP checks passed.
 - Production build, modal checks and heavy-route checks passed; the final release includes the revised readiness policy.
 - Frontend transfer/network/offline groups: 58 tests passed. Connectivity/eligibility groups: 28 passed, including eight overlapping contract tests.
 - Gateway, runtime and worker recovery tests: 13 passed.

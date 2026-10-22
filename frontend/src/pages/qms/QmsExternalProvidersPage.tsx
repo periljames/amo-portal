@@ -630,6 +630,8 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
           <p>One governed register for suppliers, contractors, subcontractors and specialist service providers. Procurement owns the provider master; Quality owns approval, oversight, contracts and evidence.</p>
         </div>
         <div className="qms-provider-page__actions">
+          {hasQmsRolePermission("qms.audit.manage") && <Link className="qms-provider-button is-secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts`}>Vendor accounts & access</Link>}
+          <a className="qms-provider-button is-secondary" href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Vendor sign in</a>
           <button className="qms-provider-button is-secondary" onClick={() => navigate(`${basePath}/agreements`)}><FileText size={16} />Agreements & renewals</button>
           <button className="qms-provider-button is-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} />Refresh</button>
           {getCachedUser()?.role === "QUALITY_MANAGER" && <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>}

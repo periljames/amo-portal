@@ -24,6 +24,7 @@ describe("QMS navigation preload coverage", () => {
     ["/maintenance/tenant/quality/audits/checklists", "checklist"],
     ["/maintenance/tenant/quality/audits/program/p1/items/i1/schedule", "programmeSchedule"],
     ["/maintenance/tenant/quality/suppliers/register", "providers"],
+    ["/maintenance/tenant/quality/external-accounts/register", "providerAccess"],
     ["/maintenance/tenant/quality/reports/car-performance", "carReport"],
     ["/maintenance/tenant/workforce", null],
   ])("selects %s without importing unrelated pages", (path, expected) => {

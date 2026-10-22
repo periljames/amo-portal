@@ -62,6 +62,17 @@ function depth(item: PortalNavItem): number {
 }
 
 describe("portal route manifest", () => {
+  it("exposes provider access beside the Quality register only to authorized reviewers", () => {
+    const navigation = (role: PortalUser["role"]) => flattenPortalNavigation(buildPortalNavigation({
+      amoCode: "safarilink", user: user({ role }), contextDepartment: "quality", adminModeActive: false,
+    }));
+    for (const role of ["QUALITY_MANAGER", "QUALITY_OFFICER"] as const) {
+      expect(navigation(role)).toContainEqual(expect.objectContaining({
+        id: "qms-provider-access", path: "/maintenance/safarilink/quality/external-accounts/register",
+      }));
+    }
+    expect(navigation("ACCOUNTABLE_EXECUTIVE").some(item => item.id === "qms-provider-access")).toBe(false);
+  });
   it("routes a Quality Officer to Quality without exposing account administration", () => {
     const officer = user({ role: "QUALITY_OFFICER", position_title: "Quality Officer" });
     const items = flattenPortalNavigation(buildPortalNavigation({

@@ -183,7 +183,7 @@ export default function ContractedWorkModule(){
     <header className="proc-section__head"><div><h1>Contracted Maintenance</h1>
       <p>MOPM §2.23: controlled technical authorization, external AMO execution, Stores custody and Safarilink acceptance. Commercial POs never authorize maintenance or release.</p>
       <Link to={`/maintenance/${encodeURIComponent(amoCode)}/procurement`}>Related Procurement</Link>
-      {" · "}<Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-providers`}>Provider Quality</Link></div>
+      {" · "}<Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>Provider Quality</Link></div>
       <div><button onClick={()=>void load()} disabled={loading}>Refresh</button>{" "}
         {canCreate&&<button onClick={()=>setNewOpen(x=>!x)}>{newOpen?"Close form":"New controlled work order"}</button>}</div>
     </header>

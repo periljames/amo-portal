@@ -1,5 +1,7 @@
 .vendor-portal{min-height:100vh;background:#f5f7fa;color:#162638;padding:28px 16px 56px;font-family:inherit}
 .vendor-shell{max-width:1160px;margin:0 auto;display:grid;gap:20px}
+.vendor-quality-workspace{min-height:0}
+.vendor-quality-workspace .vendor-header nav{margin-top:16px}
 .vendor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding:24px 28px;background:#142d42;color:#fff;border-radius:14px}
 .vendor-header h1{font-size:clamp(24px,3vw,32px);margin:6px 0;font-weight:700}
 .vendor-header p{color:#d5e4ed;font-size:14px;margin:0;max-width:660px;line-height:1.55}
