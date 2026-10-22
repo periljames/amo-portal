@@ -62,6 +62,15 @@ class Investigation(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class EffectivenessProposal(BaseModel):
+    expected_result: str = Field(min_length=8, max_length=8000)
+    verification_method: str = Field(min_length=8, max_length=8000)
+    measurable_success_criterion: str = Field(min_length=8, max_length=8000)
+    observation_period: str = Field(min_length=3, max_length=255)
+    proposed_review_date: date
+    supporting_records: list[str] = Field(default_factory=list, max_length=40)
+
+
 class InvestigationDocument(BaseModel):
     version: int = Field(default=1, ge=1, le=100)
     problem_statement: str = Field(default="", max_length=8000)
@@ -70,6 +79,7 @@ class InvestigationDocument(BaseModel):
     supported_cause_ids: list[str] = Field(default_factory=list, max_length=30)
     conclusion_evidence_references: list[str] = Field(default_factory=list, max_length=60)
     evidence_notes: str = Field(default="", max_length=8000)
+    effectiveness_proposal: EffectivenessProposal | None = None
 
     @model_validator(mode="after")
     def validate_graphs(self):
@@ -568,3 +578,82 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
     )
     db.commit()
     return _action_dict(row)
+
+class AdoptEffectivenessProposal(BaseModel):
+    responsible_reviewer_user_id: str = Field(min_length=1, max_length=36)
+    reason: str = Field(min_length=8, max_length=4000)
+
+
+@router.post("/effectiveness-plan", status_code=201)
+def adopt_car_effectiveness_proposal(
+    car_id: uuid.UUID, payload: AdoptEffectivenessProposal,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    """Quality alone adopts a responder's proposal into authoritative assurance planning."""
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="Locked CAR cannot receive a new effectiveness plan.")
+    if car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED":
+        raise HTTPException(status_code=409, detail="Accept the root cause and CAPA before adopting the effectiveness proposal.")
+    doc = _document(db, car)
+    if doc is None or doc.submitted_snapshot is None:
+        raise HTTPException(status_code=409, detail="No submitted structured RCA proposal exists.")
+    investigation = InvestigationDocument.model_validate(
+        doc.submitted_snapshot.get("investigation") or {}
+    )
+    proposal = investigation.effectiveness_proposal
+    if proposal is None:
+        raise HTTPException(status_code=422, detail="Responder has not supplied an effectiveness proposal.")
+    if proposal.proposed_review_date < date.today():
+        raise HTTPException(status_code=422, detail="Update the expired proposed review date through controlled rework.")
+    if payload.responsible_reviewer_user_id in {car.assigned_to_user_id} | {
+        action.owner_user_id for action in _actions(db, car)
+    }:
+        raise HTTPException(status_code=403, detail="An action implementer cannot independently review effectiveness.")
+    from .assurance_case_router import _assert_user, _case_ref, _add_event
+    from .assurance_case_models import QualityAssuranceCase, QualityEffectivenessPlan
+    _assert_user(db, amo_id=ctx.amo_id, user_id=payload.responsible_reviewer_user_id)
+    previous = db.query(QualityEffectivenessPlan).filter(
+        QualityEffectivenessPlan.amo_id == ctx.amo_id,
+        QualityEffectivenessPlan.source_type == "CAR",
+        QualityEffectivenessPlan.source_id == str(car.id),
+        QualityEffectivenessPlan.status != "CANCELLED",
+    ).order_by(QualityEffectivenessPlan.created_at.desc()).first()
+    if previous and previous.status != "CONCLUDED":
+        raise HTTPException(status_code=409, detail="A governed effectiveness plan is already active for this CAR.")
+    case = QualityAssuranceCase(
+        amo_id=ctx.amo_id, case_ref=_case_ref(), case_type="EFFECTIVENESS",
+        title="CAR " + str(car.car_number) + " — effectiveness verification",
+        description=payload.reason.strip(), severity="MEDIUM", status="EFFECTIVENESS_REVIEW",
+        source_references=[{"source_type": "CAR", "source_id": str(car.id)}],
+        regulatory_basis=[], owner_user_id=payload.responsible_reviewer_user_id,
+        due_date=proposal.proposed_review_date,
+        created_by_user_id=ctx.user_id, updated_by_user_id=ctx.user_id,
+    )
+    db.add(case)
+    db.flush()
+    plan = QualityEffectivenessPlan(
+        amo_id=ctx.amo_id, case_id=case.id,
+        source_type="CAR", source_id=str(car.id),
+        source_route="/maintenance/" + ctx.amo_code + "/quality/cars/" + str(car.id) + "/overview",
+        expected_outcome=proposal.expected_result.strip(),
+        effectiveness_measure=proposal.measurable_success_criterion.strip(),
+        verification_method=proposal.verification_method.strip(),
+        observation_window=proposal.observation_period.strip(),
+        source_indicators=[{"source_type": "RESPONDER_PROPOSAL", "supporting_records": proposal.supporting_records}],
+        responsible_reviewer_user_id=payload.responsible_reviewer_user_id,
+        planned_review_date=proposal.proposed_review_date,
+        status="PLANNED", created_by_user_id=ctx.user_id
+    )
+    db.add(plan)
+    db.flush()
+    _add_event(db, row=case, event_type="CREATED", reason=payload.reason.strip(), actor_user_id=ctx.user_id)
+    _add_event(db, row=case, event_type="EFFECTIVENESS_PLANNED", reason="Independent review planned from submitted CAR RCA.", actor_user_id=ctx.user_id)
+    db.commit()
+    return {
+        "case_id": str(case.id), "case_ref": case.case_ref,
+        "plan_id": str(plan.id), "planned_review_date": plan.planned_review_date,
+        "reviewer_user_id": plan.responsible_reviewer_user_id,
+    }
