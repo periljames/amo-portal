@@ -114,3 +114,25 @@ class QualityCarRcaActionEvent(Base):
     __table_args__ = (
         Index("ix_quality_car_rca_action_history", "amo_id", "car_id", "action_id", "created_at"),
     )
+
+
+class QualityCarRcaParetoSnapshot(Base):
+    """Immutable, source-backed Quality aggregate bound to an authoritative CAR."""
+    __tablename__ = "quality_car_rca_pareto_snapshots"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    filters = Column(JSON, nullable=False)
+    population = Column(Text, nullable=False)
+    sample_size = Column(Integer, nullable=False)
+    categories = Column(JSON, nullable=False)
+    source_references = Column(JSON, nullable=False)
+    source_reference_count = Column(Integer, nullable=False)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("amo_id", "car_id", "fingerprint", name="uq_quality_car_rca_pareto_fingerprint"),
+        Index("ix_quality_car_rca_pareto_history", "amo_id", "car_id", "created_at"),
+        CheckConstraint("sample_size >= 0", name="ck_quality_car_rca_pareto_sample"),
+    )
