@@ -16,6 +16,7 @@ TABLES = (
     "quality_car_rca_documents", "quality_car_rca_revisions",
     "quality_car_rca_actions", "quality_car_rca_mutations", "quality_car_rca_action_events",
     "quality_car_rca_pareto_snapshots", "quality_car_response_retained_revisions",
+    "quality_car_invite_access_controls",
 )
 
 
@@ -135,6 +136,16 @@ def upgrade():
         sa.Column("retained_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("amo_id", "car_id", "original_response_id", name="uq_quality_car_recalled_response"))
     op.create_index("ix_quality_car_response_history", "quality_car_response_retained_revisions", ["amo_id", "car_id", "retained_at"])
+    op.create_table("quality_car_invite_access_controls",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True), *_scoped_columns(),
+        sa.Column("expires_at", sa.DateTime(timezone=True)),
+        sa.Column("revoked_at", sa.DateTime(timezone=True)),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("updated_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="SET NULL")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("amo_id", "car_id", name="uq_quality_car_invite_access_control"))
+    op.create_index("ix_quality_car_invite_access_expiry", "quality_car_invite_access_controls",
+                    ["amo_id", "expires_at", "revoked_at"])
     for table in TABLES:
         _enable_rls(table)
     # Existing regulated event tables use PostgreSQL append-only triggers; keep
