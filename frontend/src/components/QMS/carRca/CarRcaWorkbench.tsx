@@ -13,6 +13,42 @@ const METHOD_GUIDE: Array<{ id: CarRcaMethod; title: string; description: string
   { id: "FMEA", title: "FMEA", description: "Assess prospective failure modes and risk-priority numbers, not proof of actual causation." },
 ];
 const CATEGORIES = ["People", "Process", "Equipment", "Materials", "Environment", "Management", "Measurement"];
+const METHOD_FIELDS: Partial<Record<CarRcaMethod, Array<{ key: string; label: string; help: string }>>> = {
+  CAUSAL_FACTOR: [
+    { key: "event_sequence", label: "Event sequence and timing", help: "Record the key events in time order." },
+    { key: "causal_mechanism", label: "Proposed causal mechanism", help: "Explain how a condition contributed to the event; cite evidence in nodes below." },
+  ],
+  BARRIER_ANALYSIS: [
+    { key: "expected_barriers", label: "Required safeguards", help: "Identify the controls expected to prevent or detect this condition." },
+    { key: "actual_barriers", label: "Safeguards actually present", help: "Describe which controls existed and how they operated." },
+    { key: "failure_mode", label: "Gap or failed barrier", help: "Describe the missing or ineffective barrier without presuming responsibility." },
+    { key: "barrier_sources", label: "Barrier evidence", help: "Reference the approved procedure, observation or controlled record." },
+  ],
+  CHANGE_ANALYSIS: [
+    { key: "previous_state", label: "Previously normal condition", help: "Describe what was different before the event." },
+    { key: "current_state", label: "Observed deviation", help: "Describe the current condition and precise change." },
+    { key: "first_detected", label: "First observed change", help: "State when the change was first evidenced." },
+    { key: "comparison_basis", label: "Comparable unaffected controls", help: "Identify comparator locations or periods and evidence references." },
+  ],
+  HUMAN_ORGANIZATIONAL: [
+    { key: "work_conditions", label: "Work and environmental conditions", help: "Consider task complexity, workload, interruptions and equipment." },
+    { key: "supervision_process", label: "Supervision and process safeguards", help: "Describe management controls and opportunities for detection." },
+    { key: "competence_training", label: "Competency, training and available guidance", help: "Use documented records; avoid presuming personal error." },
+    { key: "communication_handover", label: "Communication and handover", help: "Consider the adequacy of interfaces and information." },
+    { key: "systemic_factors", label: "Underlying organisational factors", help: "Link proposed systemic issues to supporting observations." },
+  ],
+  EIGHT_D: [
+    { key: "team", label: "D1 — Responsible problem-solving team", help: "Identify participants and authority to investigate." },
+    { key: "problem_definition", label: "D2 — Precise problem definition", help: "Describe what, where, when, extent and impact." },
+    { key: "recurrence_prevention", label: "D7 — Recurrence-prevention controls", help: "Specify the process/system changes to embed." },
+    { key: "team_review", label: "D8 — Outcome and team review", help: "Record the closure discussion only when evidence supports it." },
+  ],
+  FMEA: [
+    { key: "failure_scope", label: "Risk assessment scope", help: "Identify the process, function or component and relevant boundary." },
+    { key: "scoring_basis", label: "Severity, occurrence and detection rating basis", help: "Describe the approved scales supporting the selected scores." },
+    { key: "proposed_control", label: "Risk-reduction or detection control", help: "Describe prospective mitigations without claiming root-cause proof." },
+  ],
+};
 const D_STAGES = ["D1 Team", "D2 Problem", "D3 Containment", "D4 Root cause", "D5 Permanent action", "D6 Implementation", "D7 Recurrence prevention", "D8 Recognition"];
 const EVIDENCE_TYPES: { value: CauseEntryType; label: string }[] = [
   { value: "HYPOTHESIS", label: "Hypothesis — not verified" },
@@ -263,6 +299,16 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
           <tbody>{cumulative.map((row, i) => <tr key={i}><td>{row.category}</td><td>{row.count}</td><td>{row.percentage}%</td><td>{row.source_ref}</td><td><button type="button" disabled={disabled} onClick={() => changeContext({ frequencies: pareto.filter(item => item !== row && !(item.category === row.category && item.count === row.count && item.source_ref === row.source_ref)) })}>Remove</button></td></tr>)}</tbody></table></div>
       </> : <p>No documented occurrences have been entered. A Pareto conclusion cannot be calculated without observations.</p>}
     </div> : <div className="car-rca-analysis">
+      {METHOD_FIELDS[selected] && <div className="car-rca-analysis">
+        <h4>Guided {labelFor(selected)} record</h4>
+        {METHOD_FIELDS[selected]?.map(field => <label key={field.key} className="car-rca-field">
+          {field.label}
+          <textarea rows={2} maxLength={4000} disabled={disabled}
+            value={valueOf(current?.context?.[field.key])}
+            placeholder={field.help}
+            onChange={e => changeContext({ [field.key]: e.target.value })}/>
+        </label>)}
+      </div>}
       {selected === "FMEA" && <div className="car-rca-grid">
         <label>Severity (1–10)<input type="number" min={1} max={10} value={scoreS} disabled={disabled} onChange={e => setScoreS(Math.min(10, Math.max(1, Number(e.target.value))))}/></label>
         <label>Occurrence (1–10)<input type="number" min={1} max={10} value={scoreO} disabled={disabled} onChange={e => setScoreO(Math.min(10, Math.max(1, Number(e.target.value))))}/></label>
