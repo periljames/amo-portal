@@ -15,7 +15,7 @@ depends_on = None
 TABLES = (
     "quality_car_rca_documents", "quality_car_rca_revisions",
     "quality_car_rca_actions", "quality_car_rca_mutations", "quality_car_rca_action_events",
-    "quality_car_rca_pareto_snapshots",
+    "quality_car_rca_pareto_snapshots", "quality_car_response_retained_revisions",
 )
 
 
@@ -125,12 +125,22 @@ def upgrade():
         sa.UniqueConstraint("amo_id", "car_id", "fingerprint", name="uq_quality_car_rca_pareto_fingerprint"),
         sa.CheckConstraint("sample_size >= 0", name="ck_quality_car_rca_pareto_sample"))
     op.create_index("ix_quality_car_rca_pareto_history", "quality_car_rca_pareto_snapshots", ["amo_id", "car_id", "created_at"])
+    op.create_table("quality_car_response_retained_revisions",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True), *_scoped_columns(),
+        sa.Column("original_response_id", sa.String(80), nullable=False),
+        sa.Column("event_type", sa.String(32), nullable=False),
+        sa.Column("submitted_at", sa.DateTime(timezone=True)),
+        sa.Column("snapshot", sa.JSON(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("retained_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.UniqueConstraint("amo_id", "car_id", "original_response_id", name="uq_quality_car_recalled_response"))
+    op.create_index("ix_quality_car_response_history", "quality_car_response_retained_revisions", ["amo_id", "car_id", "retained_at"])
     for table in TABLES:
         _enable_rls(table)
     # Existing regulated event tables use PostgreSQL append-only triggers; keep
     # submitted RCA and action events similarly immutable at the DB boundary.
     if op.get_bind().dialect.name == "postgresql":
-        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events", "quality_car_rca_pareto_snapshots"):
+        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events", "quality_car_rca_pareto_snapshots", "quality_car_response_retained_revisions"):
             fn = "prevent_" + table + "_mutation"
             op.execute(sa.text(
                 "CREATE OR REPLACE FUNCTION " + fn + "() RETURNS trigger AS $ "
@@ -149,7 +159,7 @@ def downgrade():
         if op.get_bind().execute(sa.text('SELECT COUNT(*) FROM "' + table + '"')).scalar():
             raise RuntimeError("Cannot downgrade: governed RCA evidence exists in " + table)
     if op.get_bind().dialect.name == "postgresql":
-        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events", "quality_car_rca_pareto_snapshots"):
+        for table in ("quality_car_rca_revisions", "quality_car_rca_action_events", "quality_car_rca_pareto_snapshots", "quality_car_response_retained_revisions"):
             op.execute(sa.text('DROP TRIGGER IF EXISTS trg_' + table + '_append_only ON "' + table + '"'))
             op.execute(sa.text("DROP FUNCTION IF EXISTS prevent_" + table + "_mutation()"))
     for table in reversed(TABLES):
