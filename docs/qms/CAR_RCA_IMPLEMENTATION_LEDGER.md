@@ -109,3 +109,34 @@ Audit NON_CONFORMITY finding → CAR issuance/assignment/invitation → identity
 - Exact applicable approved MOPM/aviation requirements for case closure and retention; user supplied draft requirements do not establish approval.
 
 See [Phase 1 baseline](CAR_RCA_PHASE1_BASELINE.md) for detailed source references, confirmed API route groups, workflow, historical PR decisions, gap diagnosis and anticipated file changes.
+
+## Phase 2 live implementation reconciliation — 22 October 2026
+
+**Evidence category: SOURCE IMPLEMENTED, NOT TEST VERIFIED.** Source changes are in draft PR #568. The current branch has **90 commits ahead and one main commit behind** as of the latest compare. Reconcile that upstream commit conservatively in Phase 3 after reviewing per-file overlap; no automatic merge was done.
+
+| ID | Phase 2 status | Source evidence and remaining limitation |
+| --- | --- | --- |
+| F01 | IMPLEMENTED — source, NOT VERIFIED | `car_rca_router.structured_rca_required` and `submit_rca_document` apply the rollout boundary. Legacy narrative responses remain available without fabricated cause nodes; new structured responses require evidence-linked facts and supported causes. |
+| F02 | IMPLEMENTED — source, NOT VERIFIED | `CarRcaWorkbench` includes branching 5 Whys, editable Fishbone/category branches, cycle/parent validation, zoom and export; underlying structured nodes are server-persisted and historically versioned. Diagram label/layout and accessibility need real browser verification. |
+| F03 | IMPLEMENTED — source, NOT VERIFIED | `car_rca_pareto_router`, `CarRcaParetoSource`, `QualityCarRcaParetoSnapshot` persist tenant-authorized source references, filters, frequency and cumulative percentage for source QMS findings. Respondent-entered counts are labeled separately and are not causal proof. |
+| F04 | IMPLEMENTED — source, NOT VERIFIED | Draft `PUT /cars/invite/{token}/draft` with optimistic revision, mutation key, event history and public UI autosave/recovery/conflict. Multiple-device browser concurrency still unverified. |
+| F05 | IMPLEMENTED — source, NOT VERIFIED | Scoped guest invite guard, `QualityCarInviteAccessControl`, rotation/revocation/expiry; suppress related-CAR token projection. All old invitation consumers and providers require security testing. |
+| F06 | IMPLEMENTED — source, NOT VERIFIED | `QualityCarRcaAction` per-owner/deadline/cause/state, revision, corrective/preventive/containment types, independent internal Quality review, immutable `QualityCarRcaActionEvent`. |
+| F07 | IMPLEMENTED — source, NOT VERIFIED | Respondent effectiveness proposals can be adopted into governed `QualityAssuranceCase` / `QualityEffectivenessPlan`; independent reviewer restriction and structured CAR closure gates. End-to-end plan state, reviewers and legacy close paths remain Phase 3-critical. |
+| F08 | OPEN WITH REASON | Existing CAR attachments and evidence vault reused, including original links; **shared-object-storage behavior, upload resumability, long-term HA/restore and cryptographic verification were not demonstrated** by the additions. Do not claim these satisfy HA or recovery without infrastructure checks and source changes as needed. |
+| F09 | IMPLEMENTED — source, NOT VERIFIED | Specialized routes registered in established Quality router composition; route ordering utility preserves precedence by source design. Runtime FastAPI route identity and duplicate signature test remain open. |
+| F10 | IMPLEMENTED — source, NOT VERIFIED | Existing six-step `PublicCarInvitePage` extended with RCA workbench/action controls; internal `CarRecordView` and control-loop operations show corresponding information. Browser keyboard/mobile/large-case pass remains open. |
+| F11 | IMPLEMENTED — source, NOT VERIFIED | Historical recall retention introduces `QualityCarResponseRetainedRevision` while leaving active legacy response handling intact. RLS and one-review-inbox acceptance remain unverified. |
+| F12 | OPEN WITH REASON | Runtime tenant RLS, provider role gates, delivery truth, shared evidence storage and scale cannot be source-certified. Migrations include tenant isolation/append-only safeguards, but have not been run. |
+
+### Committed application sources
+
+**Backend:** `car_rca_models.py`, `car_rca_router.py`, `car_rca_pareto_router.py`, `quality/__init__.py`, `router.py`, `public_invite_extensions.py`, `car_control_loop_guard_router.py`, `assurance_case_router.py`.  
+**Schema:** `backend/amodb/alembic/versions/quality_20261022_car_rca.py`.  
+**Frontend:** `PublicCarInvitePage.tsx`, `CarRecordView.tsx`, `QmsCarControlOperations.tsx`, `qmsCore.ts`, `qmsCarRca.ts`, and six focused UI/style components under `frontend/src/components/QMS/carRca/`.
+
+**Compatibility:** no duplicate authoritative CAR register; original issued links honored except explicitly revoked/expired; controlled new-record rollout; legacy text untouched; Quality approvals independent from guest input. Prior PR #40's obsolete router diff was not merged wholesale. Prior merged features remain in branch ancestry.
+
+**Phase 3 is the first permitted execution of** pytest, Vitest, Playwright, lint, typecheck, frontend build, migrations, PostgreSQL negative tenant tests and end-to-end report/attachment/closure tests. No source-only entry above is a claim that those checks passed.
+
+**Important:** Phase 2 source still needs final focused source-level closure and evidence-storage integration review; F08 and F12 are not accurately described as completed until that source or operational proof exists. Do not merge PR #568 before resolving them and Phase 3.
