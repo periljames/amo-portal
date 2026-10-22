@@ -646,10 +646,10 @@ const QualityCarsPage: React.FC = () => {
         onEdit={()=>openEdit(cars[0])} onReview={()=>void openReview(cars[0])} onInvite={()=>void handleCopyInvite(cars[0])} onExport={()=>void handleExport(cars[0])}/> : <section className="case-workspace"><button onClick={clearRouteScope}>Back to corrective actions</button><p role={registerQuery.isError?"alert":"status"}>{registerQuery.isError?"This corrective action could not be loaded.":registerQuery.isPending?"Loading corrective action…":"Corrective action not found."}</p>{registerQuery.isError?<button onClick={()=>void registerQuery.refetch()}>Retry</button>:null}</section>) : <>
       <header className="page-header qms-car-page-heading">
         <div>
-          <p className="page-header__eyebrow">Quality · Corrective action control</p>
           <h1 className="page-header__title">Corrective action register</h1>
         </div>
         <div className="audit-chip-list">
+          <label className="car-personal-scope"><input type="checkbox" checked={actorView==='mine'} onChange={event=>navigate(`${location.pathname}${event.target.checked?'?view=mine':''}`)}/>Assigned to me</label>
           <button type="button" className="secondary-chip-btn" onClick={() => setHistoryOpen((open) => !open)}>
             {historyOpen ? "Hide history" : "History"}
           </button>
@@ -658,16 +658,9 @@ const QualityCarsPage: React.FC = () => {
               New CAR
             </button>
           ) : null}
-          <button type="button" className="secondary-chip-btn" onClick={() => navigate(`/maintenance/${amoSlug}/quality`)}>
-            Back to QMS
-          </button>
         </div>
       </header>
 
-      <nav className="car-queue-nav" aria-label="Corrective action queues">
-        {([['register','All','all'],['awaiting-auditee','Awaiting response','awaiting_auditee'],['awaiting-quality-review','Quality review','awaiting_quality_review'],['awaiting-effectiveness-review','Effectiveness','awaiting_effectiveness_review'],['overdue','Overdue','overdue']] as const).map(([path,label,scope])=><button key={path} aria-current={effectiveScope===scope?'page':undefined} onClick={()=>navigate(`/maintenance/${amoSlug}/quality/cars/${path}${actorView==='mine'?'?view=mine':''}`)}>{label}</button>)}
-        <label className="car-personal-scope"><input type="checkbox" checked={actorView==='mine'} onChange={event=>navigate(`${location.pathname}${event.target.checked?'?view=mine':''}`)}/>Assigned to me</label>
-      </nav>
 
       <section className="audit-stats-grid" aria-label="Corrective action summary">
         <div className="audit-stat-card">

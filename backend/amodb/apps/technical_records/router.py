@@ -307,7 +307,9 @@ def resolve_exception(item_id: int, payload: schemas.ExceptionResolveRequest, db
 
 @router.get("/settings", response_model=schemas.TechnicalRecordSettingsRead)
 def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    return _get_settings(db, current_user.effective_amo_id)
+    row = _get_settings(db, current_user.effective_amo_id)
+    return {"utilisation_manual_only":row.utilisation_manual_only,"ad_sb_use_hours_cycles":row.ad_sb_use_hours_cycles,
+        "record_retention_years":max(3,row.record_retention_years),"allow_manual_maintenance_records":row.allow_manual_maintenance_records}
 
 
 @router.put("/settings", response_model=schemas.TechnicalRecordSettingsRead)
@@ -373,7 +375,7 @@ def packs_preview(pack_type: str, target_id: str | None = None, db: Session = De
     return {
         "pack_type": pack_type,
         "target_id": target_id,
-        "retention_years": settings.record_retention_years,
+        "retention_years": max(3, settings.record_retention_years),
         "mode": "pdf-index-with-links",
         "message": "Bundle generation currently returns PDF index metadata and evidence links list.",
     }

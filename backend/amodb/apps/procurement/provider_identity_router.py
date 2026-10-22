@@ -12,6 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from amodb.apps.accounts import models as accounts
 from amodb.apps.quality.tenant_security import set_postgres_tenant_context
 from amodb.database import get_db
@@ -236,7 +238,7 @@ def create_identity(amo_code: str, supplier_id: int, kind: str, payload: Provide
                     current_user: accounts.User = Depends(require_roles(*_EDIT_ROLES))):
     if kind not in _TABLES or kind in _READ_ONLY:
         raise HTTPException(404, "Unsupported resource.")
-    if kind in _QUALITY_ONLY and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
+    if kind in _QUALITY_ONLY and not is_tenant_admin(current_user) and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
         raise HTTPException(403, "Quality Manager authorization required.")
     tenant = _tenant(db, amo_code, current_user)
     _require_supplier(db, tenant, supplier_id)
@@ -267,7 +269,7 @@ def update_identity(amo_code: str, supplier_id: int, kind: str, record_id: str,
                     current_user: accounts.User = Depends(require_roles(*_EDIT_ROLES))):
     if kind not in _TABLES or kind in _READ_ONLY:
         raise HTTPException(404, "Unsupported resource.")
-    if kind in _QUALITY_ONLY and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
+    if kind in _QUALITY_ONLY and not is_tenant_admin(current_user) and current_user.role != accounts.AccountRole.QUALITY_MANAGER:
         raise HTTPException(403, "Quality Manager authorization required.")
     if payload.expected_version is None:
         raise HTTPException(428, "expected_version is required.")

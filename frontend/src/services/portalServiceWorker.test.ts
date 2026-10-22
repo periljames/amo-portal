@@ -169,6 +169,15 @@ describe("QMS service-worker caching", () => {
     const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })", { ...context, waitUntil }) as Response;
     expect(await response.text()).toBe("current shell");
   });
+  it("uses the updated root shell rather than an older route warmup when offline", async () => {
+    const { context, stores, waitUntil } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([
+      ["/", new Response("current release")],
+      ["/maintenance/t/quality/settings/general", new Response("previous release")],
+    ]));
+    const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality/settings/general', null, { waitUntil })", { ...context, waitUntil }) as Response;
+    expect(await response.text()).toBe("current release");
+  });
   it("returns the cached shell without waiting for a slow network refresh", async () => {
     vi.useFakeTimers();
     try {

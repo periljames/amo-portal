@@ -19,7 +19,7 @@ async function prepare(page: Page, admin = false) {
     }
     if (path.endsWith("/quality/settings")) {
       if (request.method() === "PATCH") { writes.push(request.postDataJSON()); Object.assign(configuration, request.postDataJSON()); }
-      return json({ settings: configuration });
+      return json({ settings: configuration, compliance_policy: { version: "MOPM-4-00", source: "MOPM Issue 4", retention: [{ code: "MAINTENANCE_RECORDS", label: "Maintenance work packages and releases", event: "release_signed_at", years: 3, days: 0, reference: "MOPM 2.14.1.2; AMO Regulation 34(3)", regulatory_minimum_years: 2 }], contracting: { maximum_supplier_review_days: 365, reference: "MOPM 2.23; 3.13" } } });
     }
     if (path.endsWith("/quality/mail-identity")) return json({ tenant_name: "Tenant A", shared_domain: "example.test", shared_sender: "quality@example.test", custom_domains: [], from_name: "Quality", from_email: "quality@example.test", reply_to: "", effective_reply_to: "quality@example.test", reply_mode: "QUALITY_ROLES", sender_mode: "SHARED", enabled: true, can_manage: true, provider_status: "READY", sending_mode: "SANDBOX", ready: true });
     if (path.startsWith("/api/maintenance/") && path.includes("/quality/")) return json({ items: [{ id: "record-1", title: "Scheduled Quality review", status: "OPEN", due_date: "2026-11-01" }], columns: ["title", "status", "due_date"], limit: 30, offset: 0, total: 1, has_more: false });
@@ -40,7 +40,9 @@ test("settings is a configuration workspace and saves only changed policy groups
   await page.goto("/maintenance/tenant-a/quality/settings/general");
   await expect(page.locator(".qms-settings-page h1")).toHaveText("Settings");
   await expect(page.getByRole("grid")).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Numbering", exact: true }).click();
+  await page.getByRole("button", { name: "Controls & settings", exact: true }).click();
+  await page.getByText("Settings pages", { exact: true }).click();
+  await page.getByRole("navigation", { name: "QMS controls and settings" }).getByRole("link", { name: "Numbering", exact: true }).click();
   await page.getByLabel("Audit Prefix").fill("QA");
   await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -48,6 +50,22 @@ test("settings is a configuration workspace and saves only changed policy groups
   expect(state.writes).toEqual([{ numbering_rules: { audit_prefix: "QA", sequence_digits: 4 } }]);
   await page.locator(".tenant-shell__main").evaluate(node => node.scrollTo(0, 0));
   await page.screenshot({ path: "../.artifacts/qms-settings-desktop.png", fullPage: true });
+});
+
+test("retention settings preserve the MOPM floor and allow a longer tenant period", async ({ page }) => {
+  const state = await prepare(page);
+  await page.goto("/maintenance/tenant-a/quality/settings/retention");
+  await expect(page.getByRole("heading", { name: "MOPM retention minimums" })).toBeVisible();
+  const years = page.getByRole("spinbutton", { name: /^Tenant years/ });
+  await expect(years).toHaveValue("3");
+  await years.fill("2"); await years.blur();
+  await expect(page.getByText("Enter a whole number of at least 3.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
+  expect(state.writes).toHaveLength(0);
+  await years.fill("5");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByText("Settings saved and recorded in Quality activity history.")).toBeVisible();
+  expect(state.writes).toEqual([{ retention_rules: { extensions_years: { MAINTENANCE_RECORDS: 5 } } }]);
 });
 
 test("reply addresses use plus and remove controls with inline feedback before submission", async ({ page }) => {
@@ -115,7 +133,27 @@ test("controls remain reachable at narrow widths without covering the page", asy
   await controls.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(controls).not.toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(await page.locator(".tenant-shell__main").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await page.screenshot({ path: "../.artifacts/qms-settings-mobile.png", fullPage: true });
+});
+
+test("one compact menu owns page navigation and the drawer has readable width", async ({ page }) => {
+  await prepare(page, true);
+  await page.goto("/maintenance/tenant-a/quality/settings/general");
+  const bar = page.getByRole("navigation", { name: "QMS page menus" });
+  await expect(bar).toBeVisible();
+  expect((await bar.boundingBox())!.height).toBeLessThanOrEqual(48);
+  await expect(page.locator(".quality-context-bar__tabs,.quality-context-bar__subtabs,.qa-workspace-rail,.qms-register-views")).toHaveCount(0);
+  await bar.getByRole("button", { name: "Assurance", exact: true }).click();
+  const assurance = page.getByRole("navigation", { name: "Assurance pages", exact: true });
+  await assurance.getByText("Audits pages", { exact: true }).click();
+  await expect(assurance.getByRole("link", { name: "Checklists", exact: true })).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/checklists");
+  await page.keyboard.press("Escape");
+  await expect(assurance).toHaveCount(0);
+  await expect(bar.getByRole("button", { name: "Assurance", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "QMS navigation" });
+  expect((await drawer.boundingBox())!.width).toBeGreaterThanOrEqual(340);
 });
 
 test("settings keeps its configuration cards readable in dark appearance", async ({ page }) => {
@@ -163,12 +201,20 @@ test("reviews every shared QMS register view for rendering and navigation errors
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const modules = QMS_ROUTE_REGISTRY.filter(module => module.componentType === "canonical" && !["calendar", "findings"].includes(module.id));
+  await page.goto("/maintenance/tenant-a/quality/settings/general", { waitUntil: "domcontentloaded" });
+  const menuLabels = { command: "Work", assurance: "Assurance", control: "Controls & settings", administration: "Controls & settings", reporting: "Reports" };
   let reviewed = 0;
   for (const module of modules) for (const view of module.validViews.filter(view => view !== "new" && view !== "car-performance")) {
-    await page.goto(`/maintenance/tenant-a/quality/${module.segment}/${view}`);
+    const target = `/maintenance/tenant-a/quality/${module.segment}/${view}`;
+    await page.getByRole("navigation", { name: "QMS page menus" }).getByRole("button", { name: menuLabels[module.section], exact: true }).click();
+    const panel = page.locator(".qms-page-menu__panel");
+    if (view !== module.defaultView) await panel.getByText(`${module.navigationLabel} pages`, { exact: true }).click();
+    await panel.locator(`a[href="${target}"]`).first().click();
+    await expect(page).toHaveURL(new RegExp(`${target}$`));
     await expect(page.locator(".qms-register-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Quality route not found" })).toHaveCount(0);
-    await expect(page.getByRole("navigation", { name: `${module.label} views` })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "QMS page menus" })).toBeVisible();
+    await expect(page.locator(".qms-register-views")).toHaveCount(0);
     expect(errors, `${module.id}/${view}`).toEqual([]);
     reviewed += 1;
   }

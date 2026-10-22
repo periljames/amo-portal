@@ -108,9 +108,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
       <main className="qms-mail" aria-labelledby="qms-mail-title">
         <header className="qms-mail__header">
           <div>
-            <p className="qms-mail__eyebrow">Quality Management System / Administration</p>
             <h1 id="qms-mail-title">Notification mailing identity</h1>
-            <p>Set the sender used for audit notices and other tenant QMS notifications. Resend transport and domain approval remain under Venspera.</p>
           </div>
           <button type="button" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw size={16} /> Refresh</button>
         </header>
@@ -137,7 +135,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
 
             <div className="qms-mail__grid">
               <form className="qms-mail__card" onSubmit={(event) => void save(event)}>
-                <div className="qms-mail__card-heading"><MailCheck size={20} /><div><h2>Sending identity</h2><p>Each tenant uses its own identity without access to Venspera's API credentials.</p></div></div>
+                <div className="qms-mail__card-heading"><MailCheck size={20} /><h2>Sending identity</h2></div>
                 <label className="qms-mail__field"><span>Display name</span>
                   <input value={draft.from_name} onChange={(e) => setDraft(v => ({ ...v, from_name: e.target.value }))} minLength={2} maxLength={150} disabled={!settings.can_manage || Boolean(busy)} required />
                 </label>

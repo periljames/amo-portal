@@ -15,6 +15,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from amodb.apps.accounts import models as accounts
 from amodb.apps.quality.tenant_security import set_postgres_tenant_context
 from amodb.database import get_db
@@ -379,7 +381,7 @@ def confirm(amo_code: str, batch_id: str, db: Session = Depends(get_db),
         {"amo":tenant,"batch":batch_id}).mappings().all()
     if not rows or any(row["status"] != "READY" for row in rows):
         raise HTTPException(409, "Batch has unresolved errors or no records.")
-    if batch["import_kind"] == "CONTRACTS" and user.role != accounts.AccountRole.QUALITY_MANAGER:
+    if batch["import_kind"] == "CONTRACTS" and not is_tenant_admin(user) and user.role != accounts.AccountRole.QUALITY_MANAGER:
         raise HTTPException(403, "Only the Quality Manager can confirm governed contract drafts.")
     created = []
     for row in rows:
@@ -507,7 +509,7 @@ def rollback_import(amo_code: str, batch_id: str, reason: str = Form(...),
     if not batch: raise HTTPException(404,"Import batch not found.")
     if batch["status"] != "COMMITTED":
         raise HTTPException(409,"Only committed batches may be rolled back.")
-    if batch["import_kind"] == "CONTRACTS" and user.role != accounts.AccountRole.QUALITY_MANAGER:
+    if batch["import_kind"] == "CONTRACTS" and not is_tenant_admin(user) and user.role != accounts.AccountRole.QUALITY_MANAGER:
         raise HTTPException(403,"Quality Manager authority is required for contracts.")
     rows = db.execute(text("""SELECT * FROM external_provider_import_rows
         WHERE amo_id=:amo AND batch_id=:batch ORDER BY row_number FOR UPDATE"""),

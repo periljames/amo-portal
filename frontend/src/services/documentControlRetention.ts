@@ -1,6 +1,7 @@
 import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
+import type { AmoCompliancePolicy } from "./amoCompliancePolicy";
 
 export type DocumentRetentionSourceType = "DOCUMENT" | "REVISION" | "EVIDENCE_ASSET" | "GENERATED_RECORD";
 export type DocumentRetentionStatus = "ACTIVE" | "DUE" | "HOLD" | "DISPOSITION_REQUESTED" | "APPROVED" | "REJECTED" | "DISPOSED";
@@ -108,6 +109,14 @@ export async function listDocumentRetention(tenant: string, manualId: string): P
 
 export function getDocumentRetentionSources(tenant: string, manualId: string): Promise<DocumentRetentionSourceCatalogue> {
   return request(tenant, `/documents/${encodeURIComponent(manualId)}/retention-sources`);
+}
+
+export function getDocumentRetentionPolicy(tenant: string): Promise<AmoCompliancePolicy> {
+  return request(tenant, "/retention-policy");
+}
+
+export function updateDocumentRetentionClassification(tenant: string, id: string, payload: { retention_class: string; metadata: Record<string, unknown>; reason: string }): Promise<DocumentRetentionRecord> {
+  return request(tenant, `/retention/${encodeURIComponent(id)}/classification`, { method: "PATCH", body: JSON.stringify(payload) });
 }
 
 export async function listDocumentRetentionApprovers(tenant: string): Promise<DocumentRetentionApprover[]> {

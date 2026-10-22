@@ -121,6 +121,78 @@ def test_midnight_uses_tenant_timezone_and_handles_dst():
     assert governance.AdminProfileActivation().period == "FOUR_HOURS"
 
 
+@pytest.mark.parametrize("role", ["AMO_ADMIN", "QUALITY_OFFICER", "TECHNICIAN"])
+def test_admin_inherits_provider_quality_authority_without_changing_primary_role(governed_tenant, role):
+    from amodb.apps.procurement import external_auth_router as auth
+    from amodb.apps.procurement import external_provider_documents_router as documents
+    from amodb.apps.procurement import external_contracted_work_router as work
+    from amodb.apps.procurement import external_procurement_router as transactions
+    from amodb.apps.quality import provider_qualification_router as qualification
+    db, tenant, users = governed_tenant
+    user = users["admin"]
+    user.role = models.AccountRole(role)
+    for gate in (auth._authorized_quality, documents._staff, work._staff, transactions._staff, transactions._technical_tenant):
+        assert gate(db, "tenant-a", user) == tenant.id
+        with pytest.raises(HTTPException) as error:
+            gate(db, "tenant-b", user)
+        assert error.value.status_code == 403
+    assert documents._staff(db, "tenant-a", user, manage=True) == tenant.id
+    assert documents.document_permissions("tenant-a", db, user) == {
+        "quality_manager": True, "quality_reviewer": True, "document_controller": True,
+    }
+    auth._quality_manager(user)
+    for allowed in (qualification.QUALITY, qualification.MAINTENANCE, qualification.SAFETY, {"QUALITY_MANAGER"}):
+        qualification._require(user, allowed)
+    assert user.role == models.AccountRole(role)
+    assert user.is_amo_admin
+
+
+def test_quality_officer_without_admin_appointment_keeps_existing_limits(governed_tenant):
+    from amodb.apps.procurement import external_auth_router as auth
+    from amodb.apps.procurement import external_provider_documents_router as documents
+    from amodb.apps.quality import provider_qualification_router as qualification
+    db, tenant, users = governed_tenant
+    user = users["quality"]
+    user.role = models.AccountRole.QUALITY_OFFICER
+    assert auth._authorized_quality(db, "tenant-a", user) == tenant.id
+    assert documents._staff(db, "tenant-a", user) == tenant.id
+    for gate in (lambda: auth._quality_manager(user), lambda: documents._staff(db, "tenant-a", user, manage=True), lambda: qualification._require(user, {"QUALITY_MANAGER"})):
+        with pytest.raises(HTTPException) as error:
+            gate()
+        assert error.value.status_code == 403
+
+
+@pytest.mark.parametrize("state,action", [("QUALIFICATION_AGREEMENT_CHECK", "QUALITY_ACCEPTED"), ("INSPECTION", "TECHNICAL_ACCEPT"), ("AWAITING_AUTHORIZATION", "AUTHORIZE")])
+def test_admin_contracted_work_actions_still_require_eligibility(monkeypatch, state, action):
+    from amodb.apps.procurement import external_contracted_work_router as work
+    record = {"id": "work-a", "amo_id": "tenant-a", "work_type": "BASE", "version": 1, "status": state}
+    monkeypatch.setattr(work, "_one", lambda *args, **kwargs: None)
+    def blocked(*args):
+        raise HTTPException(409, "Qualification evidence is still required")
+    monkeypatch.setattr(work, "_eligibility", blocked)
+    payload = SimpleNamespace(action=action, reason="Administrator workflow verification", expected_version=1, idempotency_key="test-key")
+    with pytest.raises(HTTPException) as error:
+        work._transition(MagicMock(), record, payload, user=actor())
+    assert error.value.status_code == 409
+    assert error.value.detail == "Qualification evidence is still required"
+    with pytest.raises(HTTPException) as foreign:
+        work._transition(MagicMock(), record, payload, user=actor(amo_id="tenant-b", effective_amo_id="tenant-b"))
+    assert foreign.value.status_code == 403
+
+
+def test_admin_contracted_work_exposes_internal_actions_without_provider_impersonation(monkeypatch):
+    from amodb.apps.procurement import external_contracted_work_router as work
+    record = {"id": "work-a", "amo_id": "tenant-a", "work_type": "BASE", "status": "QUALIFICATION_AGREEMENT_CHECK"}
+    monkeypatch.setattr(work, "_staff", lambda *args: "tenant-a")
+    monkeypatch.setattr(work, "_work", lambda *args: record)
+    monkeypatch.setattr(work, "_details", lambda *args: {})
+    data = work.staff_detail("tenant-a", "work-a", MagicMock(), actor())
+    assert "QUALITY_ACCEPTED" in data["allowed_actions"]
+    assert data["can_review_inspections"]
+    record["status"] = "DISPATCHED"
+    assert "PROVIDER_ACCEPT" not in work.staff_detail("tenant-a", "work-a", MagicMock(), actor())["allowed_actions"]
+
+
 def test_direct_delegation_expires_and_never_becomes_a_standing_appointment(governed_tenant):
     db, tenant, users = governed_tenant
     result = grant(db, users["admin"])

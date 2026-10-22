@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useState} from "react";
 import {apiRequest} from "../../services/apiClient";
 import {getCachedUser} from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import TextItemList from "../../components/forms/TextItemList";
 import StructuredItemList from "../../components/forms/StructuredItemList";
 import { listSupplierEvaluationTemplates, type SupplierEvaluationTemplate } from "../../services/supplierGovernance";
@@ -30,10 +31,10 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
 }):React.ReactElement{
   const path="/api/maintenance/"+encodeURIComponent(amoCode)+"/quality/external-qualification";
   const role=String(getCachedUser()?.role||"");
-  const manager=role==="QUALITY_MANAGER";
+  const manager=isTenantAdmin(getCachedUser()) || role==="QUALITY_MANAGER";
   const preparer=manager||role==="QUALITY_OFFICER";
-  const technical=["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER","WORKSHOP_MANAGER"].includes(role);
-  const safety=role==="SAFETY_MANAGER";
+  const technical=isTenantAdmin(getCachedUser()) || ["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER","WORKSHOP_MANAGER"].includes(role);
+  const safety=isTenantAdmin(getCachedUser()) || role==="SAFETY_MANAGER";
   const [data,setData]=useState<Overview|null>(null);
   const [policies,setPolicies]=useState<Policy[]>([]);
   const [templates, setTemplates] = useState<SupplierEvaluationTemplate[]>([]);
@@ -83,7 +84,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
     const policy=policies.find(p=>p.category===category);
     if(!policy)return;
     setTemplateId(policy.evaluation_template_id||"");
-    setInterval(policy.surveillance_days?String(policy.surveillance_days):"");
+    setInterval(String(Math.min(policy.surveillance_days || 365, 365)));
     setInitialAudit(Boolean(policy.initial_audit_required));
     setAuthorityRequired(Boolean(policy.authority_required));
     setSafetyRequired(Boolean(policy.safety_assessment_required));
@@ -227,25 +228,26 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
           }).catch(e=>setError(messageOf(e))).finally(()=>setBusy(false));
       }}>Export full source-linked regulatory trace</button>}</section>}
     {tab==="policy"&&<section className="qp-panel"><h4>Tenant category policy</h4>
-      <p>Safarilink annual audits are not assumed for every tenant; an approved category interval controls scheduling.</p>
+      <p>MOPM 3.13 sets annual review as the default. Choose a shorter interval for higher risk.</p>
       {policies.map(p=><p key={p.category}>{p.category} Rev {p.revision} · Evaluation {p.evaluation_template_id||"Not configured"} · {p.surveillance_days||"Risk-assessed"} days
         · {p.manual_references_json.join("; ")}</p>)}
       {manager&&<div className="qp-fields">
         <label>Category<input value={category} onChange={e=>setCategory(e.target.value.toUpperCase())}/></label>
         <label>Evaluation template<select value={templateId} onChange={event => setTemplateId(event.target.value)}><option value="">Select an active template</option>{templateId && !templates.some(item => item.id === templateId) && <option value={templateId}>Currently configured template</option>}{templates.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name} · Revision {item.revision_no}</option>)}</select>{templateError && <small role="status">{templateError}</small>}</label>
-        <label>Surveillance days (blank = risk-based)<input type="number" min={30} max={3650} value={interval}
+        <label>Surveillance interval (30–365 days)<input type="number" required min={30} max={365} value={interval}
           onChange={e=>setInterval(e.target.value)}/></label>
+        {(!Number.isInteger(Number(interval)) || Number(interval)<30 || Number(interval)>365) && <small role="status">Enter a whole number from 30 to 365 days.</small>}
         <label><input type="checkbox" checked={initialAudit} onChange={e=>setInitialAudit(e.target.checked)}/> Require initial QMS audit (rather than qualifying document review)</label>
         <label><input type="checkbox" checked={authorityRequired} onChange={e=>setAuthorityRequired(e.target.checked)}/> Require verified authority or State-of-Registry approval</label>
         <label><input type="checkbox" checked={safetyRequired} onChange={e=>setSafetyRequired(e.target.checked)}/> Require Safety Manager risk assessment</label>
         <StructuredItemList label="Question" value={JSON.parse(policyQuestions) as Record<string,unknown>[]} onChange={rows => setPolicyQuestions(JSON.stringify(rows))} fields={[{key:"label",label:"Question text"},{key:"kind",label:"Answer type",options:["TEXT","YES_NO","NUMBER","DATE"]},{key:"required",label:"Required",checkbox:true}]} create={() => ({key:crypto.randomUUID().toUpperCase(),label:"",kind:"TEXT",required:true})} disabled={busy} />
         <TextItemList label="Manual references" value={manuals} onChange={setManuals} disabled={busy} />
-        <button disabled={busy||note.length<8||(JSON.parse(policyQuestions) as Record<string,unknown>[]).some(row => !String(row.label||"").trim())} onClick={()=>{
+        <button disabled={busy||note.length<8||!Number.isInteger(Number(interval))||Number(interval)<30||Number(interval)>365||(JSON.parse(policyQuestions) as Record<string,unknown>[]).some(row => !String(row.label||"").trim())} onClick={()=>{
           try{const questions=JSON.parse(policyQuestions) as unknown;
             if(!Array.isArray(questions))throw Error("Array required");
             void change("/policies/"+encodeURIComponent(category),{
               questionnaire:questions,required_checks:BASE_CHECKS,
-              surveillance_days:interval?Number(interval):null,
+              surveillance_days:Number(interval),
               evaluation_template_id:templateId||null,
               initial_audit_required:initialAudit,authority_required:authorityRequired,
               safety_assessment_required:safetyRequired,

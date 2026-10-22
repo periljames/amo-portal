@@ -1,6 +1,7 @@
 import React, {useEffect,useState} from "react";
 import {apiRequest,qmsPath} from "../../services/apiClient";
 import {getCachedUser} from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 
 type Summary={states:{status:string;risk_level:string;total:number}[];
   queue:{qualification_pending:number;reviews_due:number};
@@ -97,7 +98,7 @@ export function ProviderPortfolio({amoCode}:{amoCode:string}) {
 export default function ProviderOversight({amoCode,supplierId,evidenceOptions}:{
   amoCode:string;supplierId:number;evidenceOptions:{id:string;title:string}[]
 }){
-  const canClassify=getCachedUser()?.role==="QUALITY_MANAGER";
+  const canClassify=isTenantAdmin(getCachedUser()) || getCachedUser()?.role==="QUALITY_MANAGER";
   const [critical,setCritical]=useState(false);
   const [sole,setSole]=useState(false);
   const [evidenceId,setEvidenceId]=useState("");

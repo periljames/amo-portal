@@ -262,6 +262,14 @@ describe("portal route manifest", () => {
     expect(items.some((item) => item.id === "my-training")).toBe(true);
   });
 
+  it("matches query workspaces only on their exact page and selected workspace", async () => {
+    const { isPortalPathActive } = await import("./portalRouteManifest");
+    const missions = { id: "missions", label: "Missions", path: "/maintenance/tenant-a/quality?workspace=missions" };
+    expect(isPortalPathActive("/maintenance/tenant-a/quality/settings/general", missions)).toBe(false);
+    expect(isPortalPathActive("/maintenance/tenant-a/quality", missions, "?workspace=people")).toBe(false);
+    expect(isPortalPathActive("/maintenance/tenant-a/quality", missions, "?workspace=missions")).toBe(true);
+  });
+
   it("does not mark Quality Home active when a workspace query is open", async () => {
     const { isPortalPathActive, portalNavItemHasActiveDescendant } = await import("./portalRouteManifest");
     const home: PortalNavItem = {

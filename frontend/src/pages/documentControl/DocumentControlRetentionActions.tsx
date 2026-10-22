@@ -7,11 +7,14 @@ import {
   uploadDocumentEvidenceAsset,
   type DocumentEvidenceAsset,
 } from "../../services/documentControlEvidence";
-import { getDocumentControlAdministration } from "../../services/documentControlReports";
+import RetentionFields from "../../components/QMS/RetentionFields";
+import { emptyRetentionFacts, retentionDispositionReady, type AmoCompliancePolicy, type RetentionFacts } from "../../services/amoCompliancePolicy";
 import {
   createDocumentRetention,
   decideDocumentDisposition,
   getDocumentRetentionSources,
+  getDocumentRetentionPolicy,
+  updateDocumentRetentionClassification,
   listDocumentRetention,
   listDocumentRetentionApprovers,
   recordDocumentDisposition,
@@ -40,10 +43,11 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
   const [items, setItems] = useState<DocumentRetentionRecord[]>([]);
   const [sources, setSources] = useState<DocumentRetentionSourceCatalogue | null>(null);
   const [approvers, setApprovers] = useState<DocumentRetentionApprover[]>([]);
-  const [classes, setClasses] = useState<string[]>(["STANDARD", "PERMANENT"]);
+  const [policy, setPolicy] = useState<AmoCompliancePolicy | null>(null);
+  const [retentionFacts, setRetentionFacts] = useState(emptyRetentionFacts);
   const [sourceType, setSourceType] = useState<DocumentRetentionSourceType>("DOCUMENT");
   const [sourceId, setSourceId] = useState("");
-  const [retentionClass, setRetentionClass] = useState("STANDARD");
+  const [retentionClass, setRetentionClass] = useState("");
   const [retentionUntil, setRetentionUntil] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [approverId, setApproverId] = useState("");
@@ -58,11 +62,11 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
     setLoading(true);
     setError("");
     try {
-      const [retention, sourceCatalogue, availableApprovers, admin] = await Promise.all([
+      const [retention, sourceCatalogue, availableApprovers, catalogue] = await Promise.all([
         listDocumentRetention(tenant, detail.document.id),
         getDocumentRetentionSources(tenant, detail.document.id),
         listDocumentRetentionApprovers(tenant),
-        getDocumentControlAdministration(tenant).catch(() => null),
+        getDocumentRetentionPolicy(tenant),
       ]);
       setItems(retention);
       setSources(sourceCatalogue);
@@ -73,23 +77,18 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
       setApproverId((current) => current && availableApprovers.some((item) => item.id === current)
         ? current
         : availableApprovers[0]?.id || "");
-      const configured = (admin?.retention_classes || [])
-        .map((item) => String(item.code || "").trim().toUpperCase())
-        .filter(Boolean);
-      if (configured.length) {
-        setClasses(configured);
-        if (!configured.includes(retentionClass)) setRetentionClass(configured[0]);
-      }
+      setPolicy(catalogue);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Retention controls could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [detail.document.id, retentionClass, retentionFocusId, tenant]);
+  }, [detail.document.id, retentionFocusId, tenant]);
 
   useEffect(() => { void load(); }, [load]);
 
   const selected = useMemo(() => items.find((item) => item.id === selectedId) || null, [items, selectedId]);
+  const dispositionReady = Boolean(selected && !selected.legal_hold && retentionDispositionReady(policy, selected.retention_class, selected.metadata, selected.retention_until));
   const sourceOptions = useMemo(() => {
     if (!sources) return [];
     if (sourceType === "REVISION") return sources.revisions;
@@ -108,6 +107,7 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
         source_type: sourceType,
         source_id: sourceType === "DOCUMENT" ? null : sourceId,
         retention_class: retentionClass,
+        metadata: { compliance_retention: retentionFacts },
         retention_until: retentionUntil ? new Date(`${retentionUntil}T23:59:59`).toISOString() : null,
       });
       setSourceType("DOCUMENT");
@@ -170,9 +170,9 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
     <form className="dc-grid" onSubmit={create}>
       <label><span>Governed source</span><select value={sourceType} onChange={(event) => { setSourceType(event.target.value as DocumentRetentionSourceType); setSourceId(""); }}><option value="DOCUMENT">Whole controlled document</option><option value="REVISION">Specific revision</option><option value="EVIDENCE_ASSET">Retained evidence asset</option>{sources?.generated_records.length ? <option value="GENERATED_RECORD">Generated controlled record</option> : null}</select></label>
       {sourceType !== "DOCUMENT" ? <label><span>Source record</span><select required value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">Select controlled source</option>{sourceOptions.map((item) => <option key={item.id} value={item.id}>{item.label}{item.status ? ` · ${item.status.replaceAll("_", " ")}` : ""}</option>)}</select><small>Only records returned by the tenant-scoped server catalogue can be selected.</small></label> : null}
-      <label><span>Retention class</span><select value={retentionClass} onChange={(event) => setRetentionClass(event.target.value)}>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>
-      <label><span>Retain until</span><input type="date" value={retentionUntil} onChange={(event) => setRetentionUntil(event.target.value)} /></label>
-      <div className="dc-form__actions"><button className="dc-button dc-button--primary" type="submit" disabled={busy || (sourceType !== "DOCUMENT" && !sourceId)}><FileCheck2 size={14} /> Govern retention</button></div>
+      <RetentionFields policy={policy} primary={retentionClass} onPrimary={setRetentionClass} value={retentionFacts} onChange={setRetentionFacts} disabled={busy} />
+      <label><span>Additional retention through (optional)</span><input type="date" value={retentionUntil} onChange={(event) => setRetentionUntil(event.target.value)} /></label>
+      <div className="dc-form__actions"><button className="dc-button dc-button--primary" type="submit" disabled={busy || !policy || !retentionClass || (sourceType !== "DOCUMENT" && !sourceId)}><FileCheck2 size={14} /> Govern retention</button></div>
     </form>
 
     <div className="dc-form__actions"><button type="button" className="dc-button" disabled={loading || busy} onClick={() => void load()}><RefreshCw size={14} /> Refresh retention</button></div>
@@ -182,21 +182,40 @@ export default function DocumentControlRetentionActions({ tenant, detail, onChan
 
     {selected ? <section className="dc-form wide" aria-label="Selected retention governance">
       <div className="dc-callout"><ShieldAlert size={16} /><div><strong>{selected.source_label}</strong><div>{selected.status.replaceAll("_", " ")} · {selected.retention_class} · {dateText(selected.retention_until)}</div></div></div>
+      {selected.status !== "DISPOSED" && <RetentionEventEditor key={selected.id} policy={policy} record={selected} tenant={tenant} onSaved={load} />}
+      {!dispositionReady && selected.status !== "DISPOSED" && <p role="status">Disposition remains unavailable until all applicable periods expire and event dates and holds are resolved.</p>}
       <label><span>Governance reason / decision justification</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason for legal hold, disposition request or decision" /></label>
       {["ACTIVE", "DUE", "REJECTED"].includes(selected.status) && !selected.legal_hold ? <label><span>Assigned disposition approver</span><select value={approverId} onChange={(event) => setApproverId(event.target.value)}><option value="">Select authorized approver</option>{approvers.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.role.replaceAll("_", " ")}</option>)}</select><small>The requester is excluded. Only active users who pass the server&apos;s Document Control approval policy are listed.</small></label> : null}
       <div className="dc-form__actions">
         {canApprove && !selected.legal_hold && selected.status !== "DISPOSED" ? <button type="button" className="dc-button" disabled={busy || !reason.trim()} onClick={() => void act(() => updateDocumentRetentionHold(tenant, selected.id, true, reason))}><LockKeyhole size={14} /> Place legal hold</button> : null}
         {canApprove && selected.legal_hold ? <button type="button" className="dc-button" disabled={busy} onClick={() => void act(() => updateDocumentRetentionHold(tenant, selected.id, false, reason))}><Ban size={14} /> Release legal hold</button> : null}
-        {["ACTIVE", "DUE", "REJECTED"].includes(selected.status) && !selected.legal_hold ? <button type="button" className="dc-button" disabled={busy || !reason.trim() || !approverId} onClick={() => void act(() => requestDocumentDisposition(tenant, selected.id, approverId, reason))}><Trash2 size={14} /> Request disposition</button> : null}
-        {canApprove && selected.status === "DISPOSITION_REQUESTED" ? <><button type="button" className="dc-button dc-button--primary" disabled={busy || !reason.trim()} onClick={() => void act(() => decideDocumentDisposition(tenant, selected.id, "APPROVE", reason))}><CheckCircle2 size={14} /> Approve disposition</button><button type="button" className="dc-button" disabled={busy || !reason.trim()} onClick={() => void act(() => decideDocumentDisposition(tenant, selected.id, "REJECT", reason))}><Ban size={14} /> Reject</button></> : null}
+        {["ACTIVE", "DUE", "REJECTED"].includes(selected.status) && !selected.legal_hold ? <button type="button" className="dc-button" disabled={busy || !dispositionReady || !reason.trim() || !approverId} onClick={() => void act(() => requestDocumentDisposition(tenant, selected.id, approverId, reason))}><Trash2 size={14} /> Request disposition</button> : null}
+        {canApprove && selected.status === "DISPOSITION_REQUESTED" ? <><button type="button" className="dc-button dc-button--primary" disabled={busy || !dispositionReady || !reason.trim()} onClick={() => void act(() => decideDocumentDisposition(tenant, selected.id, "APPROVE", reason))}><CheckCircle2 size={14} /> Approve disposition</button><button type="button" className="dc-button" disabled={busy || !reason.trim()} onClick={() => void act(() => decideDocumentDisposition(tenant, selected.id, "REJECT", reason))}><Ban size={14} /> Reject</button></> : null}
       </div>
       {selected.status === "DISPOSITION_REQUESTED" && !canApprove ? <div className="dc-form__hint">This disposition is waiting for its named authorized approver. The requester cannot self-approve.</div> : null}
       {selected.status === "APPROVED" ? <div className="dc-grid">
         <label><span>Disposition method</span><select value={method} onChange={(event) => setMethod(event.target.value)}><option value="CONTROLLED_DESTRUCTION">Controlled destruction</option><option value="SECURE_DIGITAL_PURGE">Secure digital purge</option><option value="RETURN_TO_ISSUER">Return to issuer</option><option value="TRANSFER_TO_ARCHIVE">Transfer to archive</option><option value="OTHER">Other documented method</option></select></label>
         <label><span>Disposition certificate evidence</span><input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.eml" onChange={(event) => void uploadCertificate(event.target.files?.[0] || null)} /><small>{certificate ? `${certificate.filename} · SHA-256 ${certificate.sha256}` : "Retain the destruction/transfer certificate before recording disposition."}</small></label>
-        <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || !certificate} onClick={() => void act(() => recordDocumentDisposition(tenant, selected.id, { disposition_method: method, certificate_evidence_asset_id: certificate!.asset_id, notes: reason }))}><FileCheck2 size={14} /> Record disposition with evidence</button></div>
+        <div className="dc-form__actions"><button type="button" className="dc-button dc-button--primary" disabled={busy || !dispositionReady || !certificate} onClick={() => void act(() => recordDocumentDisposition(tenant, selected.id, { disposition_method: method, certificate_evidence_asset_id: certificate!.asset_id, notes: reason }))}><FileCheck2 size={14} /> Record disposition with evidence</button></div>
       </div> : null}
       {selected.status === "DISPOSED" ? <div className="dc-callout dc-callout--success"><CheckCircle2 size={16} /><div><strong>Disposition recorded</strong><div>{selected.disposition_method?.replaceAll("_", " ") || "Controlled method"} · certificate evidence {selected.certificate_evidence_asset_id || "retained"}. Controlled history remains in the audit trail.</div></div></div> : null}
     </section> : null}
   </div>;
+}
+
+export function RetentionEventEditor({ policy, record, tenant, onSaved, save }: { policy: AmoCompliancePolicy | null; record: Pick<DocumentRetentionRecord, "id" | "retention_class" | "metadata">; tenant: string; onSaved: () => Promise<void>; save?: (payload: { retention_class: string; metadata: Record<string, unknown>; reason: string }) => Promise<unknown> }) {
+  const [primary, setPrimary] = useState(record.retention_class);
+  const [facts, setFacts] = useState<RetentionFacts>((record.metadata.compliance_retention as RetentionFacts | undefined) || emptyRetentionFacts());
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <details><summary>Update classification or event dates</summary><form onSubmit={event => {
+    event.preventDefault(); setBusy(true); setError("");
+    const payload = { retention_class: primary, metadata: { compliance_retention: facts }, reason };
+    void (save ? save(payload) : updateDocumentRetentionClassification(tenant, record.id, payload))
+      .then(onSaved).catch(cause => setError(cause instanceof Error ? cause.message : "Retention update failed.")).finally(() => setBusy(false));
+  }}><RetentionFields policy={policy} primary={primary} onPrimary={setPrimary} value={facts} onChange={setFacts} disabled={busy} />
+    <label>Reason for update<textarea required minLength={8} value={reason} onChange={event => setReason(event.target.value)} spellCheck /></label>
+    {error && <p role="alert">{error}</p>}<button disabled={busy || !policy || !primary || reason.trim().length < 8}>Record retention update</button>
+  </form></details>;
 }

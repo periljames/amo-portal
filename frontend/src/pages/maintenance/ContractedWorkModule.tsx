@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useMemo,useState} from "react";
 import {Link,useLocation,useParams} from "react-router-dom";
 import {apiRequest} from "../../services/apiClient";
 import {getCachedUser} from "../../services/auth";
+import {isTenantAdmin} from "../../utils/tenantAccess";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 
 type Provider={id:string;supplier_id:number;legal_name:string};
@@ -33,7 +34,7 @@ export default function ContractedWorkModule(){
   const location=useLocation();
   const deepLinkedWork=new URLSearchParams(location.search).get("work")||"";
   const notificationRole=String(getCachedUser()?.role||"").toUpperCase();
-  const canConfigureAlerts=["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER",
+  const canConfigureAlerts=isTenantAdmin(getCachedUser()) || ["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER",
     "WORKSHOP_MANAGER","ADMIN","TENANT_ADMIN","ACCOUNTABLE_EXECUTIVE","SUPERADMIN","ADMINISTRATOR"].includes(notificationRole);
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/contracted-work";
   const [items,setItems]=useState<WorkList[]>([]);
@@ -60,7 +61,7 @@ export default function ContractedWorkModule(){
     expected_completion_at:"",provider_ack_due_at:"",
     operator_requirements:"",release_wording:"",authority_acceptance_reference:"",
     safety_assessment_reference:"",operator_approval_reference:"",restriction_review_reference:"",
-    prior_written_acceptance_reference:"",
+    prior_written_acceptance_reference:"",own_approved_scope_reference:"",authority_access_reference:"",
   });
   const [foreign,setForeign]=useState(false);const [authorityRequired,setAuthorityRequired]=useState(false);
   const [safetyRequired,setSafetyRequired]=useState(false);
@@ -68,6 +69,7 @@ export default function ContractedWorkModule(){
   const [independentInspection,setIndependentInspection]=useState(false);
   const [safetyReport,setSafetyReport]=useState(false);
   const [furtherSubcontract,setFurtherSubcontract]=useState(false);
+  const [definedFunctionOnly,setDefinedFunctionOnly]=useState(false);
   const [decision,setDecision]=useState("");const [reason,setReason]=useState("");
   const [variationId,setVariationId]=useState("");const [variationDecision,setVariationDecision]=useState("APPROVED");
   const [variationData,setVariationData]=useState("");const [amendment,setAmendment]=useState("");
@@ -163,6 +165,10 @@ export default function ContractedWorkModule(){
       purchase_order_id:form.purchase_order_id?Number(form.purchase_order_id):null,
       data_manual_id:form.data_manual_id||null,data_revision_id:form.data_revision_id||null,
       requirements:{
+        own_approved_scope_reference:form.own_approved_scope_reference,
+        authority_access_reference:form.authority_access_reference,
+        complete_type_certificated_product:false,
+        defined_function_only:definedFunctionOnly,
         foreign,governed_repair_order_reference:form.governed_repair_order_reference||null,
         product_family:form.product_family||null,
         contract_function_approval_reference:form.contract_function_approval_reference||null,state_of_registry:form.state_of_registry,foreign_approval_reference:form.foreign_approval_reference,
@@ -220,6 +226,10 @@ export default function ContractedWorkModule(){
       <label>Article or service description<input value={form.asset_description} onChange={field("asset_description")}/></label>
       <label>Defect / reason for contracted maintenance<textarea required minLength={8} value={form.defect} onChange={field("defect")}/></label>
       <label>Authorized scope<textarea required minLength={12} value={form.scope_text} onChange={field("scope_text")}/></label>
+      <label>AMO approved scope / capability reference<input required value={form.own_approved_scope_reference} onChange={field("own_approved_scope_reference")}/></label>
+      <label>Agreement clause granting unrestricted Authority access<input required value={form.authority_access_reference} onChange={field("authority_access_reference")}/></label>
+      <small>MOPM 2.23 permits defined maintenance functions within the AMO approval. A complete type-certificated product cannot be contracted.</small>
+      <label><input required type="checkbox" checked={definedFunctionOnly} onChange={event=>setDefinedFunctionOnly(event.target.checked)}/> This order contracts a defined maintenance function within the AMO approval</label>
       <label>Approved maintenance-data reference<input required value={form.data_reference} onChange={field("data_reference")}/></label>
       <label>Exact technical-data revision<input required value={form.data_revision} onChange={field("data_revision")}/></label>
       <label>Controlled DMS technical-data document ID (for assigned supplier download)<input value={form.data_manual_id} onChange={field("data_manual_id")}/></label>
@@ -316,7 +326,17 @@ export default function ContractedWorkModule(){
             <button disabled={busy||inspectionReason.trim().length<8||(inspectionResult==="ACCEPTED"&&!inspectionOriginal)}>Record inspection review</button>
             <button type="button" onClick={()=>setInspectionIndex(null)}>Cancel</button>
           </form>}
-          <h4>Operator and foreign authority conditions</h4><pre style={{whiteSpace:"pre-wrap"}}>{JSON.stringify(work.requirements_json,null,2)}</pre>
+          {detail?.can_review_inspections && !["CLOSED","CANCELLED"].includes(work.status) && <form key={`${work.id}-${work.version}`} className="partner-form" onSubmit={event=>{
+            event.preventDefault();const data=new FormData(event.currentTarget);setBusy(true);setError("");
+            void apiRequest(root+"/"+encodeURIComponent(work.id)+"/mopm-verification",{method:"PUT",body:JSON.stringify({expected_version:work.version,own_approved_scope_reference:data.get("scope"),authority_access_reference:data.get("access"),defined_function_only:true,reason:data.get("reason")})})
+              .then(async()=>{setNotice("MOPM scope and Authority access verification recorded.");await reloadDetail();}).catch(cause=>setError(cause instanceof Error?cause.message:"Verification failed")).finally(()=>setBusy(false));
+          }}><h4>MOPM scope & Authority access</h4>
+            <label>AMO approved scope / capability reference<input name="scope" required minLength={6} defaultValue={String(work.requirements_json.own_approved_scope_reference||"")}/></label>
+            <label>Agreement clause granting unrestricted Authority access<input name="access" required minLength={6} defaultValue={String(work.requirements_json.authority_access_reference||"")}/></label>
+            <label><input type="checkbox" required defaultChecked={work.requirements_json.defined_function_only===true}/> Verified defined maintenance function within the AMO approval</label>
+            <label>Verification reason<textarea name="reason" required minLength={8} spellCheck/></label><button disabled={busy}>Record verification</button>
+          </form>}
+          <h4>Operator and foreign authority conditions</h4><dl>{Object.entries(work.requirements_json).filter(([,value])=>value!==null&&value!=="").map(([key,value])=><div key={key}><dt>{key.replaceAll("_"," ")}</dt><dd>{String(value)}</dd></div>)}</dl>
           <form className="partner-form" onSubmit={e=>{e.preventDefault();if(!decision)return;
             void mutate("/"+encodeURIComponent(work.id)+"/transitions",
               {action:decision,expected_version:work.version,reason,idempotency_key:key(),details:{}},

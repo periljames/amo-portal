@@ -387,11 +387,18 @@ class ProviderCreate(BaseModel):
     default_currency: str = Field(default="USD", min_length=3, max_length=8)
     contract_required: bool = False
     oversight_owner_user_id: str | None = None
-    review_interval_days: int = Field(default=365, ge=30, le=3650)
+    review_interval_days: int = Field(default=365, ge=30, le=365)
     next_review_due_on: date | None = None
     scope_summary: str | None = None
     quality_requirements: str | None = None
     notes: str | None = None
+
+
+    @model_validator(mode="after")
+    def review_within_mopm_interval(self):
+        if self.next_review_due_on and self.next_review_due_on > _today() + timedelta(days=self.review_interval_days):
+            raise ValueError("MOPM 3.13 requires provider review within the annual interval or sooner.")
+        return self
 
 
 class ProviderProfilePatch(BaseModel):
@@ -400,7 +407,7 @@ class ProviderProfilePatch(BaseModel):
     risk_level: ProviderRisk | None = None
     contract_required: bool | None = None
     oversight_owner_user_id: str | None = None
-    review_interval_days: int | None = Field(default=None, ge=30, le=3650)
+    review_interval_days: int | None = Field(default=None, ge=30, le=365)
     last_reviewed_on: date | None = None
     next_review_due_on: date | None = None
     scope_summary: str | None = None
@@ -712,6 +719,12 @@ def update_external_provider_profile(
     provider = _provider_or_404(db, amo_id=ctx.amo_id, provider_id=provider_id, lock=True)
     provider = _ensure_profile(db, ctx=ctx, provider=provider)
     _assert_expected_version(provider, payload.expected_version)
+    reviewed = payload.last_reviewed_on or provider.get("last_reviewed_on")
+    if reviewed and reviewed > _today():
+        raise HTTPException(422, "A completed provider review cannot be dated in the future.")
+    interval = min(payload.review_interval_days or provider.get("review_interval_days") or 365, 365)
+    if payload.next_review_due_on and payload.next_review_due_on > (reviewed or _today()) + timedelta(days=interval):
+        raise HTTPException(422, "MOPM 3.13 requires provider review within the annual interval, or sooner for higher risk.")
     before = {
         "provider_kind": provider.get("provider_kind"),
         "risk_level": provider.get("risk_level"),

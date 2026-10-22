@@ -589,15 +589,16 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     if (!pinned) return;
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = sidebarWidth;
-    const onMove = (moveEvent: PointerEvent) => setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+    const minimumWidth = activeDepartment === "quality" ? 360 : 0;
+    const startWidth = Math.max(sidebarWidth, minimumWidth);
+    const onMove = (moveEvent: PointerEvent) => setSidebarWidth(Math.max(minimumWidth, clampSidebarWidth(startWidth + moveEvent.clientX - startX)));
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp, { once: true });
-  }, [pinned, sidebarWidth]);
+  }, [activeDepartment, pinned, sidebarWidth]);
 
   const toggleAdminProfile = useCallback(async () => {
     if (!adminProfile?.eligible || adminProfileBusy) return;
@@ -622,7 +623,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   }, []);
 
   const drawerVisible = pinnedVisible || drawerOpen;
-  const shellStyle = { "--tenant-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
+  const shellStyle = { "--tenant-sidebar-width": activeDepartment === "quality" ? `min(${Math.max(360, sidebarWidth)}px, calc(100vw - 24px))` : `${sidebarWidth}px` } as React.CSSProperties;
 
   return (
     <BrandProvider nameOverride={amoCode.toUpperCase()} logoSource="amo">

@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
+from amodb.apps.quality.amo_compliance_policy import assert_disposition_due, tenant_retention_extensions, prepare_retention
+from types import SimpleNamespace
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 
@@ -441,6 +443,11 @@ async def upload_record(
         raise HTTPException(status_code=422, detail="Record access scope and metadata must be JSON objects")
     if len(json.dumps(metadata)) > 16_384 or len(json.dumps(scope)) > 8_192:
         raise HTTPException(status_code=413, detail="Record metadata or access scope is too large")
+    retention_metadata = {**dict(series.metadata_json or {}), **metadata}
+    retention_class = str(retention_metadata.get("retention_class") or series.code)
+    retention_due, metadata = prepare_retention(retention_class, retention_metadata,
+        extensions=tenant_retention_extensions(db, tenant.amo_id), series_years=series.retention_years)
+    metadata["retention_class"] = retention_class
 
     record_id = str(uuid.uuid4())
     directory = (RECORD_ROOT / str(tenant.amo_id) / series.id / record_id).resolve()
@@ -498,7 +505,7 @@ async def upload_record(
         sha256=digest.hexdigest(),
         storage_path=str(destination),
         captured_at=captured,
-        retention_due_at=_add_years(captured, series.retention_years),
+        retention_due_at=retention_due,
         search_text=search_text,
         access_scope_json=scope,
         metadata_json=metadata,
@@ -747,6 +754,38 @@ def set_legal_hold(
     return {"id": row.id, "legal_hold": row.legal_hold, "legal_hold_reason": row.legal_hold_reason}
 
 
+@router.patch("/t/{tenant_slug}/records/{record_id}/retention")
+def update_record_retention(tenant_slug:str, record_id:str, payload:dict,
+    request:Request, db:Session=Depends(get_db), current_user:account_models.User=Depends(get_current_active_user)):
+    from .workspace_retention_router import RetentionFactsUpdate
+    from amodb.apps.quality.amo_compliance_policy import reclassification_metadata, _instant
+    from pydantic import ValidationError
+    if not is_control_user(current_user):
+        raise HTTPException(403, "Document Control privileges are required")
+    try:
+        change = RetentionFactsUpdate.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(422, "Select a retention class and enter an update reason of at least eight characters.") from exc
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _record(db, tenant.amo_id, record_id)
+    if row.disposition_status == "DISPOSED":
+        raise HTTPException(409, "Disposed records are immutable")
+    series = _series(db, tenant.amo_id, row.series_id)
+    before = dict(row.metadata_json or {})
+    metadata = reclassification_metadata(str(before.get("retention_class") or series.code), before, change.metadata)
+    until, metadata = prepare_retention(change.retention_class, metadata,
+        extensions=tenant_retention_extensions(db, tenant.amo_id),series_years=series.retention_years)
+    if until and row.retention_due_at:
+        until = max(until, _instant(row.retention_due_at))
+    row.retention_due_at = until
+    row.metadata_json = {**metadata,"retention_class":change.retention_class}
+    _write_event(db,tenant_id=tenant.amo_id,record_id=row.id,user_id=current_user.id,
+        event_type="RETENTION_UPDATED",reason=change.reason,metadata={"before":before,"after":row.metadata_json})
+    audit(db,tenant,request,"document.records.retention_updated","record_asset",row.id,{"reason":change.reason})
+    db.commit()
+    return _record_payload(row,series,current_user)
+
+
 @router.post("/t/{tenant_slug}/records/{record_id}/disposition")
 def dispose_record(
     tenant_slug: str,
@@ -764,6 +803,11 @@ def dispose_record(
         raise HTTPException(status_code=409, detail="This record is under legal/administrative hold and cannot be disposed")
     if payload.disposition_status not in RECORD_STATUSES - {"ACTIVE"}:
         raise HTTPException(status_code=422, detail="Unsupported disposition status")
+    if payload.disposition_status == "DISPOSED":
+        series = _series(db, tenant.amo_id, row.series_id)
+        metadata = {**dict(series.metadata_json or {}), **dict(row.metadata_json or {})}
+        classified = SimpleNamespace(retention_class=metadata.get("retention_class", series.code), metadata_json=metadata, retention_until=row.retention_due_at, legal_hold=row.legal_hold)
+        assert_disposition_due(classified, extensions=tenant_retention_extensions(db, tenant.amo_id))
     row.disposition_status = payload.disposition_status
     row.disposed_at = utcnow()
     row.disposed_by_user_id = current_user.id

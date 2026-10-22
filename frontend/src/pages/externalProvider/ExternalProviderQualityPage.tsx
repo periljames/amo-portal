@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import ExternalPartnerQualityReview from "./ExternalPartnerQualityReview";
 import "./external-provider-portal.css";
 
@@ -25,7 +26,9 @@ const CAPS = ["profile.read", "profile.propose", "document.read", "document.subm
 const LABEL = (value: string) => value.replaceAll("_", " ");
 export default function ExternalProviderQualityPage() {
   const { amoCode = "" } = useParams();
-  const manager = getCachedUser()?.role === "QUALITY_MANAGER";
+  const accountRole = getCachedUser()?.role;
+  const manager = isTenantAdmin(getCachedUser()) || accountRole === "QUALITY_MANAGER";
+  const canReviewAccounts = manager || accountRole === "QUALITY_OFFICER";
   const [items, setItems] = useState<Grant[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [supplier, setSupplier] = useState("");
@@ -56,7 +59,7 @@ export default function ExternalProviderQualityPage() {
     ]);
     setItems(accounts.items); setEvents(audit.items);
   };
-  useEffect(() => { void refresh().catch((e) => setError(e instanceof Error ? e.message : "Could not load accounts")); }, [amoCode]);
+  useEffect(() => { if (canReviewAccounts) void refresh().catch((e) => setError(e instanceof Error ? e.message : "Could not load accounts")); }, [amoCode, canReviewAccounts]);
   useEffect(() => {
     if (!manager) return;
     const abort = new AbortController();
@@ -95,14 +98,28 @@ export default function ExternalProviderQualityPage() {
       Object.entries(item.object_scope_json || {}).filter(([key])=>key!=="contracted_work")
     ),null,2));
   };
+  if (!canReviewAccounts) return <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
+    <div className="vendor-portal vendor-quality-workspace"><div className="vendor-shell">
+      <section className="vendor-card">
+        <span className="vendor-eyebrow">QMS · Vendor accounts & access</span>
+        <h1>External provider access</h1>
+        <h2>Quality appointment required</h2>
+        <p>A tenant administrator, Quality Manager or Quality Officer manages vendor accounts and reviews provider submissions. Your current account does not have this access.</p>
+        <p>Ask your AMO administrator or Quality team to review your access.</p>
+        <nav aria-label="Provider management">
+          <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers register</Link>
+          <a href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Open vendor sign in</a>
+        </nav>
+      </section>
+    </div></div>
+  </DepartmentLayout>;
   const filtered=items.filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
     .toLowerCase().includes(search.toLowerCase()));
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="vendor-portal vendor-quality-workspace">
     <div className="vendor-shell">
       <header className="vendor-header">
-        <div><span className="vendor-eyebrow">QUALITY DEPARTMENT · EXTERNAL ACCOUNT GOVERNANCE</span>
+        <div>
           <h1>External provider access</h1>
-          <p>Portal account decisions do not approve suppliers commercially or authorize maintenance work.</p>
           <nav aria-label="Provider management">
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers register</Link>
             <a href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Open vendor sign in</a>

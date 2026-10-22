@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db
 from amodb.security import get_current_active_user, get_password_hash, verify_password
 from amodb.apps.accounts import models as accounts
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from amodb.apps.notifications import service as notifications
 from . import service
 from . import external_auth_core as core
@@ -85,14 +86,14 @@ class SensitivePassword(BaseModel):
     password: str
 
 def _authorized_quality(db,amo_code,user):
-    if user.role not in {accounts.AccountRole.QUALITY_MANAGER, accounts.AccountRole.QUALITY_OFFICER}:
+    if not is_tenant_admin(user) and user.role not in {accounts.AccountRole.QUALITY_MANAGER, accounts.AccountRole.QUALITY_OFFICER}:
         raise HTTPException(403,"Quality account-control role required")
     tenant=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
     core.context(db,tenant,str(user.id))
     return tenant
 
 def _quality_manager(user):
-    if user.role!=accounts.AccountRole.QUALITY_MANAGER:
+    if not is_tenant_admin(user) and user.role!=accounts.AccountRole.QUALITY_MANAGER:
         raise HTTPException(403,"Quality Manager approval required")
 
 def _caps(role,proposed=None,bound=None):
@@ -535,9 +536,9 @@ def eligible_supplier_search(amo_code:str,search:str="",limit:int=30,offset:int=
     rows=core.many("""SELECT id,supplier_code,legal_name,status,is_active,
           external_import_pending_activation
         FROM procurement_suppliers
-        WHERE amo_id=:amo AND (lower(legal_name) LIKE :query OR lower(supplier_code) LIKE :query)
+        WHERE amo_id=:amo AND (lower(legal_name) LIKE :search_term OR lower(supplier_code) LIKE :search_term)
         ORDER BY legal_name,id LIMIT :limit OFFSET :offset""",
-        db,amo=amo,query=query,limit=limit,offset=offset)
+        db,amo=amo,search_term=query,limit=limit,offset=offset)
     return {"items":rows,"limit":limit,"offset":offset,"has_more":len(rows)==limit}
 
 @quality_router.get("")

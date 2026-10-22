@@ -83,3 +83,43 @@ a.qms-settings__card:hover { border-color:var(--accent-primary,#2454c6); }
   .qms-settings__card { padding:16px; }
   .qms-settings__header h1 { font-size:25px; }
 }
+
+/* One module menu owns page navigation; workflow stages and table filters stay local. */
+.tenant-shell[data-workspace-module="quality"] { --tenant-sidebar-total-width:var(--tenant-sidebar-width); }
+.tenant-shell[data-workspace-module="quality"] .sidebar__item-label { white-space:normal;line-height:1.4; }
+.tenant-shell[data-workspace-module="quality"] .tenant-shell__sidebar .tenant-shell__brand strong { max-width:none;white-space:normal;line-height:1.3;font-size:13px; }
+.tenant-shell[data-workspace-module="quality"] .tenant-shell__sidebar-header { min-height:64px;height:auto;padding:12px; }
+.tenant-shell[data-workspace-module="quality"] .qms-menu-bar.quality-context-bar { display:flex;position:relative;align-items:center;flex-wrap:wrap;gap:4px;min-height:44px;padding:4px 12px;box-sizing:border-box;width:100%;max-width:100%; }
+.qms-menu-bar__home { padding:7px 10px;color:var(--text-primary);font-size:14px;font-weight:750;text-decoration:none; }
+.qms-page-menu { position:relative;min-width:0; }
+.qms-page-menu>button { display:flex;align-items:center;gap:6px;min-height:34px;padding:7px 10px;background:transparent;border:0;border-radius:6px;color:var(--text-primary);font:inherit;font-size:13px;font-weight:600;cursor:pointer; }
+.qms-page-menu>button:is(:hover,[aria-expanded="true"],.is-active) { background:var(--tenant-nav-hover,#eaf1fd);color:var(--accent-primary,#2454c6); }
+.qms-page-menu__panel { position:absolute;left:0;top:calc(100% + 6px);z-index:100;width:350px;max-width:calc(100vw - 32px);max-height:min(70dvh,620px);overflow:auto;display:grid;gap:4px;padding:10px;border:1px solid var(--surface-border,#cbd5e1);border-radius:10px;background:var(--surface-elevated,#fff);box-shadow:0 10px 30px #0b1d3026; }
+.qms-page-menu__panel a { display:block;min-height:36px;padding:8px 10px;color:var(--text-primary);font-size:13px;line-height:1.5;text-decoration:none;border-radius:5px;overflow-wrap:anywhere; }
+.qms-page-menu__panel a:is(:hover,[aria-current="page"]) { background:var(--tenant-nav-hover,#eaf1fd);color:var(--accent-primary,#2454c6); }
+.qms-page-menu__destination+.qms-page-menu__destination { border-top:1px solid var(--surface-border,#dbe2ea);padding-top:4px; }
+.qms-page-menu__module>summary { padding:6px 10px;cursor:pointer;font-size:12px;color:var(--text-secondary); }
+.qms-page-menu__module>div { margin:3px 0 6px 14px;padding-left:6px;border-left:2px solid var(--surface-border,#dbe2ea); }
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--unified { grid-template-columns:minmax(0,1fr); }
+.tenant-shell[data-workspace-module="quality"] .qa-workspace-current-page-heading { display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 0 10px;margin:0; }
+.qa-workspace-current-page-heading h1 { margin:0;font-size:22px;line-height:1.3; }
+.tenant-shell[data-workspace-module="quality"] .qms-settings-page { padding:16px 24px;gap:16px; }
+.tenant-shell[data-workspace-module="quality"] .qms-settings__card { padding:16px; }
+@media(max-width:760px) {
+  .tenant-shell[data-workspace-module="quality"] .qms-menu-bar.quality-context-bar { padding:4px 6px;gap:0; }
+  .qms-page-menu { position:static; }
+  .qms-page-menu>button { padding:7px 8px;font-size:12px;gap:3px; }
+  .qms-menu-bar__home { padding:7px 6px;font-size:13px; }
+  .qms-page-menu__panel { left:8px;right:8px;top:100%;width:auto;max-width:none; }
+  .tenant-shell[data-workspace-module="quality"] .qms-settings-page { padding:14px; }
+}
+.qms-retention-policy { display: grid; gap: 0; }
+.qms-retention-policy__row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border-color, #dce2ea); align-items: start; }
+.qms-retention-policy__row small, .qms-retention-fields > small { display: block; margin-top: 4px; color: var(--text-muted, #586579); }
+.qms-retention-policy__row label, .qms-retention-fields > label, .qms-retention-fields details > label { display: grid; gap: 5px; }
+.qms-retention-policy__row input { width: 100%; min-height: 36px; }
+.qms-retention-policy__row input[aria-invalid="true"] { border: 1px solid #b42318; }
+.qms-retention-fields { min-width: 0; display: grid; gap: 12px; padding: 14px; border: 1px solid var(--border-color, #dce2ea); border-radius: 8px; grid-column: 1 / -1; }
+.qms-retention-fields__checks { display: grid; gap: 8px; margin: 12px 0; }
+.qms-retention-fields__checks label { display: flex; align-items: start; gap: 8px; }
+@media (max-width: 600px) { .qms-retention-policy__row { grid-template-columns: minmax(0, 1fr); } }

@@ -12,6 +12,7 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import PageHeader from "../../components/shared/PageHeader";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import type { AgGridReactProps } from "ag-grid-react";
 import InlineLoading from "../../components/shared/InlineLoading";
 const QmsPersonalTasks = lazy(()=>import("./inbox/QmsPersonalTasks"));
@@ -20,7 +21,6 @@ import type { ColDef } from "ag-grid-community";
 import type { QmsSourceError } from "../../types/qms";
 import { classifyQmsPath, qmsBasePath, qmsModulePath, type QmsModuleRoute } from "./routes/qmsRouteRegistry";
 import "../../styles/qms/register.css";
-import { QMS_WORKSPACE_PURPOSE, qmsViewLabel } from "./qmsWorkspaceCopy";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type QmsRow = Record<string, unknown>;
@@ -271,7 +271,7 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const rows = useMemo(() => data?.items || [], [data?.items]);
   const columns = useMemo(() => context?.module.id === "evidence-vault" && data?.columns ? data.columns : deriveColumns(rows, data?.columns), [context?.module.id, data?.columns, rows]);
   const currentUser = getCachedUser();
-  const diagnosticsAuthorized = Boolean(currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_OFFICER" || currentUser?.role === "QUALITY_INSPECTOR");
+  const diagnosticsAuthorized = Boolean(isTenantAdmin(currentUser) || currentUser?.role === "QUALITY_MANAGER" || currentUser?.role === "QUALITY_OFFICER" || currentUser?.role === "QUALITY_INSPECTOR");
 
   if (!context) return <Navigate to="." replace />;
   const { amoCode, module, view } = context;
@@ -316,8 +316,7 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
   const content = (
     <div className={`qms-register-page qms-register-page--${module.id}`}>
-      {!embedded ? <PageHeader compact eyebrow="Quality Management System" title={module.label} subtitle={QMS_WORKSPACE_PURPOSE[module.id] || `Review ${module.navigationLabel.toLowerCase()} and open a record to act.`} breadcrumbs={[{ label: "Quality", to: qmsBasePath(amoCode) }, { label: module.navigationLabel }, { label: viewLabel(view) }]} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
-      {!embedded && <nav className="qms-register-views" aria-label={`${module.label} views`}>{module.validViews.filter(candidate => candidate !== "new").map(candidate => <Link key={candidate} to={qmsModulePath(amoCode, module.id, candidate)} aria-current={view === candidate ? "page" : undefined}>{qmsViewLabel(candidate)}</Link>)}</nav>}
+      {!embedded ? <PageHeader compact title={module.label} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
 
       {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></> : null}
       {controlledNew ? (

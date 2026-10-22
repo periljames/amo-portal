@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v13";
+const VERSION = "v14";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
@@ -201,7 +201,9 @@ function isStaticAsset(request, url) {
 }
 
 async function matchShell(cache, request) {
-  return (await cache.match(request)) || (await cache.match("/"));
+  // Every SPA destination uses the same HTML. A route-specific warmup entry
+  // may predate a release that already refreshed the canonical root shell.
+  return (await cache.match("/")) || (await cache.match(request));
 }
 
 async function cachedShellNavigation(request, preloadResponsePromise, event) {

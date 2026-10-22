@@ -21,6 +21,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import {getCachedUser} from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 
 import {
   createExternalProvider,
@@ -191,7 +192,7 @@ function ProviderCreatePanel({ amoCode, onCreated, onClose }: {
         <label>Quality contact<input value={form.quality_contact_name} onChange={(e) => setForm({ ...form, quality_contact_name: e.target.value })} /></label>
         <label>Quality email<input type="email" value={form.quality_contact_email} onChange={(e) => setForm({ ...form, quality_contact_email: e.target.value })} /></label>
         <label>Country<input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></label>
-        <label>Review interval (days)<input type="number" min={30} max={3650} value={form.review_interval_days} onChange={(e) => setForm({ ...form, review_interval_days: Number(e.target.value) })} /></label>
+        <label>Review interval (30–365 days)<input type="number" required min={30} max={365} value={form.review_interval_days} onChange={(e) => setForm({ ...form, review_interval_days: Number(e.target.value) })} /></label>
         <label className="is-wide">Approved / proposed scope<textarea value={form.scope_summary} onChange={(e) => setForm({ ...form, scope_summary: e.target.value })} /></label>
         <label className="is-wide">Quality requirements<textarea value={form.quality_requirements} onChange={(e) => setForm({ ...form, quality_requirements: e.target.value })} /></label>
         <label className="qms-provider-check is-wide"><input type="checkbox" checked={form.contract_required} onChange={(e) => setForm({ ...form, contract_required: e.target.checked })} />A current contract is mandatory before Quality approval</label>
@@ -399,7 +400,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   onBack: () => void;
 }): React.ReactElement {
   const navigate = useNavigate();
-  const qualityManager=getCachedUser()?.role==="QUALITY_MANAGER";
+  const qualityManager=isTenantAdmin(getCachedUser()) || getCachedUser()?.role==="QUALITY_MANAGER";
   const [provider, setProvider] = useState<ProviderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -625,16 +626,12 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
     <main className="qms-provider-page qms-surface-root">
       <header className="qms-provider-page__header">
         <div>
-          <span className="qms-provider-eyebrow">Quality assurance · outsourced processes</span>
           <h1>External Providers</h1>
-          <p>One governed register for suppliers, contractors, subcontractors and specialist service providers. Procurement owns the provider master; Quality owns approval, oversight, contracts and evidence.</p>
         </div>
         <div className="qms-provider-page__actions">
-          {hasQmsRolePermission("qms.audit.manage") && <Link className="qms-provider-button is-secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts`}>Vendor accounts & access</Link>}
           <a className="qms-provider-button is-secondary" href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Vendor sign in</a>
-          <button className="qms-provider-button is-secondary" onClick={() => navigate(`${basePath}/agreements`)}><FileText size={16} />Agreements & renewals</button>
           <button className="qms-provider-button is-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} />Refresh</button>
-          {getCachedUser()?.role === "QUALITY_MANAGER" && <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>}
+          {(isTenantAdmin(getCachedUser()) || getCachedUser()?.role === "QUALITY_MANAGER") && <button className="qms-provider-button" onClick={() => setCreating(true)}><Plus size={16} />Add provider</button>}
         </div>
       </header>
 
