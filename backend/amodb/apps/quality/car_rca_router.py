@@ -327,7 +327,7 @@ def _save(db: Session, car, payload: CarRcaSave, *, actor, actor_ref):
     return _public_projection(db, car)
 
 
-def submit_rca_document(db: Session, car, root_cause_text: str | None):
+def submit_rca_document(db: Session, car, root_cause_text: str | None, *, responder_email: str | None = None):
     """Stage the structured evidence in the SAME transaction as base CAR submission.
 
     Legacy CARs without a structured RCA document retain their established
@@ -357,7 +357,7 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None):
     doc.submitted_snapshot = dict(doc.draft)
     _append_revision(
         db, car, doc, event="SUBMITTED", actor="GUEST",
-        actor_ref=car.submitted_by_email, reason="Structured RCA submitted with CAR response."
+        actor_ref=(responder_email or car.submitted_by_email), reason="Structured RCA submitted with CAR response."
     )
 
 
