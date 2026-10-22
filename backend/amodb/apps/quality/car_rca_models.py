@@ -96,3 +96,21 @@ class QualityCarRcaMutation(Base):
         UniqueConstraint("amo_id", "car_id", "mutation_key", name="uq_quality_car_rca_mutation_key"),
         Index("ix_quality_car_rca_mutations", "amo_id", "car_id", "created_at"),
     )
+
+class QualityCarRcaActionEvent(Base):
+    """Immutable history of proposed, approved, implemented and verified actions."""
+    __tablename__ = "quality_car_rca_action_events"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    action_id = Column(UUID(as_uuid=True), ForeignKey("quality_car_rca_actions.id", ondelete="RESTRICT"), nullable=False)
+    previous_state = Column(String(24), nullable=True)
+    next_state = Column(String(24), nullable=False)
+    snapshot = Column(JSON, nullable=False)
+    actor_kind = Column(String(16), nullable=False)
+    actor_ref = Column(String(255), nullable=True)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        Index("ix_quality_car_rca_action_history", "amo_id", "car_id", "action_id", "created_at"),
+    )
