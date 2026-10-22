@@ -340,6 +340,9 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None):
     data = InvestigationDocument.model_validate(doc.draft.get("investigation") or {})
     if not data.conclusion.strip() or not data.supported_cause_ids:
         raise HTTPException(status_code=422, detail="Complete an evidence-backed root cause conclusion before submitting.")
+    source_nodes = [node for method in data.investigations for node in method.nodes]
+    if not any(node.entry_type == "FACT" and node.evidence_references for node in source_nodes):
+        raise HTTPException(status_code=422, detail="Record at least one evidence-linked fact before submitting a causal conclusion.")
     if not data.conclusion_evidence_references:
         raise HTTPException(status_code=422, detail="Reference the evidence supporting the final root cause.")
     if (root_cause_text or "").strip() != data.conclusion.strip():
