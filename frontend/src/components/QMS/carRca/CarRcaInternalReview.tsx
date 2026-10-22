@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import CarRcaWorkbench from "./CarRcaWorkbench";
-import { emptyCarRca, getCarRcaInternal, reviewCarRcaAction, type CarRcaProjection, type CarRcaAction } from "../../../services/qmsCarRca";
+import { emptyCarRca, getCarRcaInternal, reviewCarRcaAction, addCarRcaInternalAction, type CarRcaProjection, type CarRcaAction, type CarRcaActionCreate } from "../../../services/qmsCarRca";
 import "./car-rca.css";
 import CarRcaParetoSource from "./CarRcaParetoSource";
 import { hasQmsRolePermission } from "../../../app/routeGuards";
@@ -15,6 +15,26 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [creating, setCreating] = useState(false);
+  const [newAction, setNewAction] = useState<CarRcaActionCreate>({
+    kind: "CORRECTIVE", description: "", cause_node_ids: [],
+    evidence_references: [], external_owner_name: null, target_date: null,
+    priority: "MEDIUM",
+  });
+  const submitInternalAction = async () => {
+    if (busy || creating || newAction.description.trim().length < 5) return;
+    setCreating(true); setError(null);
+    try {
+      await addCarRcaInternalAction(amoCode, carId, {
+        ...newAction, description: newAction.description.trim(),
+        external_owner_name: newAction.external_owner_name?.trim() || null,
+      });
+      setNewAction({ kind: "CORRECTIVE", description: "", cause_node_ids: [], evidence_references: [],
+        external_owner_name: null, target_date: null, priority: "MEDIUM" });
+      await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create a controlled CAR action."); }
+    finally { setCreating(false); }
+  };
   const load = async () => {
     setError(null);
     try { setData(await getCarRcaInternal(amoCode, carId)); }
@@ -59,6 +79,37 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
         <p>Only legacy free-text RCA is available for this CAR. No new structured analysis has been recorded.</p>}
       <CarRcaParetoSource amoCode={amoCode} carId={carId}
         canSave={canReview && hasQmsRolePermission("qms.car.manage") && hasQmsRolePermission("qms.reports.view")} />
+      {canReview && <div className="car-rca" aria-label="Create an internal governed corrective action">
+        <h4>Record a Quality-managed corrective action</h4>
+        <p>This supplements the auditee's plan and retains an individual owner, deadline, causal linkage and independent review trail.</p>
+        <div className="car-rca-grid">
+          <label>Type<select value={newAction.kind} onChange={event => setNewAction(current => ({ ...current, kind: event.target.value as CarRcaActionCreate["kind"] }))}>
+            <option value="CORRECTIVE">Corrective</option><option value="PREVENTIVE">Preventive</option><option value="CONTAINMENT">Containment</option>
+          </select></label>
+          <label>Responsible person's name<input value={newAction.external_owner_name || ""} onChange={event => setNewAction(current => ({ ...current, external_owner_name: event.target.value }))}/></label>
+          <label>Target date<input type="date" value={newAction.target_date || ""} onChange={event => setNewAction(current => ({ ...current, target_date: event.target.value || null }))}/></label>
+          <label>Priority<select value={newAction.priority} onChange={event => setNewAction(current => ({ ...current, priority: event.target.value as CarRcaActionCreate["priority"] }))}>
+            {(["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const).map(priority => <option key={priority}>{priority}</option>)}
+          </select></label>
+        </div>
+        <label className="car-rca-field">Action description<textarea rows={3} maxLength={8000} value={newAction.description}
+          onChange={event => setNewAction(current => ({ ...current, description: event.target.value }))}/></label>
+        {data.draft.investigation.investigations.flatMap(method => method.nodes)
+          .filter(node => node.entry_type === "CAUSAL_CONCLUSION").length > 0 &&
+          <fieldset><legend>Documented causes addressed</legend>
+            {data.draft.investigation.investigations.flatMap(method => method.nodes)
+              .filter(node => node.entry_type === "CAUSAL_CONCLUSION").map(cause => <label key={cause.id} className="car-rca-check">
+                <input type="checkbox" checked={newAction.cause_node_ids.includes(cause.id)}
+                  onChange={event => setNewAction(current => ({
+                    ...current, cause_node_ids: event.target.checked
+                      ? [...current.cause_node_ids, cause.id] : current.cause_node_ids.filter(id => id !== cause.id),
+                  }))}/>{cause.statement}
+              </label>)}</fieldset>}
+        <label className="car-rca-field">Evidence references<textarea rows={2} value={newAction.evidence_references.join("\n")}
+          onChange={event => setNewAction(current => ({ ...current, evidence_references: event.target.value.split("\n").map(value => value.trim()).filter(Boolean) }))}/></label>
+        <button type="button" disabled={creating || Boolean(busy) || newAction.description.trim().length < 5 || !newAction.target_date || !newAction.external_owner_name?.trim()}
+          onClick={() => void submitInternalAction()}>{creating ? "Recording…" : "Create governed action"}</button>
+      </div>}
       <div className="car-rca-table-scroll"><table>
         <caption>Individually governed corrective and preventive actions — {data.actions.length}</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
