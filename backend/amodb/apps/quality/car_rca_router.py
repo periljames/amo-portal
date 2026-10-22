@@ -699,6 +699,7 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
     if row.state not in {"ACCEPTED", "IN_PROGRESS"}:
         raise HTTPException(status_code=409, detail="Only an approved corrective action can enter implementation.")
     previous = row.state
+    _validate_attachment_references(db, car, payload.evidence_references)
     row.state = payload.state
     row.completion_note = payload.completion_note.strip()
     row.evidence_references = payload.evidence_references
