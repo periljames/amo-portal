@@ -137,6 +137,13 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       parent_id: parentId || null, statement: statement.trim(), category,
       entry_type: kind, evidence_references: csv(evidence), rationale: rationale.trim(),
     };
+    if (updated.parent_id && editingId) {
+      const descendants = descendantsOf(editingId);
+      if (descendants.has(updated.parent_id)) {
+        window.alert("A cause cannot be linked to itself or one of its descendants.");
+        return;
+      }
+    }
     if (updated.entry_type === "CAUSAL_CONCLUSION" && !updated.evidence_references.length) return;
     const next = { ...base, nodes: editingId
       ? base.nodes.map(node => node.id === editingId ? updated : node)
