@@ -28,6 +28,7 @@ import {
   type CarDependencyType,
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
+import { getCarRcaInternal } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
 const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -138,6 +139,11 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     queryKey: ["qms-car-control-source", carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
     staleTime: 30_000,
+  });
+  const rcaQuery = useQuery({
+    queryKey: ["qms-car-control-rca", amoCode, carId],
+    queryFn: () => getCarRcaInternal(amoCode, carId),
+    staleTime: 10_000,
   });
 
   useEffect(() => {
@@ -314,14 +320,39 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       `${item.created_at}; severity=${item.severity}; actor=${assigneeName(assignees, item.actor_user_id)}; ${item.reason}`,
     ]));
     control.closure_readiness.blockers.forEach((item) => rows.push(["Closure blocker", item.code, item.message]));
+    const rca = rcaQuery.data;
+    const documented = rca?.submitted_snapshot?.investigation || rca?.draft.investigation;
+    if (rca) {
+      rows.push(["Structured RCA", "Current revision", rca.revision]);
+      rows.push(["Structured RCA", "Submitted revision", rca.submitted_revision || "Not submitted"]);
+      rows.push(["Structured RCA", "Consolidated proposed root cause", documented?.conclusion || "Not recorded"]);
+      rows.push(["Structured RCA", "Conclusion evidence", (documented?.conclusion_evidence_references || []).join("; ")]);
+      documented?.investigations.forEach(method => method.nodes.forEach(node =>
+        rows.push(["Investigation " + method.method, node.category + " · " + node.entry_type,
+          node.statement + "; parent=" + (node.parent_id || "") + "; evidence=" + node.evidence_references.join("; ")])));
+      rca.actions.forEach(action => rows.push(["Action " + action.action_number, action.kind + " · " + action.state,
+        action.description + "; owner=" + (action.external_owner_name || action.owner_user_id || "") +
+        "; due=" + (action.target_date || "") + "; evidence=" + action.evidence_references.join("; ") +
+        "; Quality review=" + (action.quality_review_note || "")]));
+      rca.history.forEach(event => rows.push(["RCA revision " + event.revision, event.event_type,
+        event.created_at + "; actor=" + (event.actor_ref || "unattributed") + "; reason=" + event.reason]));
+    }
     return ["Section,Field,Value", ...rows.map((row) => row.map(csvCell).join(","))].join("\n");
   };
 
   const exportCsv = () => {
+    if (rcaQuery.isError || rcaQuery.isPending) {
+      setLocalError("Structured RCA could not be loaded. Retry before exporting a complete controlled package.");
+      return;
+    }
     saveDownloadedFile(new Blob([buildCsv()], { type: "text/csv;charset=utf-8" }), `${control.car.car_number}-controlled-package.csv`);
   };
 
   const printPackage = () => {
+    if (rcaQuery.isError || rcaQuery.isPending) {
+      setLocalError("Structured RCA could not be loaded. Retry before printing a complete controlled package.");
+      return;
+    }
     const source = inviteQuery.data;
     const popup = window.open("", "_blank", "width=1100,height=850");
     if (!popup) {
