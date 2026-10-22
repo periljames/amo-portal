@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import CarRcaWorkbench from "./CarRcaWorkbench";
 import { emptyCarRca, getCarRcaInternal, reviewCarRcaAction, type CarRcaProjection, type CarRcaAction } from "../../../services/qmsCarRca";
 import "./car-rca.css";
+import CarRcaParetoSource from "./CarRcaParetoSource";
+import { hasQmsRolePermission } from "../../../app/routeGuards";
 
 export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   amoCode: string;
@@ -55,6 +57,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
         disabled onChange={() => undefined} onSave={() => undefined}
         saveState="Controlled record — reviewer read only" /> :
         <p>Only legacy free-text RCA is available for this CAR. No new structured analysis has been recorded.</p>}
+      <CarRcaParetoSource amoCode={amoCode} carId={carId}
+        canSave={canReview && hasQmsRolePermission("qms.car.manage") && hasQmsRolePermission("qms.reports.view")} />
       <div className="car-rca-table-scroll"><table>
         <caption>Individually governed corrective and preventive actions — {data.actions.length}</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
