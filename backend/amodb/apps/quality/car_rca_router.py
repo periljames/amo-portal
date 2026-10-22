@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -258,8 +258,15 @@ def _public_projection(db: Session, car, *, include_history=False):
         "submitted_revision": doc.submitted_revision if doc else None,
         "submitted_snapshot": doc.submitted_snapshot if doc else None,
         "submitted_at": doc.submitted_at if doc else None,
-        "actions": [_action_dict(item) for item in _actions(db, car)],
-        "action_events": _action_events(db, car),
+        # Public bearer capabilities must not expose internal actor identities.
+        # Full attributed history is available only to tenant Quality readers.
+        "actions": [
+            _action_dict(item) if include_history
+            else {**_action_dict(item), "owner_user_id": None,
+                  "reviewed_by_user_id": None}
+            for item in _actions(db, car)
+        ],
+        "action_events": _action_events(db, car) if include_history else [],
         "history": [
             {
                 "id": str(item.id), "revision": item.revision,
@@ -363,7 +370,9 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None, *, respon
 
 @public_router.get("/{invite_token}/draft")
 @public_router.get("/{invite_token}/investigation")
-def read_public_rca(invite_token: str, db: Session = Depends(get_db)):
+def read_public_rca(invite_token: str, response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Referrer-Policy"] = "no-referrer"
     car = _car_for_guest(db, invite_token)
     return _public_projection(db, car)
 
