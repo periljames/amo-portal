@@ -218,7 +218,10 @@ def submit_car_invite_with_detailed_response(
     from .tenant_security import set_postgres_tenant_context
     from .car_rca_router import submit_rca_document
     set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
-    submit_rca_document(db, car, payload.root_cause if payload.root_cause is not None else car.root_cause)
+    submit_rca_document(
+        db, car, payload.root_cause if payload.root_cause is not None else car.root_cause,
+        responder_email=payload.submitted_by_email,
+    )
 
     # Prevent the compatibility handler from re-applying its historical 500
     # character default to the four narrative fields. The same SQLAlchemy session
