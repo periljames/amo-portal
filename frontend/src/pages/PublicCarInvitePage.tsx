@@ -1329,7 +1329,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       note={invite.root_cause_review_note}
                                     />}
                                     {!invite.structured_rca_required && <p className="car-invite-subtitle">This CAR predates controlled structured RCA. The existing response remains valid. You may optionally adopt the guided methods below; doing so requires completing and saving their supporting evidence before final submission.</p>}
-                                    <CarRcaWorkbench value={entry.rca} disabled={locked || !entry.rcaLoaded}
+                                    <CarRcaWorkbench value={entry.rca} attachments={entry.attachments.map(file => ({ id: file.id, filename: file.filename }))} disabled={locked || !entry.rcaLoaded}
                                       onChange={(investigation) => updateEntry(entry.token, (current) => ({
                                         ...current, rca: investigation,
                                         form: { ...current.form, root_cause: investigation.conclusion },
