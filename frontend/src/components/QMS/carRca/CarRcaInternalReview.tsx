@@ -81,6 +81,17 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
             </div>}
           </td></tr>)}</tbody>
       </table></div>
+      {data.retained_responses.length > 0 && <details>
+        <summary>Retained recalled CAR responses ({data.retained_responses.length})</summary>
+        <p>These revisions remain in the audit history but are excluded from the active Quality review queue.</p>
+        <ol>{data.retained_responses.map(record => <li key={record.id}>
+          <strong>Original submission: {record.submitted_at ? new Date(record.submitted_at).toLocaleString() : "Unknown date"}</strong>
+          <p>{record.reason}</p>
+          <details><summary>View retained original fields</summary>
+            <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(record.snapshot, null, 2)}</pre>
+          </details>
+        </li>)}</ol>
+      </details>}
       {data.action_events.length > 0 && <details>
         <summary>Attributable action implementation and Quality decisions ({data.action_events.length})</summary>
         <ol>{data.action_events.map(event => <li key={event.id}>
