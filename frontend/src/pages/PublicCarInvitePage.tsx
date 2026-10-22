@@ -768,7 +768,11 @@ const PublicCarInvitePage: React.FC = () => {
       const fallbackForm = toForm(data.value);
       const serverForm = savedRca?.revision ? savedRca.draft.form : null;
       const selectedForm = restoredDraft || { ...fallbackForm, ...(serverForm || {}) };
-      const investigation = savedRca?.draft.investigation || emptyCarRca(data.value.summary);
+      const investigation = (
+        !isInviteEditable(data.value) && savedRca?.submitted_snapshot?.investigation
+          ? savedRca.submitted_snapshot.investigation
+          : savedRca?.draft.investigation
+      ) || emptyCarRca(data.value.summary);
       if (investigation.conclusion && !restoredDraft) selectedForm.root_cause = investigation.conclusion;
       const nextEntry: InviteEntry = {
           ...createEntry(tokenValue),
