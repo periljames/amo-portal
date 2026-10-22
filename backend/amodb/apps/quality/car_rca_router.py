@@ -1,0 +1,466 @@
+"""Governed RCA documents and action endpoints for the authoritative CAR.
+
+Public invitation possession grants access only to the matching CAR. It never
+grants authenticated Assurance Case or Quality review permissions.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from datetime import date, datetime, timezone
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.orm import Session
+
+from amodb.database import get_db, get_read_db, get_write_db
+from . import models
+from .car_rca_models import (
+    QualityCarRcaAction, QualityCarRcaDocument, QualityCarRcaMutation, QualityCarRcaRevision
+)
+from .tenant_security import (
+    TenantContext, assert_quality_permission, require_quality_permission,
+    set_postgres_tenant_context, write_tenant_context
+)
+
+public_router = APIRouter(prefix="/quality/cars/invite", tags=["Quality / Public CAR RCA"])
+router = APIRouter(prefix="/cars/{car_id}", tags=["Quality / CAR RCA"])
+
+METHODS = {
+    "FIVE_WHYS", "ISHIKAWA", "PARETO", "CAUSAL_FACTOR", "BARRIER_ANALYSIS",
+    "CHANGE_ANALYSIS", "HUMAN_ORGANIZATIONAL", "EIGHT_D", "FMEA"
+}
+NODE_TYPES = {"FACT", "HYPOTHESIS", "CAUSAL_CONCLUSION", "RULED_OUT"}
+ACTIVE_ACTIONS = {"PROPOSED", "ACCEPTED", "IN_PROGRESS", "SUBMITTED", "VERIFIED", "REJECTED", "CANCELLED"}
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+
+class CauseNode(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=80)
+    statement: str = Field(min_length=2, max_length=4000)
+    category: str = Field(default="Process", max_length=80)
+    entry_type: Literal["FACT", "HYPOTHESIS", "CAUSAL_CONCLUSION", "RULED_OUT"] = "HYPOTHESIS"
+    evidence_references: list[str] = Field(default_factory=list, max_length=30)
+    rationale: str = Field(default="", max_length=4000)
+
+
+class Investigation(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    method: Literal[
+        "FIVE_WHYS", "ISHIKAWA", "PARETO", "CAUSAL_FACTOR", "BARRIER_ANALYSIS",
+        "CHANGE_ANALYSIS", "HUMAN_ORGANIZATIONAL", "EIGHT_D", "FMEA"
+    ]
+    version: int = Field(default=1, ge=1, le=100)
+    nodes: list[CauseNode] = Field(default_factory=list, max_length=100)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class InvestigationDocument(BaseModel):
+    version: int = Field(default=1, ge=1, le=100)
+    problem_statement: str = Field(default="", max_length=8000)
+    investigations: list[Investigation] = Field(default_factory=list, max_length=12)
+    conclusion: str = Field(default="", max_length=8000)
+    supported_cause_ids: list[str] = Field(default_factory=list, max_length=30)
+    conclusion_evidence_references: list[str] = Field(default_factory=list, max_length=60)
+    evidence_notes: str = Field(default="", max_length=8000)
+
+    @model_validator(mode="after")
+    def validate_graphs(self):
+        method_ids = set()
+        all_nodes = {}
+        for method in self.investigations:
+            if method.id in method_ids:
+                raise ValueError("Each investigation requires a distinct identifier.")
+            method_ids.add(method.id)
+            local = set()
+            for node in method.nodes:
+                if node.id in all_nodes:
+                    raise ValueError("Cause IDs must be unique across investigations.")
+                all_nodes[node.id] = node
+                local.add(node.id)
+            for node in method.nodes:
+                if node.parent_id and node.parent_id not in local:
+                    raise ValueError("Every parent cause must belong to the same method.")
+                if node.parent_id == node.id:
+                    raise ValueError("A cause cannot be its own parent.")
+                seen = {node.id}
+                current = node.parent_id
+                while current:
+                    if current in seen:
+                        raise ValueError("Causal graphs must not contain cycles.")
+                    seen.add(current)
+                    current = all_nodes[current].parent_id
+        for cause_id in self.supported_cause_ids:
+            node = all_nodes.get(cause_id)
+            if not node or node.entry_type != "CAUSAL_CONCLUSION":
+                raise ValueError("Supported causes must reference documented causal conclusions.")
+            if not node.evidence_references:
+                raise ValueError("A supported causal conclusion requires its own evidence references.")
+        return self
+
+
+class CarRcaSave(BaseModel):
+    expected_revision: int = Field(ge=0)
+    mutation_key: str = Field(min_length=8, max_length=100)
+    investigation: InvestigationDocument = Field(default_factory=InvestigationDocument)
+    form: dict[str, str] = Field(default_factory=dict)
+
+
+class ActionCreate(BaseModel):
+    kind: Literal["CORRECTIVE", "PREVENTIVE", "CONTAINMENT"] = "CORRECTIVE"
+    description: str = Field(min_length=5, max_length=8000)
+    cause_node_ids: list[str] = Field(default_factory=list, max_length=30)
+    evidence_references: list[str] = Field(default_factory=list, max_length=40)
+    owner_user_id: str | None = Field(default=None, max_length=36)
+    external_owner_name: str | None = Field(default=None, max_length=255)
+    target_date: date | None = None
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+
+
+class ActionProgress(BaseModel):
+    state: Literal["IN_PROGRESS", "SUBMITTED"]
+    completion_note: str = Field(default="", max_length=4000)
+    evidence_references: list[str] = Field(default_factory=list, max_length=40)
+
+
+class ActionReview(BaseModel):
+    state: Literal["ACCEPTED", "REJECTED", "VERIFIED"]
+    reason: str = Field(min_length=8, max_length=4000)
+
+
+def _car_for_guest(db: Session, token: str, *, lock=False):
+    if not token or len(token) > 64:
+        raise HTTPException(status_code=404, detail="CAR invitation not found")
+    query = db.query(models.CorrectiveActionRequest).filter(
+        models.CorrectiveActionRequest.invite_token == token
+    )
+    car = (query.with_for_update() if lock else query).first()
+    if car is None:
+        raise HTTPException(status_code=404, detail="CAR invitation not found")
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
+    return car
+
+
+def _car_for_employee(db: Session, ctx: TenantContext, car_id: uuid.UUID, *, lock=False):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    query = db.query(models.CorrectiveActionRequest).filter(
+        models.CorrectiveActionRequest.amo_id == ctx.amo_id,
+        models.CorrectiveActionRequest.id == car_id,
+    )
+    car = (query.with_for_update() if lock else query).first()
+    if car is None:
+        raise HTTPException(status_code=404, detail="CAR not found for this tenant")
+    return car
+
+
+def _assert_guest_editable(db: Session, car):
+    from .router import _require_public_car_invite_editable
+    _require_public_car_invite_editable(db, car)
+
+
+def _document(db: Session, car, *, lock=False, create=False):
+    query = db.query(QualityCarRcaDocument).filter(
+        QualityCarRcaDocument.amo_id == str(car.amo_id),
+        QualityCarRcaDocument.car_id == car.id,
+    )
+    doc = (query.with_for_update() if lock else query).first()
+    if doc is None and create:
+        doc = QualityCarRcaDocument(
+            id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+            revision=0, draft={"form": {}, "investigation": InvestigationDocument().model_dump()}
+        )
+        db.add(doc)
+        db.flush()
+    return doc
+
+
+def _action_dict(row: QualityCarRcaAction):
+    return {
+        "id": str(row.id), "car_id": str(row.car_id), "sequence_no": row.sequence_no,
+        "action_number": str(row.sequence_no).zfill(2),
+        "kind": row.kind, "description": row.description,
+        "cause_node_ids": row.cause_node_ids or [],
+        "evidence_references": row.evidence_references or [],
+        "owner_user_id": row.owner_user_id, "external_owner_name": row.external_owner_name,
+        "target_date": row.target_date, "priority": row.priority, "state": row.state,
+        "completion_note": row.completion_note, "completed_at": row.completed_at,
+        "quality_review_note": row.quality_review_note,
+        "reviewed_by_user_id": row.reviewed_by_user_id, "reviewed_at": row.reviewed_at,
+    }
+
+
+def _actions(db: Session, car):
+    return db.query(QualityCarRcaAction).filter(
+        QualityCarRcaAction.amo_id == str(car.amo_id),
+        QualityCarRcaAction.car_id == car.id
+    ).order_by(QualityCarRcaAction.sequence_no).all()
+
+
+def _public_projection(db: Session, car, *, include_history=False):
+    doc = _document(db, car)
+    revisions = []
+    if include_history and doc is not None:
+        revisions = db.query(QualityCarRcaRevision).filter(
+            QualityCarRcaRevision.amo_id == str(car.amo_id),
+            QualityCarRcaRevision.car_id == car.id
+        ).order_by(QualityCarRcaRevision.revision.desc()).limit(100).all()
+    return {
+        "car_id": str(car.id), "revision": doc.revision if doc else 0,
+        "draft": doc.draft if doc else {
+            "form": {}, "investigation": InvestigationDocument(
+                problem_statement=str(car.summary or "")
+            ).model_dump()
+        },
+        "submitted_revision": doc.submitted_revision if doc else None,
+        "submitted_snapshot": doc.submitted_snapshot if doc else None,
+        "submitted_at": doc.submitted_at if doc else None,
+        "actions": [_action_dict(item) for item in _actions(db, car)],
+        "history": [
+            {
+                "id": str(item.id), "revision": item.revision,
+                "event_type": item.event_type, "actor_kind": item.actor_kind,
+                "actor_ref": item.actor_ref, "created_at": item.created_at,
+                "reason": item.reason, "snapshot": item.snapshot
+            } for item in revisions
+        ],
+    }
+
+
+def _append_revision(db: Session, car, doc, *, event, actor, actor_ref, reason):
+    db.add(QualityCarRcaRevision(
+        id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+        document_id=doc.id, revision=doc.revision, event_type=event,
+        snapshot=doc.draft, actor_kind=actor, actor_ref=actor_ref,
+        reason=reason
+    ))
+
+
+def _save(db: Session, car, payload: CarRcaSave, *, actor, actor_ref):
+    _assert_guest_editable(db, car) if actor == "GUEST" else None
+    doc = _document(db, car, lock=True, create=True)
+    data = {
+        "investigation": payload.investigation.model_dump(mode="json"),
+        "form": {key: value[:8000] for key, value in payload.form.items()
+                 if key in {
+                     "submitted_by_name", "submitted_by_email", "containment_action",
+                     "root_cause", "corrective_action", "preventive_action",
+                     "evidence_ref", "due_date", "target_closure_date"
+                 } and isinstance(value, str)}
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    existing = db.query(QualityCarRcaMutation).filter(
+        QualityCarRcaMutation.amo_id == str(car.amo_id),
+        QualityCarRcaMutation.car_id == car.id,
+        QualityCarRcaMutation.mutation_key == payload.mutation_key,
+    ).first()
+    if existing:
+        if existing.fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="The save key was already used for different content.")
+        return _public_projection(db, car)
+    if doc.revision != payload.expected_revision:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "A newer draft was saved elsewhere; reload before overwriting.",
+                    "server_revision": doc.revision}
+        )
+    if doc.draft == data:
+        return _public_projection(db, car)
+    doc.revision += 1
+    doc.draft = data
+    _append_revision(
+        db, car, doc, event="DRAFT_SAVED", actor=actor,
+        actor_ref=actor_ref, reason="Investigation draft saved."
+    )
+    db.add(QualityCarRcaMutation(
+        id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+        mutation_key=payload.mutation_key, fingerprint=fingerprint,
+        result_revision=doc.revision
+    ))
+    db.commit()
+    return _public_projection(db, car)
+
+
+def submit_rca_document(db: Session, car, root_cause_text: str | None):
+    """Stage the structured evidence in the SAME transaction as base CAR submission.
+
+    Legacy CARs without a structured RCA document retain their established
+    submissions. Newly created structured investigations require a supported
+    conclusion and evidence-backed cause; a hypothesis alone is never verified.
+    """
+    doc = _document(db, car, lock=True)
+    if doc is None or doc.revision == 0:
+        return
+    data = InvestigationDocument.model_validate(doc.draft.get("investigation") or {})
+    if not data.conclusion.strip() or not data.supported_cause_ids:
+        raise HTTPException(status_code=422, detail="Complete an evidence-backed root cause conclusion before submitting.")
+    if not data.conclusion_evidence_references:
+        raise HTTPException(status_code=422, detail="Reference the evidence supporting the final root cause.")
+    if (root_cause_text or "").strip() != data.conclusion.strip():
+        raise HTTPException(status_code=409, detail="The CAR root-cause narrative differs from your saved investigation. Save the latest conclusion and resubmit.")
+    doc.revision += 1
+    doc.submitted_revision = doc.revision
+    doc.submitted_at = _utcnow()
+    doc.submitted_snapshot = dict(doc.draft)
+    _append_revision(
+        db, car, doc, event="SUBMITTED", actor="GUEST",
+        actor_ref=car.submitted_by_email, reason="Structured RCA submitted with CAR response."
+    )
+
+
+@public_router.get("/{invite_token}/draft")
+@public_router.get("/{invite_token}/investigation")
+def read_public_rca(invite_token: str, db: Session = Depends(get_db)):
+    car = _car_for_guest(db, invite_token)
+    return _public_projection(db, car)
+
+
+@public_router.put("/{invite_token}/draft")
+@public_router.put("/{invite_token}/investigation")
+def save_public_rca(invite_token: str, payload: CarRcaSave, db: Session = Depends(get_db)):
+    car = _car_for_guest(db, invite_token, lock=True)
+    identity = (payload.form.get("submitted_by_email") or "").strip()[:255]
+    return _save(db, car, payload, actor="GUEST", actor_ref=identity or "invited-responder")
+
+
+@router.get("/investigation")
+def read_employee_rca(car_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.car.view")),
+    db: Session = Depends(get_read_db)):
+    car = _car_for_employee(db, ctx, car_id)
+    return _public_projection(db, car, include_history=True)
+
+
+@router.put("/investigation")
+def save_employee_rca(car_id: uuid.UUID, payload: CarRcaSave,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db)):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="CAR is locked.")
+    return _save(db, car, payload, actor="EMPLOYEE", actor_ref=ctx.user_id)
+
+
+@public_router.get("/{invite_token}/corrective-actions")
+def public_actions(invite_token: str, db: Session = Depends(get_db)):
+    return _public_projection(db, _car_for_guest(db, invite_token))["actions"]
+
+
+@router.get("/corrective-actions")
+def employee_actions(car_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.car.view")),
+    db: Session = Depends(get_read_db)):
+    return _public_projection(db, _car_for_employee(db, ctx, car_id))["actions"]
+
+
+def _add_action(db, car, payload: ActionCreate, *, public: bool):
+    if payload.owner_user_id and public:
+        raise HTTPException(status_code=403, detail="Guest cannot assign internal employee privileges.")
+    if payload.owner_user_id:
+        from amodb.apps.accounts import models as accounts
+        exists = db.query(accounts.User.id).filter(
+            accounts.User.id == payload.owner_user_id,
+            accounts.User.amo_id == str(car.amo_id),
+            accounts.User.is_active.is_(True)
+        ).first()
+        if not exists:
+            raise HTTPException(status_code=422, detail="Owner is not an active tenant user.")
+    # The CAR row is locked by the route, protecting action sequence allocation.
+    existing = _actions(db, car)
+    row = QualityCarRcaAction(
+        id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+        sequence_no=max([x.sequence_no for x in existing] + [0]) + 1,
+        kind=payload.kind, description=payload.description.strip(),
+        cause_node_ids=payload.cause_node_ids,
+        evidence_references=payload.evidence_references,
+        owner_user_id=payload.owner_user_id,
+        external_owner_name=payload.external_owner_name,
+        target_date=payload.target_date, priority=payload.priority,
+        state="PROPOSED"
+    )
+    db.add(row)
+    db.commit()
+    return _action_dict(row)
+
+
+@public_router.post("/{invite_token}/corrective-actions", status_code=201)
+def add_public_action(invite_token: str, payload: ActionCreate,
+    db: Session = Depends(get_db)):
+    car = _car_for_guest(db, invite_token, lock=True)
+    _assert_guest_editable(db, car)
+    return _add_action(db, car, payload, public=True)
+
+
+@router.post("/corrective-actions", status_code=201)
+def add_employee_action(car_id: uuid.UUID, payload: ActionCreate,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db)):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="CAR is locked.")
+    return _add_action(db, car, payload, public=False)
+
+
+@public_router.patch("/{invite_token}/corrective-actions/{action_id}")
+def report_public_action(invite_token: str, action_id: uuid.UUID, payload: ActionProgress,
+    db: Session = Depends(get_db)):
+    car = _car_for_guest(db, invite_token, lock=True)
+    _assert_guest_editable(db, car)
+    row = db.query(QualityCarRcaAction).filter(
+        QualityCarRcaAction.id == action_id,
+        QualityCarRcaAction.amo_id == str(car.amo_id),
+        QualityCarRcaAction.car_id == car.id
+    ).with_for_update().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Action not found for this CAR")
+    if row.state not in {"PROPOSED", "ACCEPTED", "IN_PROGRESS", "REJECTED"}:
+        raise HTTPException(status_code=409, detail="Action is not open for respondent updates.")
+    row.state = payload.state
+    row.completion_note = payload.completion_note.strip()
+    row.evidence_references = payload.evidence_references
+    if row.state == "SUBMITTED":
+        if not row.completion_note or not row.evidence_references:
+            raise HTTPException(status_code=422, detail="Completion needs a declaration and evidence.")
+        row.completed_at = _utcnow()
+    db.commit()
+    return _action_dict(row)
+
+
+@router.patch("/corrective-actions/{action_id}/review")
+def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db)):
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="Closed or escalated CAR cannot receive action approvals.")
+    row = db.query(QualityCarRcaAction).filter(
+        QualityCarRcaAction.amo_id == ctx.amo_id,
+        QualityCarRcaAction.car_id == car.id,
+        QualityCarRcaAction.id == action_id
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Action not found")
+    if ctx.user_id in {row.owner_user_id, car.assigned_to_user_id}:
+        raise HTTPException(status_code=403, detail="Action implementer cannot approve their own action.")
+    if payload.state == "ACCEPTED" and row.state != "PROPOSED":
+        raise HTTPException(status_code=409, detail="Only proposed actions may be approved.")
+    if payload.state == "VERIFIED" and (row.state != "SUBMITTED" or not row.evidence_references):
+        raise HTTPException(status_code=409, detail="Verify submitted implementation evidence before approving.")
+    if payload.state == "REJECTED" and row.state not in {"PROPOSED", "SUBMITTED"}:
+        raise HTTPException(status_code=409, detail="This action is not in a reviewable state.")
+    row.state = payload.state
+    row.quality_review_note = payload.reason.strip()
+    row.reviewed_by_user_id = ctx.user_id
+    row.reviewed_at = _utcnow()
+    db.commit()
+    return _action_dict(row)
