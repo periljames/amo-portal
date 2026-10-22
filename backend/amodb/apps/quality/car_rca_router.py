@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+import secrets
 from datetime import date, datetime, timezone
 from typing import Any, Literal
 
@@ -780,6 +781,45 @@ def update_invite_access_control(
     )
     db.commit()
     return _invite_control_dict(control)
+
+
+class RotateCarInvite(BaseModel):
+    reason: str = Field(min_length=8, max_length=4000)
+
+
+@router.post("/invite-access/rotate")
+def rotate_car_invitation(
+    car_id: uuid.UUID, payload: RotateCarInvite,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    """Issue a new capability; the old bearer URL immediately ceases matching."""
+    assert_quality_permission(db, ctx, "qms.car.manage")
+    car = _car_for_employee(db, ctx, car_id, lock=True)
+    if str(getattr(car.status, "value", car.status)) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="A closed or restricted CAR cannot issue a new respondent invitation.")
+    old_digest = hashlib.sha256(car.invite_token.encode("utf-8")).hexdigest()[:12]
+    car.invite_token = secrets.token_urlsafe(32)
+    control = _control_for_car(db, car)
+    if control is not None:
+        # The row now governs the freshly rotated bearer token, not the old
+        # revoked capability. This does NOT reactivate the old link.
+        control.revoked_at = None
+        control.expires_at = None
+        control.reason = payload.reason.strip()
+        control.updated_by_user_id = ctx.user_id
+    from .service import add_car_action, build_car_invite_link
+    add_car_action(
+        db=db, car=car, action_type=models.CARActionType.COMMENT,
+        message="CAR invitation rotated (previous token fingerprint " + old_digest + "): " + payload.reason.strip(),
+        actor_user_id=ctx.user_id,
+    )
+    db.commit()
+    return {
+        "new_invite_url": build_car_invite_link(car),
+        "expires_at": None, "revoked_at": None,
+        "reason": payload.reason.strip(),
+    }
 
 
 class AdoptEffectivenessProposal(BaseModel):
