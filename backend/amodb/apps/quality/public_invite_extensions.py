@@ -179,6 +179,9 @@ def get_car_invite_with_report(
 ):
     car = _car_for_token(db, invite_token)
     payload = _car_invite_payload(car, request=request, db=db)
+    # A bearer token must not mint access to sibling CARs. Multiple-CAR access
+    # uses only tokens explicitly delivered to the responder.
+    payload["related_cars"] = []
     audit = _audit_for_car(car)
     report_path = _issued_report_path(db, audit)
     payload["audit_report_download_url"] = (
@@ -210,6 +213,12 @@ def submit_car_invite_with_detailed_response(
     ):
         raise HTTPException(status_code=409, detail="The agreed CAR deadline requires a Quality extension decision. Submit your response without changing the deadline.")
     _persist_detailed_response_fields(car, payload)
+    # Keep structured RCA submission in the existing CAR response transaction,
+    # without requiring legacy CARs to invent causal nodes retroactively.
+    from .tenant_security import set_postgres_tenant_context
+    from .car_rca_router import submit_rca_document
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="car-invitation")
+    submit_rca_document(db, car, payload.root_cause if payload.root_cause is not None else car.root_cause)
 
     # Prevent the compatibility handler from re-applying its historical 500
     # character default to the four narrative fields. The same SQLAlchemy session
