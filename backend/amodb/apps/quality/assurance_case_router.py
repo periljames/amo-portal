@@ -380,6 +380,25 @@ def conclude_effectiveness(
         raise HTTPException(status_code=404, detail="Effectiveness plan not found.")
     if plan.status == "CONCLUDED":
         raise HTTPException(status_code=409, detail="Effectiveness conclusions are immutable. Reopen the case and create a new plan for a new observation window.")
+    if plan.source_type == "CAR":
+        # For CAR-specific effectiveness plans, the designated reviewer must
+        # perform the conclusion and must be independent of the implementer.
+        from . import models as quality_models
+        from uuid import UUID as _UUID
+        try:
+            source_car_id = _UUID(str(plan.source_id))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="Effectiveness plan has an invalid CAR linkage.") from exc
+        source_car = db.query(quality_models.CorrectiveActionRequest).filter(
+            quality_models.CorrectiveActionRequest.amo_id == ctx.amo_id,
+            quality_models.CorrectiveActionRequest.id == source_car_id,
+        ).first()
+        if source_car is None:
+            raise HTTPException(status_code=404, detail="Linked CAR not found in this tenant.")
+        if not plan.responsible_reviewer_user_id or ctx.user_id != plan.responsible_reviewer_user_id:
+            raise HTTPException(status_code=403, detail="Only the independently appointed effectiveness reviewer may record the conclusion.")
+        if ctx.user_id == source_car.assigned_to_user_id:
+            raise HTTPException(status_code=403, detail="CAR implementer cannot independently conclude effectiveness.")
     if plan.planned_review_date > date.today():
         raise HTTPException(status_code=409, detail="The planned observation window has not reached its review date.")
     plan.status = "CONCLUDED"; plan.conclusion = payload.conclusion; plan.conclusion_rationale = payload.rationale.strip()
