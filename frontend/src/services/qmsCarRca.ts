@@ -67,6 +67,7 @@ export interface CarRcaProjection {
   submitted_at: string | null;
   actions: CarRcaAction[];
   action_events: Array<{ id: string; action_id: string; previous_state: string | null; next_state: string; actor_kind: string; actor_ref: string | null; reason: string; created_at: string; snapshot: unknown }>;
+  retained_responses: Array<{ id: string; original_response_id: string; event_type: string; submitted_at: string | null; retained_at: string; reason: string; snapshot: Record<string, unknown> }>;
   history: Array<{ id: string; revision: number; event_type: string; actor_kind: string; actor_ref: string | null; reason: string; created_at: string; snapshot: unknown }>;
 }
 export type CarRcaSavePayload = {
