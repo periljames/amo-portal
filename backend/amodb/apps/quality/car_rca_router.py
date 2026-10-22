@@ -460,6 +460,10 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
         raise HTTPException(status_code=409, detail="Only proposed actions may be approved.")
     if payload.state == "VERIFIED" and (row.state != "SUBMITTED" or not row.evidence_references):
         raise HTTPException(status_code=409, detail="Verify submitted implementation evidence before approving.")
+    if payload.state == "VERIFIED" and (
+        car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED"
+    ):
+        raise HTTPException(status_code=409, detail="Quality must accept the RCA and corrective action plan before implementation verification.")
     if payload.state == "REJECTED" and row.state not in {"PROPOSED", "SUBMITTED"}:
         raise HTTPException(status_code=409, detail="This action is not in a reviewable state.")
     row.state = payload.state
