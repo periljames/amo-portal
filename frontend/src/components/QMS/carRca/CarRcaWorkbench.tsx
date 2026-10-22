@@ -115,9 +115,14 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       nodes.forEach(node => { if (node.parent_id && ids.has(node.parent_id) && !ids.has(node.id)) { ids.add(node.id); changed = true; } });
     }
     if (ids.has(editingId ?? "")) resetEdit();
-    updateMethod({ ...createMethod(), nodes: nodes.filter(node => !ids.has(node.id)) });
-    onChange({ ...value, supported_cause_ids: value.supported_cause_ids.filter(cause => !ids.has(cause)),
-      investigations: value.investigations.map(method => method.method === selected ? { ...method, nodes: nodes.filter(node => !ids.has(node.id)) } : method) });
+    const trimmed = nodes.filter(node => !ids.has(node.id));
+    const next = { ...createMethod(), nodes: trimmed };
+    onChange({
+      ...value, supported_cause_ids: value.supported_cause_ids.filter(cause => !ids.has(cause)),
+      investigations: current
+        ? value.investigations.map(method => method.id === current.id ? next : method)
+        : [...value.investigations, next],
+    });
   };
 
   const pareto = (Array.isArray(current?.context?.frequencies) ? current.context.frequencies : []) as Array<{ category: string; count: number; source_ref: string }>;
