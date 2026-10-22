@@ -147,3 +147,9 @@ See [Phase 1 baseline](CAR_RCA_PHASE1_BASELINE.md) for detailed source reference
 - The public RCA workbench now links previously uploaded CAR attachments by stable `CAR-ATTACHMENT:{id}` reference rather than requiring duplicate uploads. Backend verification checks that those referenced files actually belong to the exact CAR at structured RCA submission, corrective-action proposal, and implementation progress.
 - Existing non-CAR controlled evidence references remain narrative/record references subject to independent Quality review; they are **not** represented as cryptographically verified uploaded files.
 - **Remaining Phase 2 source concern:** evidence upload itself still uses the established storage mechanism. Platform-wide shared object-store migration, resumable uploads, failover and restore are not established by these changes. These must not be represented as delivered unless separately implemented/verified.
+
+### Remaining Phase 2 closure blockers
+
+- Shared CAR storage adapter exists but its integration into the legacy CAR router is not committed; no statement of object-storage readiness is warranted.
+- Serialized draft saves and CAR evidence-link UI changes need repository updates and validation.
+- Do not merge until these integration issues and Phase 3 checks are resolved.
