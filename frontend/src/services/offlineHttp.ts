@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from "./config";
+import { uploadTimeoutMs } from "./transferPolicy";
 import { isQmsLiveAuthority } from "./qmsCachePolicy";
 import {
   currentOfflineScope,
@@ -302,7 +303,7 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
 
   const controller = new AbortController();
   const detachCallerSignal = combineAbortSignals(controller, signal);
-  const effectiveTimeout = timeoutMs ?? recommendedRequestTimeoutMs(method);
+  const effectiveTimeout = timeoutMs ?? uploadTimeoutMs(requestInit.body) ?? recommendedRequestTimeoutMs(method);
   const timeout = globalThis.setTimeout(
     () => controller.abort(new DOMException(`Request timed out after ${Math.round(effectiveTimeout / 1000)} seconds`, "AbortError")),
     effectiveTimeout,

@@ -12,6 +12,8 @@ import {
 import { getApiBaseUrl } from "./config";
 import { beginBackgroundLoading, beginLoading, endBackgroundLoading, endLoading } from "./loading";
 import { portalFetch, type PortalOfflineOptions } from "./offlineHttp";
+import { uploadTimeoutMs } from "./transferPolicy";
+import { fetchFileDownload } from "./fileTransfers";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type AppRequestInit = RequestInit & {
@@ -83,7 +85,7 @@ async function request<T>(
       body,
       ...fetchInit,
       headers,
-      timeoutMs: method === "GET" ? 12_000 : 45_000,
+      timeoutMs: uploadTimeoutMs(body) ?? (method === "GET" ? 12_000 : 45_000),
       offline: {
         cache: offline?.cache ?? method === "GET",
         cacheTtlMs: offline?.cacheTtlMs ?? 5 * 60_000,
@@ -273,7 +275,7 @@ export async function fetchCRSTemplateMeta(): Promise<CRSTemplateMeta> {
 
 export async function fetchCRSTemplatePdf(): Promise<Blob> {
   const url = `${getApiBaseUrl()}/crs/template/pdf`;
-  const res = await portalFetch(url, {
+  const { response: res, blob } = await fetchFileDownload(url, {
     method: "GET",
     headers: authHeaders(),
     offline: { cache: false },
@@ -290,5 +292,5 @@ export async function fetchCRSTemplatePdf(): Promise<Blob> {
     console.error(`API GET ${url} failed or returned non-PDF:`, res.status, contentType, text.slice(0, 300));
     throw new Error(text || `Expected PDF from ${url}, but got ${contentType || "unknown"}`);
   }
-  return res.blob();
+  return blob!;
 }

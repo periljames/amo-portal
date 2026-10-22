@@ -11,6 +11,7 @@ import { isQmsLiveAuthority } from "./qmsCachePolicy";
 import { newOfflineIdempotencyKey } from "./offlinePersistence";
 import { classifyOfflineMutation } from "./offlineCapabilities";
 import { portalErrorMessage } from "./portalError";
+import { uploadTimeoutMs } from "./transferPolicy";
 import {
   isProxyTransportFailureResponse,
   portalFetch,
@@ -327,7 +328,7 @@ function isRetryableNetworkError(error: unknown): boolean {
 
 export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
   const {
-    timeoutMs = 30_000,
+    timeoutMs = uploadTimeoutMs(options.body) ?? 30_000,
     cacheTtlMs,
     persistCache = false,
     staleWhileOfflineMs = DEFAULT_STALE_OFFLINE_MS,
@@ -429,7 +430,10 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           return responseBody as T;
         } catch (error) {
           lastError = error;
-          const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
+          // A lost upload acknowledgement may follow a committed write. Only
+          // replay a write if the proxy confirms it never reached the backend.
+          const replaySafe = method === "GET" || method === "HEAD" || (error instanceof ApiClientError && error.transportFailure);
+          const canTryNext = replaySafe && index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
           if (canTryNext) {
             console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
             continue;

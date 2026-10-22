@@ -17,6 +17,18 @@ afterEach(() => vi.unstubAllGlobals());
 function response() { return new Response("{}", { headers: { "Content-Type": "application/json" } }); }
 
 describe("portal networking queue", () => {
+  it("does not replay an upload after an ambiguous connection failure", async () => {
+    state.fetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const body = new FormData(); body.set("file", new Blob(["evidence"]), "evidence.txt");
+    await expect(apiRequest("/network-test/upload", { method: "POST", body })).rejects.toThrow("Failed to fetch");
+    expect(state.fetch).toHaveBeenCalledTimes(1);
+  });
+  it("uses a file transfer budget for multipart uploads", async () => {
+    state.fetch.mockResolvedValue(response());
+    const body = new FormData(); body.set("file", new Blob(["evidence"]), "evidence.txt");
+    await apiRequest("/network-test/upload", { method: "POST", body });
+    expect(state.fetch.mock.calls[0][1].timeoutMs).toBeGreaterThan(290_000);
+  });
   it("shows the actionable message from a structured workflow failure", async () => {
     state.fetch.mockResolvedValue(new Response(JSON.stringify({ detail: { code: "AUDIT_NOTICE_MEETINGS_REQUIRED", message: "Save both meetings before generating the notice." } }), { status: 409, headers: { "Content-Type": "application/json" } }));
     await expect(apiRequest("/network-test/notice", { method: "POST", body: "{}" })).rejects.toThrow("Save both meetings before generating the notice.");

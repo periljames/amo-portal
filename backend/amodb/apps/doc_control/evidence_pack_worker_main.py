@@ -10,7 +10,7 @@ import argparse
 import logging
 import os
 import signal
-import time
+import threading
 from pathlib import Path
 
 
@@ -64,31 +64,41 @@ def main() -> None:
     # Import only after the worker-specific DB pool has been applied. database.py
     # creates SQLAlchemy engines at import time.
     from amodb.apps.doc_control.evidence_pack_job_service import process_one_pending_job
-    from amodb.database import dispose_engines
+    from amodb.database import dispose_engines, probe_database
+    from amodb.database_resilience import database_circuit
 
     poll_seconds = args.poll_seconds
     if poll_seconds is None:
         poll_seconds = float(os.getenv("DOCUMENT_EVIDENCE_PACK_WORKER_POLL_SECONDS", "2") or "2")
     poll_seconds = max(0.25, min(poll_seconds, 60.0))
 
-    stopping = False
+    stopping = threading.Event()
 
     def stop(_signum=None, _frame=None) -> None:
-        nonlocal stopping
-        stopping = True
+        stopping.set()
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
 
     try:
-        while not stopping:
+        database_unavailable = False
+        while not stopping.is_set():
+            if not probe_database():
+                if not database_unavailable:
+                    logging.warning("Evidence-pack worker paused: PostgreSQL is unavailable; queued jobs are retained")
+                database_unavailable = True
+                stopping.wait(min(30.0, max(poll_seconds, database_circuit.retry_after_seconds())))
+                continue
+            if database_unavailable:
+                logging.info("PostgreSQL recovered; resuming evidence-pack jobs")
+                database_unavailable = False
             try:
                 processed = process_one_pending_job()
             except Exception:
                 logging.exception("Document Control evidence-pack worker cycle failed")
                 processed = False
             if not processed:
-                time.sleep(poll_seconds)
+                stopping.wait(poll_seconds)
     finally:
         dispose_engines()
 

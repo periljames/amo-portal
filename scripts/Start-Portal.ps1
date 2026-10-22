@@ -1,4 +1,4 @@
-param([ValidateSet('Dev','Shared')][string]$FrontendMode = 'Dev', [ValidateSet('All','Backend','Frontend')][string]$Service = 'All')
+param([ValidateSet('Dev','Shared')][string]$FrontendMode = 'Shared', [ValidateSet('All','Backend','Frontend')][string]$Service = 'All', [switch]$Visible)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $selectedPorts = switch($Service){ 'Backend' {@(8080,8090)} 'Frontend' {@(5173)} default {@(5173,8080,8090)} }
@@ -12,8 +12,9 @@ if(-not $shellPath){ $shellPath = (Get-Command powershell.exe).Source }
 $serviceScript = Join-Path $PSScriptRoot 'Run-PortalService.ps1'
 $selectedServices = if($Service -eq 'All'){@('Backend','Frontend')}else{@($Service)}
 foreach($serviceName in $selectedServices){
- $arguments = @('-NoLogo','-NoProfile','-NoExit','-ExecutionPolicy','Bypass','-File',('"'+$serviceScript+'"'),'-Service',$serviceName,'-FrontendMode',$FrontendMode)
- $console = Start-Process -FilePath $shellPath -WorkingDirectory $workspaceRoot -ArgumentList $arguments -WindowStyle Normal -PassThru
- Write-Host "$serviceName visible console PID: $($console.Id)"
+ $arguments = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$serviceScript+'"'),'-Service',$serviceName,'-FrontendMode',$FrontendMode)
+ $windowStyle = if($Visible){ 'Normal' }else{ 'Hidden' }
+ $console = Start-Process -FilePath $shellPath -WorkingDirectory $workspaceRoot -ArgumentList $arguments -WindowStyle $windowStyle -PassThru
+ Write-Host "$serviceName owner PID: $($console.Id)"
 }
-Write-Host 'Logs are in the two visible windows. Stop both with: .\scripts\Stop-Portal.ps1'
+Write-Host 'Logs: .artifacts/portal-runtime. Stop both with: .\scripts\Stop-Portal.ps1'

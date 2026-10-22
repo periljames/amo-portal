@@ -1,4 +1,5 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { uploadTimeoutMs } from "./transferPolicy";
 import type { PublicationUploadPayload } from "./publications";
 import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
@@ -240,7 +241,7 @@ export async function parseUploadedAuditChecklist(amoCode: string, auditId: stri
   body.append("file", file);
   return apiRequest<UploadedChecklistDraft>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklists/parse-upload`),
-    { method: "POST", body, timeoutMs: 120_000, offline: { queueMutation: false } },
+    { method: "POST", body, timeoutMs: uploadTimeoutMs(body), offline: { queueMutation: false } },
   );
 }
 
@@ -339,6 +340,6 @@ export function uploadDmsChecklistFromAudit(
   }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/upload`), {
     method: "POST",
     body,
-    timeoutMs: 120_000,
+    timeoutMs: uploadTimeoutMs(body),
   });
 }

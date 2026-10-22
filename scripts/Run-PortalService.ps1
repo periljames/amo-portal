@@ -21,12 +21,16 @@ public static class PortalConsoleLifetime {
  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attributes,string name);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int type,ref Limits info,uint size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job,IntPtr process);
+ [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint flags);
  static IntPtr handle;
  public static void OwnConsole() {
   handle=CreateJobObject(IntPtr.Zero,null);
   var limits=new Limits(); limits.basic.flags=0x2000;
   if(handle==IntPtr.Zero || !SetInformationJobObject(handle,9,ref limits,(uint)Marshal.SizeOf(typeof(Limits))) || !AssignProcessToJobObject(handle,Process.GetCurrentProcess().Handle))
    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+  // Keep unattended transfers alive during automatic idle sleep. Explicit
+  // user sleep/shutdown is still honoured; this resets when the owner exits.
+  SetThreadExecutionState(0x80000001);
  }
 }
 '@
@@ -35,12 +39,16 @@ $runtimeDir = Join-Path $workspaceRoot '.artifacts/portal-runtime'
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $ownerFile = Join-Path $runtimeDir "$($Service.ToLower()).json"
 @{pid=$PID; startedTicks=(Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks; workspace=$workspaceRoot; service=$Service} | ConvertTo-Json | Set-Content -LiteralPath $ownerFile -Encoding utf8
-Write-Host "AMO Portal $Service is owned by this visible window (PID $PID)." -ForegroundColor Cyan
+Write-Host "AMO Portal $Service owner PID $PID." -ForegroundColor Cyan
 Write-Host 'Ctrl+C stops the foreground service. Closing this window stops all its children.'
 Write-Host "Stop both: & '$PSScriptRoot\Stop-Portal.ps1'"
 try {
  if($Service -eq 'Backend') {
-  & (Join-Path $workspaceRoot '.venv/Scripts/python.exe') (Join-Path $PSScriptRoot 'dev_runtime.py') --env-file .env.development --no-frontend --no-reload 2>&1 | Tee-Object -FilePath (Join-Path $runtimeDir 'backend-service.log')
+  while($true) {
+   & (Join-Path $workspaceRoot '.venv/Scripts/python.exe') (Join-Path $PSScriptRoot 'dev_runtime.py') --env-file .env.development --no-frontend --no-reload 2>&1 | Tee-Object -FilePath (Join-Path $runtimeDir 'backend-service.log') -Append
+   Write-Warning "Backend supervisor exited ($LASTEXITCODE). Restarting in five seconds."
+   Start-Sleep -Seconds 5
+  }
  } else {
   Set-Location -LiteralPath (Join-Path $workspaceRoot 'frontend')
   if($FrontendMode -eq 'Shared') {
@@ -51,15 +59,22 @@ try {
    $previousRelease = Get-ChildItem -LiteralPath $releasesRoot -Directory | Where-Object { $_.Name -match '^release-[0-9]+$' } | Sort-Object Name -Descending | Select-Object -First 1
    $releaseRoot = Join-Path $releasesRoot ("release-" + [DateTime]::UtcNow.Ticks)
    New-Item -ItemType Directory -Path $releaseRoot | Out-Null
-   Get-ChildItem -LiteralPath 'dist' -Force | Copy-Item -Destination $releaseRoot -Recurse -Force
+   & robocopy.exe (Join-Path $workspaceRoot 'frontend/dist') $releaseRoot /E /COPY:DAT /R:1 /W:1 /MT:8 /NFL /NDL /NJH /NJS /NP | Out-Null
+   if($LASTEXITCODE -gt 7){ throw 'Could not copy the built frontend release.' }
    # Old tabs may still request immutable chunks from the previous release.
    if($previousRelease -and (Test-Path -LiteralPath (Join-Path $previousRelease.FullName 'assets'))) {
-    Get-ChildItem -LiteralPath (Join-Path $previousRelease.FullName 'assets') -Force | Copy-Item -Destination (Join-Path $releaseRoot 'assets') -Recurse -Force
+    # Carry forward only missing immutable files; do not overwrite this release.
+    & robocopy.exe (Join-Path $previousRelease.FullName 'assets') (Join-Path $releaseRoot 'assets') /E /XC /XN /XO /COPY:DAT /R:1 /W:1 /MT:8 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if($LASTEXITCODE -gt 7){ throw 'Could not retain the previous frontend assets.' }
    }
    @{pid=$PID; startedTicks=(Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks; workspace=$workspaceRoot; service=$Service; release=$releaseRoot} | ConvertTo-Json | Set-Content -LiteralPath $ownerFile -Encoding utf8
    Write-Host "Serving verified release: $releaseRoot" -ForegroundColor Cyan
    Write-Host 'Rebuild dist and restart this frontend to publish source changes.'
-   & npm.cmd run preview -- --host 0.0.0.0 --port 5173 --strictPort --outDir $releaseRoot
+   while($true) {
+    & (Join-Path $workspaceRoot '.venv/Scripts/python.exe') (Join-Path $PSScriptRoot 'portal_gateway.py') --root $releaseRoot --host 0.0.0.0 --port 5173
+    Write-Warning "Shared gateway exited ($LASTEXITCODE). Restarting in two seconds."
+    Start-Sleep -Seconds 2
+   }
   } else { & npm.cmd run dev -- --host 0.0.0.0 --port 5173 --strictPort }
  }
 } finally {

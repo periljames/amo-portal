@@ -1,6 +1,7 @@
 import { resolveDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 import { authHeaders } from "./auth";
 import { portalFetch, type PortalFetchInit } from "./offlineHttp";
+import { fetchFileDownload } from "./fileTransfers";
 
 export type StructuredApiError = Error & {
   status: number;
@@ -167,7 +168,7 @@ export async function apiBlob(
   path: string,
   init: PortalFetchInit = {},
 ): Promise<{ blob: Blob; filename?: string }> {
-  const response = await portalFetch(path, {
+  const { response, blob } = await fetchFileDownload(path, {
     credentials: "include",
     ...init,
     offline: { ...init.offline, cache: false, queueMutation: false },
@@ -176,7 +177,7 @@ export async function apiBlob(
   if (!response.ok) throw await parseError(response);
   const disposition = response.headers.get("content-disposition") || "";
   return {
-    blob: await response.blob(),
+    blob: blob!,
     filename: disposition ? resolveDownloadFilename(disposition, "download", response.headers.get("Content-Type")) : undefined,
   };
 }
