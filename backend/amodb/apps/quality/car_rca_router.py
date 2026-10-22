@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from amodb.database import get_db, get_read_db, get_write_db
 from . import models
 from .car_rca_models import (
-    QualityCarRcaAction, QualityCarRcaDocument, QualityCarRcaMutation, QualityCarRcaRevision
+    QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
+    QualityCarRcaMutation, QualityCarRcaRevision
 )
 from .tenant_security import (
     TenantContext, assert_quality_permission, require_quality_permission,
@@ -195,6 +196,32 @@ def _action_dict(row: QualityCarRcaAction):
     }
 
 
+def _record_action_event(db: Session, car, row: QualityCarRcaAction, *,
+                         from_state: str | None, actor_kind: str, actor_ref: str | None, reason: str):
+    db.add(QualityCarRcaActionEvent(
+        id=uuid.uuid4(), amo_id=str(car.amo_id), car_id=car.id,
+        action_id=row.id, previous_state=from_state, next_state=row.state,
+        snapshot=_action_dict(row), actor_kind=actor_kind,
+        actor_ref=actor_ref, reason=reason
+    ))
+
+
+def _action_events(db: Session, car):
+    rows = db.query(QualityCarRcaActionEvent).filter(
+        QualityCarRcaActionEvent.amo_id == str(car.amo_id),
+        QualityCarRcaActionEvent.car_id == car.id
+    ).order_by(QualityCarRcaActionEvent.created_at.desc()).limit(250).all()
+    return [
+        {
+            "id": str(row.id), "action_id": str(row.action_id),
+            "previous_state": row.previous_state, "next_state": row.next_state,
+            "actor_kind": row.actor_kind, "actor_ref": row.actor_ref,
+            "reason": row.reason, "created_at": row.created_at,
+            "snapshot": row.snapshot
+        } for row in rows
+    ]
+
+
 def _actions(db: Session, car):
     return db.query(QualityCarRcaAction).filter(
         QualityCarRcaAction.amo_id == str(car.amo_id),
@@ -221,6 +248,7 @@ def _public_projection(db: Session, car, *, include_history=False):
         "submitted_snapshot": doc.submitted_snapshot if doc else None,
         "submitted_at": doc.submitted_at if doc else None,
         "actions": [_action_dict(item) for item in _actions(db, car)],
+        "action_events": _action_events(db, car),
         "history": [
             {
                 "id": str(item.id), "revision": item.revision,
@@ -391,6 +419,12 @@ def _add_action(db, car, payload: ActionCreate, *, public: bool):
         state="PROPOSED"
     )
     db.add(row)
+    db.flush()
+    _record_action_event(
+        db, car, row, from_state=None, actor_kind="GUEST" if public else "EMPLOYEE",
+        actor_ref=row.external_owner_name if public else row.owner_user_id,
+        reason="Corrective action proposed."
+    )
     db.commit()
     return _action_dict(row)
 
@@ -428,6 +462,7 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         raise HTTPException(status_code=404, detail="Action not found for this CAR")
     if row.state not in {"PROPOSED", "ACCEPTED", "IN_PROGRESS", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Action is not open for respondent updates.")
+    previous = row.state
     row.state = payload.state
     row.completion_note = payload.completion_note.strip()
     row.evidence_references = payload.evidence_references
@@ -435,6 +470,10 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         if not row.completion_note or not row.evidence_references:
             raise HTTPException(status_code=422, detail="Completion needs a declaration and evidence.")
         row.completed_at = _utcnow()
+    _record_action_event(
+        db, car, row, from_state=previous, actor_kind="GUEST",
+        actor_ref=row.external_owner_name, reason="Respondent reported implementation progress."
+    )
     db.commit()
     return _action_dict(row)
 
@@ -466,9 +505,14 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
         raise HTTPException(status_code=409, detail="Quality must accept the RCA and corrective action plan before implementation verification.")
     if payload.state == "REJECTED" and row.state not in {"PROPOSED", "SUBMITTED"}:
         raise HTTPException(status_code=409, detail="This action is not in a reviewable state.")
+    previous = row.state
     row.state = payload.state
     row.quality_review_note = payload.reason.strip()
     row.reviewed_by_user_id = ctx.user_id
     row.reviewed_at = _utcnow()
+    _record_action_event(
+        db, car, row, from_state=previous, actor_kind="EMPLOYEE",
+        actor_ref=ctx.user_id, reason="Quality decision: " + payload.reason.strip()
+    )
     db.commit()
     return _action_dict(row)
