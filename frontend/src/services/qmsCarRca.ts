@@ -19,6 +19,14 @@ export interface CarRcaInvestigation {
   nodes: CarRcaNode[];
   context: Record<string, unknown>;
 }
+export interface CarRcaEffectivenessProposal {
+  expected_result: string;
+  verification_method: string;
+  measurable_success_criterion: string;
+  observation_period: string;
+  proposed_review_date: string | null;
+  supporting_records: string[];
+}
 export interface CarRcaDocument {
   version: number;
   problem_statement: string;
@@ -27,6 +35,7 @@ export interface CarRcaDocument {
   supported_cause_ids: string[];
   conclusion_evidence_references: string[];
   evidence_notes: string;
+  effectiveness_proposal: CarRcaEffectivenessProposal | null;
 }
 export type CarRcaActionState = "PROPOSED" | "ACCEPTED" | "IN_PROGRESS" | "SUBMITTED" | "VERIFIED" | "REJECTED" | "CANCELLED";
 export interface CarRcaAction {
@@ -74,6 +83,7 @@ export type CarRcaActionCreate = Pick<CarRcaAction, "kind" | "description" | "ca
 export const emptyCarRca = (problem_statement = ""): CarRcaDocument => ({
   version: 1, problem_statement, investigations: [], conclusion: "",
   supported_cause_ids: [], conclusion_evidence_references: [], evidence_notes: "",
+  effectiveness_proposal: null,
 });
 
 const publicPath = (token: string, path: string) => `/quality/cars/invite/${encodeURIComponent(token)}${path}`;
@@ -111,6 +121,12 @@ export const reviseCarRcaInviteAction = (token: string, actionId: string, payloa
   publicRcaRequest<CarRcaAction>(token, `/corrective-actions/${encodeURIComponent(actionId)}`, "PUT", payload);
 export const progressCarRcaInviteAction = (token: string, actionId: string, payload: { state: "IN_PROGRESS" | "SUBMITTED"; completion_note: string; evidence_references: string[] }) =>
   publicRcaRequest<CarRcaAction>(token, `/corrective-actions/${encodeURIComponent(actionId)}`, "PATCH", payload);
+
+export const adoptCarEffectivenessProposal = (amoCode: string, carId: string, responsible_reviewer_user_id: string, reason: string) =>
+  apiRequest<{ case_id: string; case_ref: string; plan_id: string; planned_review_date: string; reviewer_user_id: string }>(
+    qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/effectiveness-plan`),
+    { method: "POST", body: JSON.stringify({ responsible_reviewer_user_id, reason }), cacheTtlMs: 0 },
+  );
 
 export const getCarRcaInternal = (amoCode: string, carId: string) =>
   apiRequest<CarRcaProjection>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/investigation`), { cacheTtlMs: 0, timeoutMs: 20000 });
