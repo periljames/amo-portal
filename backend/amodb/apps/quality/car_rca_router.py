@@ -12,7 +12,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db, get_read_db, get_write_db
@@ -51,6 +51,13 @@ class CauseNode(BaseModel):
     evidence_references: list[str] = Field(default_factory=list, max_length=30)
     rationale: str = Field(default="", max_length=4000)
 
+    @field_validator("evidence_references")
+    @classmethod
+    def check_evidence_references(cls, references: list[str]) -> list[str]:
+        if any(not str(ref).strip() or len(ref) > 500 for ref in references):
+            raise ValueError("Evidence references must be nonblank and at most 500 characters each.")
+        return references
+
 
 class Investigation(BaseModel):
     id: str = Field(min_length=1, max_length=80)
@@ -61,6 +68,23 @@ class Investigation(BaseModel):
     version: int = Field(default=1, ge=1, le=100)
     nodes: list[CauseNode] = Field(default_factory=list, max_length=100)
     context: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("context")
+    @classmethod
+    def bounded_context(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(value) > 40 or len(json.dumps(value, default=str)) > 40000:
+            raise ValueError("Analysis metadata exceeds the controlled size limit.")
+        if "frequencies" in value:
+            rows = value["frequencies"]
+            if not isinstance(rows, list) or len(rows) > 200:
+                raise ValueError("Pareto must include at most 200 documented categories.")
+            for row in rows:
+                if not isinstance(row, dict) or not str(row.get("source_ref", "")).strip():
+                    raise ValueError("Pareto source references are required for each category.")
+                count = row.get("count")
+                if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > 1_000_000:
+                    raise ValueError("Pareto frequencies must be positive whole numbers.")
+        return value
 
 
 class EffectivenessProposal(BaseModel):
@@ -82,6 +106,13 @@ class InvestigationDocument(BaseModel):
     conclusion_evidence_references: list[str] = Field(default_factory=list, max_length=60)
     evidence_notes: str = Field(default="", max_length=8000)
     effectiveness_proposal: EffectivenessProposal | None = None
+
+    @field_validator("conclusion_evidence_references")
+    @classmethod
+    def check_conclusion_sources(cls, references: list[str]) -> list[str]:
+        if any(not str(ref).strip() or len(ref) > 500 for ref in references):
+            raise ValueError("Conclusion references must be nonblank and at most 500 characters each.")
+        return references
 
     @model_validator(mode="after")
     def validate_graphs(self):
