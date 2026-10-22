@@ -28,7 +28,7 @@ import {
   type CarDependencyType,
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
-import { getCarRcaInternal } from "../../services/qmsCarRca";
+import { adoptCarEffectivenessProposal, getCarRcaInternal } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
 const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -124,6 +124,10 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [dependencyDrafts, setDependencyDrafts] = useState<Record<string, DependencyDraft>>({});
+  const [effectivenessReviewer, setEffectivenessReviewer] = useState("");
+  const [effectivenessReason, setEffectivenessReason] = useState("");
+  const [effectivenessAdopting, setEffectivenessAdopting] = useState(false);
+  const [effectivenessResult, setEffectivenessResult] = useState<{ case_ref: string; case_id: string } | null>(null);
 
   const responsesQuery = useQuery({
     queryKey: ["qms-car-control-responses", carId],
@@ -145,6 +149,24 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     queryFn: () => getCarRcaInternal(amoCode, carId),
     staleTime: 10_000,
   });
+
+  const proposal = rcaQuery.data?.submitted_snapshot?.investigation.effectiveness_proposal;
+  const adoptEffectiveness = async () => {
+    if (!effectivenessReviewer || effectivenessReason.trim().length < 8 || effectivenessAdopting) return;
+    setEffectivenessAdopting(true);
+    setLocalError(null);
+    setEffectivenessResult(null);
+    try {
+      const next = await adoptCarEffectivenessProposal(amoCode, carId, effectivenessReviewer, effectivenessReason.trim());
+      setEffectivenessResult({ case_id: next.case_id, case_ref: next.case_ref });
+      setLocalMessage("Independent effectiveness verification plan established. Quality will review observations before closure.");
+      void queryClient.invalidateQueries({ queryKey: ["qms-car-control", amoCode, carId] });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Could not establish the governed effectiveness plan.");
+    } finally {
+      setEffectivenessAdopting(false);
+    }
+  };
 
   useEffect(() => {
     const next: Record<string, DependencyDraft> = {};
@@ -485,6 +507,41 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         ) : <p className="muted">No auditee/responsible-manager response has been submitted.</p>}
       </section>
 
+      {proposal && <section className="card" aria-labelledby="car-effectiveness-proposal-heading">
+        <div className="card__header">
+          <div><h2 id="car-effectiveness-proposal-heading">Proposed independent effectiveness verification</h2>
+            <p>The auditee's suggested measure is not an approved verification plan. Quality must nominate the reviewer and adopt the plan independently.</p></div>
+        </div>
+        <dl className="case-key-values">
+          <div><dt>Expected outcome</dt><dd>{proposal.expected_result || "Not provided"}</dd></div>
+          <div><dt>Measurable criterion</dt><dd>{proposal.measurable_success_criterion || "Not provided"}</dd></div>
+          <div><dt>Verification method</dt><dd>{proposal.verification_method || "Not provided"}</dd></div>
+          <div><dt>Observation period</dt><dd>{proposal.observation_period || "Not provided"}</dd></div>
+          <div><dt>Proposed review date</dt><dd>{proposal.proposed_review_date || "Not provided"}</dd></div>
+        </dl>
+        {proposal.supporting_records?.length ? <ul>{proposal.supporting_records.map((source, index) => <li key={index}>{source}</li>)}</ul> : null}
+        {canManage && !effectivenessResult && <div className="form-grid">
+          <label>Independent effectiveness reviewer
+            <select className="input" value={effectivenessReviewer} onChange={e => setEffectivenessReviewer(e.target.value)}
+              disabled={effectivenessAdopting}>
+              <option value="">Select an authorized reviewer</option>
+              {assignees.filter(user => user.id !== control.car.assigned_to_user_id).map(user =>
+                <option key={user.id} value={user.id}>{personDisplay(user.full_name || user.email)}</option>)}
+            </select>
+          </label>
+          <label>Quality adoption and independence rationale
+            <textarea className="input" rows={2} value={effectivenessReason} maxLength={4000}
+              onChange={e => setEffectivenessReason(e.target.value)} disabled={effectivenessAdopting}/>
+          </label>
+          <button className="btn btn--primary" type="button" disabled={effectivenessAdopting || !effectivenessReviewer || effectivenessReason.trim().length < 8}
+            onClick={() => void adoptEffectiveness()}>
+            {effectivenessAdopting ? "Establishing plan…" : "Adopt governed effectiveness plan"}
+          </button>
+        </div>}
+        {effectivenessResult && <p role="status">Assurance Case {effectivenessResult.case_ref} created.
+          <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality?workspace=assurance`)}>
+            Open Assurance Cases</button></p>}
+      </section>}
       <section className="card" aria-labelledby="car-evidence-heading">
         <div className="card__header"><div><h2 id="car-evidence-heading">Objective evidence</h2><p>Upload, index, link and retrieve the evidence used to accept implementation and closure.</p></div><span className="badge badge--neutral">{attachments.length} file{attachments.length === 1 ? "" : "s"}</span></div>
         {canManage ? <div className="form-grid"><label>Link new evidence to milestone<select className="input" value={evidenceMilestoneId} onChange={(event) => setEvidenceMilestoneId(event.target.value)}><option value="">CAR-wide evidence</option>{control.milestones.map((item) => <option key={item.id} value={item.id}>{item.phase_order}. {item.title}</option>)}</select></label><label>Upload evidence files<input className="input" type="file" multiple disabled={uploadBusy} onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ""; }} /></label><div className="muted">Use the underlying evidence record for documents, photos, spreadsheets, certificates, work orders and other accepted proof. Filename, size and upload time remain visible below.</div></div> : null}
