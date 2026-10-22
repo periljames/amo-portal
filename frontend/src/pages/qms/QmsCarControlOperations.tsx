@@ -28,6 +28,7 @@ import {
   type CarDependencyType,
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
+import CarInviteGovernance from "../../components/QMS/carRca/CarInviteGovernance";
 import { adoptCarEffectivenessProposal, getCarRcaInternal, listCarRcaParetoSnapshots } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
@@ -568,6 +569,8 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
           <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality?workspace=assurance`)}>
             Open Assurance Cases</button></p>}
       </section>}
+      <CarInviteGovernance amoCode={amoCode} carId={carId} canManage={canManage}
+        onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["qms-car-control-source", carId] }); }} />
       <section className="card" aria-labelledby="car-evidence-heading">
         <div className="card__header"><div><h2 id="car-evidence-heading">Objective evidence</h2><p>Upload, index, link and retrieve the evidence used to accept implementation and closure.</p></div><span className="badge badge--neutral">{attachments.length} file{attachments.length === 1 ? "" : "s"}</span></div>
         {canManage ? <div className="form-grid"><label>Link new evidence to milestone<select className="input" value={evidenceMilestoneId} onChange={(event) => setEvidenceMilestoneId(event.target.value)}><option value="">CAR-wide evidence</option>{control.milestones.map((item) => <option key={item.id} value={item.id}>{item.phase_order}. {item.title}</option>)}</select></label><label>Upload evidence files<input className="input" type="file" multiple disabled={uploadBusy} onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ""; }} /></label><div className="muted">Use the underlying evidence record for documents, photos, spreadsheets, certificates, work orders and other accepted proof. Filename, size and upload time remain visible below.</div></div> : null}
