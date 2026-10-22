@@ -77,6 +77,14 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
             </div>}
           </td></tr>)}</tbody>
       </table></div>
+      {data.action_events.length > 0 && <details>
+        <summary>Attributable action implementation and Quality decisions ({data.action_events.length})</summary>
+        <ol>{data.action_events.map(event => <li key={event.id}>
+          <strong>{event.previous_state || "NEW"} → {event.next_state}</strong>
+          <p>{event.actor_kind}: {event.actor_ref || "Unattributed"} · {new Date(event.created_at).toLocaleString()}</p>
+          <p>{event.reason}</p>
+        </li>)}</ol>
+      </details>}
       {data.history.length > 0 && <details>
         <summary>Attributed investigation revisions ({data.history.length})</summary>
         <ol>{data.history.map(event => <li key={event.id}><strong>{event.event_type} · r{event.revision}</strong>
