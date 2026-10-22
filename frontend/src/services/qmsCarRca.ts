@@ -142,3 +142,32 @@ export const reviewCarRcaAction = (amoCode: string, carId: string, actionId: str
   apiRequest<CarRcaAction>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/corrective-actions/${encodeURIComponent(actionId)}/review`), {
     method: "PATCH", body: JSON.stringify({ state, reason }), cacheTtlMs: 0,
   });
+
+export type CarRcaParetoSnapshot = {
+  id: string;
+  car_id: string;
+  source_kind: "QMS_AUDIT_FINDINGS";
+  filters: { start: string; end: string; group_by: "severity" | "finding_type" | "requirement"; cohort_definition: string };
+  population: string;
+  sample_size: number;
+  categories: Array<{ category: string; count: number; share_percent: number; cumulative_percent: number }>;
+  source_references: Array<{ id: string; audit_id: string; reference: string | null; audit_reference: string | null; created_at: string | null; requirement: string | null; severity: string; finding_type: string }>;
+  source_reference_count: number;
+  source_references_truncated: boolean;
+  created_at: string;
+  created_by_user_id: string;
+  fingerprint: string;
+};
+
+export const listCarRcaParetoSnapshots = (amoCode: string, carId: string) =>
+  apiRequest<CarRcaParetoSnapshot[]>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/pareto-snapshots`), {
+    cacheTtlMs: 0, timeoutMs: 20000,
+  });
+
+export const saveCarRcaParetoSnapshot = (
+  amoCode: string, carId: string,
+  payload: { start: string; end: string; group_by: "severity" | "finding_type" | "requirement" },
+) =>
+  apiRequest<CarRcaParetoSnapshot>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/pareto-snapshots`), {
+    method: "POST", body: JSON.stringify(payload), cacheTtlMs: 0, timeoutMs: 45000,
+  });
