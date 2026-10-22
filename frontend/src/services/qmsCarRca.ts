@@ -57,6 +57,7 @@ export interface CarRcaProjection {
   submitted_snapshot: { form: Record<string, string>; investigation: CarRcaDocument } | null;
   submitted_at: string | null;
   actions: CarRcaAction[];
+  action_events: Array<{ id: string; action_id: string; previous_state: string | null; next_state: string; actor_kind: string; actor_ref: string | null; reason: string; created_at: string; snapshot: unknown }>;
   history: Array<{ id: string; revision: number; event_type: string; actor_kind: string; actor_ref: string | null; reason: string; created_at: string; snapshot: unknown }>;
 }
 export type CarRcaSavePayload = {
@@ -106,6 +107,8 @@ async function publicRcaRequest<T>(token: string, path: string, method: "GET" | 
 export const getCarRcaInvite = (token: string) => publicRcaRequest<CarRcaProjection>(token, "/draft");
 export const saveCarRcaInvite = (token: string, payload: CarRcaSavePayload) => publicRcaRequest<CarRcaProjection>(token, "/draft", "PUT", payload);
 export const addCarRcaInviteAction = (token: string, payload: CarRcaActionCreate) => publicRcaRequest<CarRcaAction>(token, "/corrective-actions", "POST", payload);
+export const reviseCarRcaInviteAction = (token: string, actionId: string, payload: CarRcaActionCreate) =>
+  publicRcaRequest<CarRcaAction>(token, `/corrective-actions/${encodeURIComponent(actionId)}`, "PUT", payload);
 export const progressCarRcaInviteAction = (token: string, actionId: string, payload: { state: "IN_PROGRESS" | "SUBMITTED"; completion_note: string; evidence_references: string[] }) =>
   publicRcaRequest<CarRcaAction>(token, `/corrective-actions/${encodeURIComponent(actionId)}`, "PATCH", payload);
 
