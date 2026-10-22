@@ -19,7 +19,7 @@ class QualityCarRcaDocument(Base):
     __tablename__ = "quality_car_rca_documents"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
     revision = Column(Integer, nullable=False, default=0)
     draft = Column(JSON, nullable=False, default=dict)
     submitted_revision = Column(Integer, nullable=True)
@@ -37,7 +37,7 @@ class QualityCarRcaRevision(Base):
     __tablename__ = "quality_car_rca_revisions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
     document_id = Column(UUID(as_uuid=True), ForeignKey("quality_car_rca_documents.id", ondelete="RESTRICT"), nullable=False)
     revision = Column(Integer, nullable=False)
     event_type = Column(String(32), nullable=False)
@@ -56,7 +56,7 @@ class QualityCarRcaAction(Base):
     __tablename__ = "quality_car_rca_actions"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
     sequence_no = Column(Integer, nullable=False)
     kind = Column(String(20), nullable=False)
     description = Column(Text, nullable=False)
@@ -87,7 +87,7 @@ class QualityCarRcaMutation(Base):
     __tablename__ = "quality_car_rca_mutations"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
     mutation_key = Column(String(100), nullable=False)
     fingerprint = Column(String(64), nullable=False)
     result_revision = Column(Integer, nullable=False)
@@ -102,7 +102,7 @@ class QualityCarRcaActionEvent(Base):
     __tablename__ = "quality_car_rca_action_events"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False)
-    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(UUID(as_uuid=True), ForeignKey("quality_cars.id", ondelete="RESTRICT"), nullable=False)
     action_id = Column(UUID(as_uuid=True), ForeignKey("quality_car_rca_actions.id", ondelete="RESTRICT"), nullable=False)
     previous_state = Column(String(24), nullable=True)
     next_state = Column(String(24), nullable=False)
