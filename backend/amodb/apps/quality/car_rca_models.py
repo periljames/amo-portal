@@ -136,3 +136,15 @@ class QualityCarRcaParetoSnapshot(Base):
         Index("ix_quality_car_rca_pareto_history", "amo_id", "car_id", "created_at"),
         CheckConstraint("sample_size >= 0", name="ck_quality_car_rca_pareto_sample"),
     )
+
+
+class QualityCarRcaRollout(Base):
+    """Migration-time boundary: older CARs retain their original response contract.
+
+    One global non-sensitive timestamp separates existing issued CARs from
+    newly issued governed CARs. A historical free-text response is never
+    retroactively converted into invented causal statements.
+    """
+    __tablename__ = "quality_car_rca_rollout"
+    id = Column(Integer, primary_key=True)
+    activated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
