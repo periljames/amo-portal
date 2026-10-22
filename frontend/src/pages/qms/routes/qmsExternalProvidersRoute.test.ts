@@ -23,7 +23,7 @@ describe("External Providers QMS route ownership", () => {
   });
 
   it("recognises every provider lifecycle detail tab before the QMS not-found guard", () => {
-    for (const tab of ["overview", "approval", "contracts", "evidence", "monitoring"]) {
+    for (const tab of ["overview", "approval", "contracts", "evidence", "monitoring", "qualification"]) {
       const path = `/maintenance/SAF/quality/suppliers/17/${tab}`;
       expect(classifyQmsPath(path), path).toMatchObject({
         kind: "known",

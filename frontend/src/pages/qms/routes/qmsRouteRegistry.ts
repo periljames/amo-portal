@@ -58,6 +58,7 @@ const PROVIDER_WORKSPACE_TAILS = [
   "contracts",
   "evidence",
   "monitoring",
+  "qualification",
 ] as const;
 
 const MODULES: readonly QmsModuleRoute[] = [
@@ -275,7 +276,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "administration",
     defaultView: "general",
     validViews: ["general", "workflows", "numbering", "notifications", "retention"],
-    componentType: "canonical",
+    componentType: "specialist",
   },
   {
     id: "aerodoc",

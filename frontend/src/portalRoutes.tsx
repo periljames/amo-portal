@@ -160,6 +160,7 @@ const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
 const ExternalProviderPortalPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderPortalPage"));
 const ExternalPartnerPage = lazyDefault(() => import("./features/externalPartner/ExternalPartnerPage"));
 const ExternalProviderQualityPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderQualityPage"));
+const QmsSettingsPage = lazyDefault(qmsPageLoaders.settings);
 const ExternalProviderDmsPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderDmsPage"));
 const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
 const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
@@ -858,6 +859,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/settings/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsSettingsPage /></RequireQmsPermission></RequireAuth>} />
 
       {/* Provider scope is a governed cross-functional read surface. Technical
           and Safety managers may inspect supplier qualification without the

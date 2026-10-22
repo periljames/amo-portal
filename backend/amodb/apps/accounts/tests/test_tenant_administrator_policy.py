@@ -96,6 +96,31 @@ def grant(db, creator, target="delegate", **overrides):
     return governance.request_admin_grant("tenant-a", payload, current_user=creator, db=db)
 
 
+@pytest.mark.parametrize("period,hours", [("FOUR_HOURS", 4), ("TWENTY_FOUR_HOURS", 24), ("ONE_WEEK", 168)])
+def test_standing_admin_view_is_explicit_timed_and_login_scoped(governed_tenant, period, hours):
+    db, tenant, users = governed_tenant
+    user = users["admin"]
+    assert not governance._state(db, amo=tenant, user=user)["active"]
+    before = datetime.now(timezone.utc)
+    state = governance.activate_admin_profile("tenant-a", current_user=user, db=db, payload=governance.AdminProfileActivation(period=period))
+    assert state["active"] and state["eligible"] and user.is_amo_admin
+    assert abs((governance._as_utc(state["expires_at"]) - before).total_seconds() - hours * 3600) < 5
+    assert active_admin_profile_session(db, user, tenant)
+    user.auth_session_id = "another-login"
+    assert not active_admin_profile_session(db, user, tenant)
+    user.auth_session_id = "session-admin"
+    governance.deactivate_admin_profile("tenant-a", current_user=user, db=db)
+    assert not active_admin_profile_session(db, user, tenant)
+    assert user.is_amo_admin and is_standing_admin(user)
+
+
+def test_midnight_uses_tenant_timezone_and_handles_dst():
+    now = datetime(2026, 11, 1, 4, 0, tzinfo=timezone.utc)
+    assert governance._activation_expiry(now, "UNTIL_MIDNIGHT", "America/New_York") == datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)
+    assert governance._activation_expiry(now, "UNTIL_MIDNIGHT", "Africa/Nairobi") == datetime(2026, 11, 1, 21, 0, tzinfo=timezone.utc)
+    assert governance.AdminProfileActivation().period == "FOUR_HOURS"
+
+
 def test_direct_delegation_expires_and_never_becomes_a_standing_appointment(governed_tenant):
     db, tenant, users = governed_tenant
     result = grant(db, users["admin"])
@@ -159,7 +184,9 @@ def test_platform_appointment_is_permanent_and_tenant_scoped(governed_tenant):
     assert is_standing_admin(users["delegate"])
     assert not is_tenant_admin(users["delegate"], "tenant-b")
     state = governance.admin_profile_state("tenant-a", users["delegate"], db)
-    assert state["active"] and state["grant_type"] == "PERMANENT" and state["expires_at"] is None
+    assert not state["active"] and state["eligible"] and state["grant_type"] == "PERMANENT"
+    state = governance.activate_admin_profile("tenant-a", users["delegate"], db)
+    assert state["active"] and state["expires_at"] is not None
     governance.remove_administrator("tenant-a", "delegate", governance.AdminRemovalDecision(), users["superuser"], db)
     assert not active_admin_profile_session(db, users["delegate"], tenant)
 

@@ -183,8 +183,8 @@ function ProviderCreatePanel({ amoCode, onCreated, onClose }: {
       </div>
       {error && <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error}</div>}
       <form className="qms-provider-form" onSubmit={submit}>
-        <label>Provider code<input required value={form.supplier_code} onChange={(e) => setForm({ ...form, supplier_code: e.target.value })} /></label>
-        <label className="is-wide">Legal name<input required value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} /></label>
+        <label>Provider code<input required minLength={2} maxLength={64} spellCheck={false} value={form.supplier_code} onChange={(e) => setForm({ ...form, supplier_code: e.target.value })} /></label>
+        <label className="is-wide">Legal name<input required minLength={2} maxLength={255} value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} /></label>
         <label>Trading name<input value={form.trading_name} onChange={(e) => setForm({ ...form, trading_name: e.target.value })} /></label>
         <label>Provider type<select value={form.provider_kind} onChange={(e) => setForm({ ...form, provider_kind: e.target.value as ProviderKind })}>{PROVIDER_KINDS.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select></label>
         <label>Risk<select value={form.risk_level} onChange={(e) => setForm({ ...form, risk_level: e.target.value as ProviderRisk })}>{PROVIDER_RISKS.map((item) => <option key={item}>{item}</option>)}</select></label>

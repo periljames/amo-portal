@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -19,7 +20,7 @@ from .tenant_authority import is_standing_admin, is_tenant_admin, tenant_member,
 # Included by the canonical /accounts/admin router. The resulting API surface is
 # /accounts/admin/admin-profile/{amo_code}/...
 router = APIRouter(prefix="/admin-profile", tags=["admin_profile"])
-SESSION_DURATION_MINUTES = 30
+SESSION_DURATION_MINUTES = 240
 REQUIRED_APPROVALS = 1
 REQUIRED_SCHEMA_TABLES = frozenset(
     {
@@ -39,6 +40,22 @@ class AdminGrantRequest(BaseModel):
     valid_from: datetime | None = None
     valid_until: datetime | None = None
     reason: str = Field(min_length=8, max_length=1000)
+
+
+class AdminProfileActivation(BaseModel):
+    period: Literal["FOUR_HOURS", "UNTIL_MIDNIGHT", "TWENTY_FOUR_HOURS", "ONE_WEEK"] = "FOUR_HOURS"
+
+
+def _activation_expiry(now: datetime, period: str, tenant_timezone: str | None) -> datetime:
+    if period == "UNTIL_MIDNIGHT":
+        try:
+            local_zone = ZoneInfo(tenant_timezone or "UTC")
+        except (ZoneInfoNotFoundError, ValueError):
+            local_zone = timezone.utc
+        local = now.astimezone(local_zone)
+        return (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    hours = {"FOUR_HOURS": 4, "TWENTY_FOUR_HOURS": 24, "ONE_WEEK": 168}[period]
+    return now + timedelta(hours=hours)
 
 
 class AdminGrantDecision(BaseModel):
@@ -284,15 +301,6 @@ def _active_session(
 def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]:
     _ensure_schema(db)
     implicit = _is_implicit_admin(user)
-    if implicit:
-        return {
-            "eligible": True,
-            "active": True,
-            "session_id": None,
-            "expires_at": None,
-            "grant_type": "PERMANENT",
-            "reason": "Standing AMO administrator assigned by the platform superuser",
-        }
     now = _utcnow()
     auth_session_id = _auth_session_id(user)
     db.execute(
@@ -317,23 +325,23 @@ def _state(db: Session, *, amo: models.AMO, user: models.User) -> dict[str, Any]
         """),
         {"now": now, "amo_id": str(amo.id)},
     )
-    grant = _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
+    grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(user.id), now=now)
     session = _active_session(
         db,
         amo_id=str(amo.id),
         user_id=str(user.id),
         auth_session_id=auth_session_id,
-        implicit_admin=False,
+        implicit_admin=implicit,
         now=now,
     )
-    eligible = grant is not None
+    eligible = implicit or grant is not None
     return {
         "eligible": eligible,
         "active": bool(session),
         "session_id": session.get("id") if session else None,
         "expires_at": session.get("expires_at") if session else None,
-        "grant_type": grant.get("grant_type") if grant else None,
-        "reason": grant.get("reason") if grant else None,
+        "grant_type": "PERMANENT" if implicit else grant.get("grant_type") if grant else None,
+        "reason": "Standing AMO administrator" if implicit else grant.get("reason") if grant else None,
     }
 
 
@@ -374,19 +382,16 @@ def activate_admin_profile(
     amo_code: str,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    payload: AdminProfileActivation | None = None,
 ) -> dict[str, Any]:
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
-    if _is_implicit_admin(current_user):
-        # Standing authority is assigned by the platform superuser and is
-        # already active. Do not create a misleading temporary session row.
-        db.commit()
-        return _state(db, amo=amo, user=current_user)
+    implicit = _is_implicit_admin(current_user)
     now = _utcnow()
     auth_session_id = _auth_session_id(current_user)
-    grant = _eligible_grant(db, amo_id=str(amo.id), user_id=str(current_user.id), now=now)
-    if not grant:
+    grant = None if implicit else _eligible_grant(db, amo_id=str(amo.id), user_id=str(current_user.id), now=now)
+    if not implicit and not grant:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No approved administrator grant is active for this user.")
 
     db.execute(
@@ -405,7 +410,7 @@ def activate_admin_profile(
             "auth_session_id": auth_session_id,
         },
     )
-    expires_at = now + timedelta(minutes=SESSION_DURATION_MINUTES)
+    expires_at = _activation_expiry(now, (payload or AdminProfileActivation()).period, getattr(amo, "time_zone", None))
     grant_valid_until = _as_utc(grant.get("valid_until")) if grant else None
     if grant_valid_until and grant_valid_until < expires_at:
         expires_at = grant_valid_until
@@ -454,11 +459,6 @@ def deactivate_admin_profile(
     amo = _resolve_amo(db, amo_code)
     _assert_tenant_member(current_user, amo)
     _ensure_schema(db)
-    if _is_implicit_admin(current_user):
-        # A user cannot deactivate a standing platform grant from inside the
-        # tenant. The platform superuser must revoke the overlay explicitly.
-        db.commit()
-        return _state(db, amo=amo, user=current_user)
     now = _utcnow()
     auth_session_id = _auth_session_id(current_user)
     db.execute(

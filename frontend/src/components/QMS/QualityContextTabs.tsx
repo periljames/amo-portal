@@ -18,6 +18,7 @@ import {
 import { qmsBasePath, qmsModulePath, qmsRecordPath, qmsRouteWorkspace, QMS_ROUTE_REGISTRY, AUDIT_ASSURANCE_DESTINATIONS } from "../../pages/qms/routes/qmsRouteRegistry";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import { qmsWorkspaceNavigationItems, QMS_WORKSPACES, type QmsWorkspaceId } from "../../pages/qms/routes/qmsWorkspaceRegistry";
+import QmsControlsMenu from "./QmsControlsMenu";
 
 type ContextTab = {
   id: string;
@@ -163,6 +164,14 @@ const QualityContextTabs: React.FC = () => {
   const route = useMemo(() => parseQualityRoute(location.pathname), [location.pathname]);
   const qualityActive = Boolean(route);
   const [mountTarget, setMountTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!mountTarget) return;
+    const main = mountTarget.closest<HTMLElement>(".tenant-shell__main");
+    const measure = () => main?.style.setProperty("--qms-context-height", `${mountTarget.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(measure);
+    observer.observe(mountTarget); measure();
+    return () => { observer.disconnect(); main?.style.removeProperty("--qms-context-height"); };
+  }, [mountTarget]);
 
   useEffect(() => {
     if (!qualityActive) {
@@ -247,7 +256,9 @@ const QualityContextTabs: React.FC = () => {
     ? "Audits"
     : isCarRecord
       ? `CAR ${safeRecordKey}`
-      : workspaceTitle(activeWorkspaceId(route, location.pathname, location.search), moduleSegment);
+      : QMS_ROUTE_REGISTRY.some(module => module.segment === moduleSegment && ["control", "administration"].includes(module.section))
+        ? moduleTitle(moduleSegment)
+        : workspaceTitle(activeWorkspaceId(route, location.pathname, location.search), moduleSegment);
 
   const currentWorkspace = activeWorkspaceId(route, location.pathname, location.search);
   const defaultWorkPath = `${route.basePath}/inbox/assigned-to-me`;
@@ -299,11 +310,7 @@ const QualityContextTabs: React.FC = () => {
         </span>
         <span>
           <small>{calendarSurface || currentWorkspace === "assurance" ? "Quality" : "Quality assurance"}</small>
-          {isAuditRecord ? (
-            <span className="quality-context-bar__title">{title}</span>
-          ) : (
-            <h1 className="quality-context-bar__title">{title}</h1>
-          )}
+          <span className="quality-context-bar__title">{title}</span>
         </span>
       </div>
 
@@ -312,6 +319,7 @@ const QualityContextTabs: React.FC = () => {
       </nav>
 
       <div className="quality-context-bar__actions">
+        <QmsControlsMenu amoCode={route.amoCode} />
         <span className="quality-context-bar__live" title="Quality data refreshes while the workspace is active">
           <RefreshCw size={13} aria-hidden="true" /> Live
         </span>

@@ -62,12 +62,10 @@ def assert_administrator_removal_allowed(db, *, actor: object, user: object) -> 
 
 
 def active_admin_profile_session(db, user, amo) -> bool:
-    """Return whether the user has standing or session-scoped admin authority.
+    """Check timed Admin View for this login, retaining the user's appointment.
 
-    Standing AMO administrators are appointed and revoked by the platform
-    superuser, so their authority does not depend on a temporary activation
-    row. Approved delegates use rows linked to a currently active grant;
-    concurrent logins for the same delegated account never share elevation.
+    Standing appointments may activate grantless sessions; delegates must retain
+    their approved grant. Concurrent logins never share activation.
     """
     from datetime import datetime, timezone
     from sqlalchemy import text
@@ -75,8 +73,6 @@ def active_admin_profile_session(db, user, amo) -> bool:
 
     if not tenant_member(user, amo.id):
         return False
-    if is_standing_admin(user):
-        return True
 
     auth_session_id = str(
         getattr(user, "auth_session_id", None)
@@ -120,7 +116,7 @@ def active_admin_profile_session(db, user, amo) -> bool:
                     "amo_id": str(amo.id),
                     "user_id": str(user.id),
                     "auth_session_id": auth_session_id,
-                    "implicit_admin": False,
+                    "implicit_admin": is_standing_admin(user),
                     "now": datetime.now(timezone.utc),
                 },
             ).first() is not None

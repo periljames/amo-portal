@@ -20,6 +20,7 @@ import type { ColDef } from "ag-grid-community";
 import type { QmsSourceError } from "../../types/qms";
 import { classifyQmsPath, qmsBasePath, qmsModulePath, type QmsModuleRoute } from "./routes/qmsRouteRegistry";
 import "../../styles/qms/register.css";
+import { QMS_WORKSPACE_PURPOSE, qmsViewLabel } from "./qmsWorkspaceCopy";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type QmsRow = Record<string, unknown>;
@@ -77,8 +78,8 @@ function formatValue(value: unknown): string {
   if (typeof value === "number") return Intl.NumberFormat().format(value);
   if (typeof value === "object") {
     try {
-      const serialised = JSON.stringify(value);
-      return serialised.length > 100 ? `${serialised.slice(0, 97)}…` : serialised;
+      if (Array.isArray(value) && value.every(item => ["string", "number"].includes(typeof item))) return value.join(" · ");
+      return "Open record for details";
     } catch {
       return String(value);
     }
@@ -315,7 +316,8 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
   const content = (
     <div className={`qms-register-page qms-register-page--${module.id}`}>
-      {!embedded ? <PageHeader compact eyebrow="Quality Management System" title={module.label} subtitle={isInbox ? `${viewLabel(view)}. Prioritise your assigned approvals, reviews, verifications and assurance work.` : `${viewLabel(view)} workspace. Results are server-bounded; open the governed record to investigate or act.`} breadcrumbs={[{ label: "Quality", to: qmsBasePath(amoCode) }, { label: module.navigationLabel }, { label: viewLabel(view) }]} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
+      {!embedded ? <PageHeader compact eyebrow="Quality Management System" title={module.label} subtitle={QMS_WORKSPACE_PURPOSE[module.id] || `Review ${module.navigationLabel.toLowerCase()} and open a record to act.`} breadcrumbs={[{ label: "Quality", to: qmsBasePath(amoCode) }, { label: module.navigationLabel }, { label: viewLabel(view) }]} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
+      {!embedded && <nav className="qms-register-views" aria-label={`${module.label} views`}>{module.validViews.filter(candidate => candidate !== "new").map(candidate => <Link key={candidate} to={qmsModulePath(amoCode, module.id, candidate)} aria-current={view === candidate ? "page" : undefined}>{qmsViewLabel(candidate)}</Link>)}</nav>}
 
       {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></> : null}
       {controlledNew ? (

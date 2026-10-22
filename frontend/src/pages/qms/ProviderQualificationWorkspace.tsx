@@ -1,6 +1,9 @@
 import React,{useCallback,useEffect,useState} from "react";
 import {apiRequest} from "../../services/apiClient";
 import {getCachedUser} from "../../services/auth";
+import TextItemList from "../../components/forms/TextItemList";
+import StructuredItemList from "../../components/forms/StructuredItemList";
+import { listSupplierEvaluationTemplates, type SupplierEvaluationTemplate } from "../../services/supplierGovernance";
 import "./provider-qualification.css";
 
 type Overview={cases:Array<{id:string;category:string;status:string;case_kind:string;version:number}>;
@@ -33,6 +36,14 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const safety=role==="SAFETY_MANAGER";
   const [data,setData]=useState<Overview|null>(null);
   const [policies,setPolicies]=useState<Policy[]>([]);
+  const [templates, setTemplates] = useState<SupplierEvaluationTemplate[]>([]);
+  const [templateError, setTemplateError] = useState("");
+  useEffect(() => {
+    if (!manager) return;
+    let active = true;
+    void listSupplierEvaluationTemplates(amoCode, true).then(items => { if (active) setTemplates(items); }).catch(() => { if (active) setTemplateError("Evaluation templates could not be loaded. Retry by reopening this provider."); });
+    return () => { active = false; };
+  }, [amoCode, manager]);
   const [alerts,setAlerts]=useState<Alerts|null>(null);
   const [caseItem,setCase]=useState<QualCase|null>(null);
   const [category,setCategory]=useState("SUBCONTRACTOR");
@@ -52,7 +63,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
   const [authorityRequired,setAuthorityRequired]=useState(false);
   const [safetyRequired,setSafetyRequired]=useState(false);
   const [policyQuestions,setPolicyQuestions]=useState('[{"key":"REGULATORY_BASIS","label":"Regulatory applicability basis","kind":"TEXT","required":true}]');
-  const [manuals,setManuals]=useState("");
+  const [manuals,setManuals]=useState<string[]>([]);
   const [tab,setTab]=useState("qualification");
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -77,7 +88,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
     setAuthorityRequired(Boolean(policy.authority_required));
     setSafetyRequired(Boolean(policy.safety_assessment_required));
     setPolicyQuestions(JSON.stringify(policy.questionnaire_json||[],null,2));
-    setManuals((policy.manual_references_json||[]).join("; "));
+    setManuals(policy.manual_references_json||[]);
   },[category,policies]);
   const open=async(id:string)=>{
     try{
@@ -150,9 +161,8 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
               {status:"VERIFIED",evidence_reference:reference,approval_reference:reference,
                 expires_on:expires||null,conclusion:note})}>Record verification</button></div>}
         {(technical||safety||manager)&&<div className="qp-fields">
-          {technical&&<><label>Exact technical scope JSON<textarea rows={3} value={technicalScope}
-            onChange={e=>setTechnicalScope(e.target.value)}/></label>
-            <button disabled={busy||note.length<8} onClick={()=>{
+          {technical&&<><StructuredItemList label="Technical scope" value={JSON.parse(technicalScope) as Record<string,unknown>[]} onChange={rows => setTechnicalScope(JSON.stringify(rows))} fields={[{key:"category",label:"Category"},{key:"site",label:"Site"},{key:"product_family",label:"Product family"}]} create={() => ({category:"",site:"",product_family:""})} disabled={busy} />
+            <button disabled={busy||note.length<8||!(JSON.parse(technicalScope) as Record<string,unknown>[]).length||(JSON.parse(technicalScope) as Record<string,unknown>[]).some(row => !row.category || !row.site || !row.product_family)} onClick={()=>{
               try{const values=JSON.parse(technicalScope) as unknown;
                 if(!Array.isArray(values))throw Error("Scope must be an array");
                 void change("/cases/"+caseItem.id+"/review/technical",
@@ -222,15 +232,15 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
         · {p.manual_references_json.join("; ")}</p>)}
       {manager&&<div className="qp-fields">
         <label>Category<input value={category} onChange={e=>setCategory(e.target.value.toUpperCase())}/></label>
-        <label>Active QMS supplier evaluation template UUID<input value={templateId} onChange={e=>setTemplateId(e.target.value)} placeholder="Use canonical Procurement/QMS evaluation templates"/></label>
+        <label>Evaluation template<select value={templateId} onChange={event => setTemplateId(event.target.value)}><option value="">Select an active template</option>{templateId && !templates.some(item => item.id === templateId) && <option value={templateId}>Currently configured template</option>}{templates.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name} · Revision {item.revision_no}</option>)}</select>{templateError && <small role="status">{templateError}</small>}</label>
         <label>Surveillance days (blank = risk-based)<input type="number" min={30} max={3650} value={interval}
           onChange={e=>setInterval(e.target.value)}/></label>
         <label><input type="checkbox" checked={initialAudit} onChange={e=>setInitialAudit(e.target.checked)}/> Require initial QMS audit (rather than qualifying document review)</label>
         <label><input type="checkbox" checked={authorityRequired} onChange={e=>setAuthorityRequired(e.target.checked)}/> Require verified authority or State-of-Registry approval</label>
         <label><input type="checkbox" checked={safetyRequired} onChange={e=>setSafetyRequired(e.target.checked)}/> Require Safety Manager risk assessment</label>
-        <label>Questionnaire JSON<textarea rows={4} value={policyQuestions} onChange={e=>setPolicyQuestions(e.target.value)}/></label>
-        <label>Exact manual references (semicolon separated)<textarea value={manuals} onChange={e=>setManuals(e.target.value)}/></label>
-        <button disabled={busy||note.length<8} onClick={()=>{
+        <StructuredItemList label="Question" value={JSON.parse(policyQuestions) as Record<string,unknown>[]} onChange={rows => setPolicyQuestions(JSON.stringify(rows))} fields={[{key:"label",label:"Question text"},{key:"kind",label:"Answer type",options:["TEXT","YES_NO","NUMBER","DATE"]},{key:"required",label:"Required",checkbox:true}]} create={() => ({key:crypto.randomUUID().toUpperCase(),label:"",kind:"TEXT",required:true})} disabled={busy} />
+        <TextItemList label="Manual references" value={manuals} onChange={setManuals} disabled={busy} />
+        <button disabled={busy||note.length<8||(JSON.parse(policyQuestions) as Record<string,unknown>[]).some(row => !String(row.label||"").trim())} onClick={()=>{
           try{const questions=JSON.parse(policyQuestions) as unknown;
             if(!Array.isArray(questions))throw Error("Array required");
             void change("/policies/"+encodeURIComponent(category),{
@@ -239,7 +249,7 @@ export default function ProviderQualificationWorkspace({amoCode,supplierId}:{
               evaluation_template_id:templateId||null,
               initial_audit_required:initialAudit,authority_required:authorityRequired,
               safety_assessment_required:safetyRequired,
-              manual_references:manuals.split(";").map(x=>x.trim()).filter(Boolean),reason:note,
+              manual_references:manuals.map(x=>x.trim()).filter(Boolean),reason:note,
               expected_revision:policies.find(p=>p.category===category)?.revision||0,
             },"PUT");}
           catch{setError("Questionnaire must be an array in JSON");}

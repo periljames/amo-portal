@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
+import "../../styles/qms-workspace-usability.css";
 import {
   BarChart3,
   BookOpen,
@@ -62,6 +63,7 @@ import {
   onAdminProfileChange,
   readCachedAdminProfileState,
   type AdminProfileState,
+  type AdminViewPeriod,
 } from "../../services/adminProfileMode";
 import { useColorScheme } from "../../hooks/useColorScheme";
 import { usePortalAppearance } from "../../hooks/usePortalAppearance";
@@ -386,6 +388,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const [adminProfile, setAdminProfile] = useState<AdminProfileState | null>(() => readCachedAdminProfileState(amoCode));
   const [adminProfileBusy, setAdminProfileBusy] = useState(false);
   const [adminProfileError, setAdminProfileError] = useState<string | null>(null);
+  const [adminViewPeriod, setAdminViewPeriod] = useState<AdminViewPeriod>("FOUR_HOURS");
   const profileRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
 
@@ -402,7 +405,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       user: currentUser,
       contextDepartment: activeDepartment,
       activeDepartment,
-      adminModeActive: standingAdmin || Boolean(adminProfile?.active),
+      adminModeActive: Boolean(adminProfile?.active),
     }),
     [activeDepartment, adminProfile?.active, amoCode, currentUser, standingAdmin],
   );
@@ -603,7 +606,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     try {
       const next = adminProfile.active
         ? await deactivateAdminProfile(amoCode)
-        : await activateAdminProfile(amoCode);
+        : await activateAdminProfile(amoCode, adminViewPeriod);
       setAdminProfile(next);
       setProfileOpen(false);
       navigate(next.active ? `/maintenance/${encodeURIComponent(amoCode)}/admin/overview` : homePath);
@@ -612,7 +615,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     } finally {
       setAdminProfileBusy(false);
     }
-  }, [adminProfile, adminProfileBusy, amoCode, homePath, navigate]);
+  }, [adminProfile, adminProfileBusy, adminViewPeriod, amoCode, homePath, navigate]);
 
   const handleSignOut = useCallback(() => {
     endSession("manual");
@@ -637,7 +640,8 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
             <aside
               ref={sidebarRef}
               className="tenant-shell__sidebar"
-              aria-label="Portal navigation drawer"
+              id="tenant-navigation"
+              aria-label={activeDepartment === "quality" ? "QMS navigation" : "Portal navigation drawer"}
               aria-hidden={!drawerVisible}
               inert={!drawerVisible}
               role={!pinnedVisible ? "dialog" : undefined}
@@ -648,7 +652,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                   <BrandLogo size={30} />
                   <span>
                     <strong>{brand.name || amoCode.toUpperCase()}</strong>
-                    <small>AMO Portal</small>
+                    <small>{activeDepartment === "quality" ? "QMS App" : "AMO Portal"}</small>
                   </span>
                 </button>
                 <div className="tenant-shell__sidebar-actions">
@@ -701,7 +705,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                     <strong>{labelForDepartment(activeDepartment)}</strong>
                     <span>{brand.name || amoCode.toUpperCase()}</span>
                   </div>
-                  {standingAdmin ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> AMO administrator</span> : adminProfile?.active ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Delegated admin</span> : null}
+                  {adminProfile?.active ? <span className="tenant-shell__admin-chip"><Sparkles size={13} /> Admin View active</span> : null}
                 </div>
 
                 <div className="tenant-shell__topbar-actions">
@@ -722,11 +726,17 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                       <div className="tenant-shell__profile-menu" role="menu">
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(assignedWorkPath); }}><ClipboardCheck size={15} /> Assigned work</button>
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
-                        {adminProfile?.eligible && !standingAdmin ? (
-                          <button type="button" role="menuitem" onClick={() => void toggleAdminProfile()} disabled={adminProfileBusy}>
-                            {adminProfile.active ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
-                            {adminProfileBusy ? "Updating admin profile…" : adminProfile.active ? "Admin profile Off" : "Admin profile On"}
+                        {adminProfile?.eligible || standingAdmin ? (
+                          <div className="tenant-shell__admin-view" role="group" aria-label="Admin View">
+                            {!adminProfile?.active ? <label><span>Admin View duration</span>
+                              <select aria-label="Admin View duration" value={adminViewPeriod} onChange={event => setAdminViewPeriod(event.target.value as AdminViewPeriod)} disabled={adminProfileBusy}>
+                                <option value="FOUR_HOURS">4 hours (default)</option><option value="UNTIL_MIDNIGHT">Until midnight (AMO time)</option><option value="TWENTY_FOUR_HOURS">24 hours</option><option value="ONE_WEEK">1 week</option>
+                              </select></label> : <p>Active until {adminProfile.expires_at ? new Date(adminProfile.expires_at).toLocaleString() : "session expiry"}</p>}
+                          <button type="button" role="menuitem" onClick={() => void toggleAdminProfile()} disabled={adminProfileBusy || !adminProfile?.eligible}>
+                            {adminProfile?.active ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+                            {adminProfileBusy ? "Updating Admin View…" : adminProfile?.active ? "Turn off Admin View" : "Activate Admin View"}
                           </button>
+                          </div>
                         ) : null}
                         <button type="button" role="menuitem" onClick={() => setAppearanceOpen((value) => !value)} aria-expanded={appearanceOpen}>
                           <SlidersHorizontal size={15} /> Appearance

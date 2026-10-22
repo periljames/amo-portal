@@ -374,8 +374,14 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
   if (!user || !user.amo_id || !user.is_active || user.is_superuser || user.role === "SUPERUSER") return [];
   if ((user.amo_code || user.amo_slug) && !userBelongsToTenant(user, amoCode)) return [];
-  const standingAdmin = isTenantAdmin(user);
-  const administrationActive = adminModeActive || standingAdmin;
+  const administrationActive = adminModeActive;
+  if (context.activeDepartment === "quality") {
+    const qualityBase = `${tenantBase(amoCode)}/quality`;
+    return [{ id: "qms-app", label: "QMS App", items: [
+      { id: "home", label: "Overview", icon: "quality", path: qualityBase, exact: true },
+      ...qualitySections(amoCode, user),
+    ] }];
+  }
   const operationalUser = getOperationalAccessUser(user);
   // Tenant administration includes every tenant workspace.
   const effectiveUser = operationalUser;
