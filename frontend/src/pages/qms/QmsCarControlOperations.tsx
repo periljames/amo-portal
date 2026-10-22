@@ -28,7 +28,7 @@ import {
   type CarDependencyType,
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
-import { adoptCarEffectivenessProposal, getCarRcaInternal } from "../../services/qmsCarRca";
+import { adoptCarEffectivenessProposal, getCarRcaInternal, listCarRcaParetoSnapshots } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
 const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -150,6 +150,12 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     queryKey: ["qms-car-control-rca", amoCode, carId],
     queryFn: () => getCarRcaInternal(amoCode, carId),
     staleTime: 10_000,
+  });
+  const paretoQuery = useQuery({
+    queryKey: ["qms-car-control-pareto", amoCode, carId],
+    queryFn: () => listCarRcaParetoSnapshots(amoCode, carId),
+    staleTime: 10_000,
+    enabled: canViewReports && hasQmsRolePermission("qms.reports.view"),
   });
 
   const proposal = rcaQuery.data?.submitted_snapshot?.investigation.effectiveness_proposal;
@@ -361,20 +367,32 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       rca.history.forEach(event => rows.push(["RCA revision " + event.revision, event.event_type,
         event.created_at + "; actor=" + (event.actor_ref || "unattributed") + "; reason=" + event.reason]));
     }
+    (paretoQuery.data || []).forEach(snapshot => {
+      rows.push(["QMS Pareto", "Source cohort", snapshot.population]);
+      rows.push(["QMS Pareto", "Snapshot", snapshot.id + " generated " + snapshot.created_at]);
+      rows.push(["QMS Pareto", "Period", snapshot.filters.start + " to " + snapshot.filters.end]);
+      rows.push(["QMS Pareto", "Population", String(snapshot.sample_size)]);
+      snapshot.categories.forEach(item => rows.push(["QMS Pareto category", item.category,
+        "count=" + item.count + "; share=" + item.share_percent + "%; cumulative=" + item.cumulative_percent + "%"]));
+      snapshot.source_references.forEach(source => rows.push(["QMS source finding", source.reference || source.id,
+        "audit=" + (source.audit_reference || "") + "; requirement=" + (source.requirement || "")]));
+    });
     return ["Section,Field,Value", ...rows.map((row) => row.map(csvCell).join(","))].join("\n");
   };
 
   const exportCsv = () => {
-    if (rcaQuery.isError || rcaQuery.isPending) {
-      setLocalError("Structured RCA could not be loaded. Retry before exporting a complete controlled package.");
+    if (rcaQuery.isError || rcaQuery.isPending ||
+        (paretoQuery.isEnabled !== false && (paretoQuery.isError || paretoQuery.isPending))) {
+      setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before exporting a complete package.");
       return;
     }
     saveDownloadedFile(new Blob([buildCsv()], { type: "text/csv;charset=utf-8" }), `${control.car.car_number}-controlled-package.csv`);
   };
 
   const printPackage = () => {
-    if (rcaQuery.isError || rcaQuery.isPending) {
-      setLocalError("Structured RCA could not be loaded. Retry before printing a complete controlled package.");
+    if (rcaQuery.isError || rcaQuery.isPending ||
+        (paretoQuery.isEnabled !== false && (paretoQuery.isError || paretoQuery.isPending))) {
+      setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before printing a complete package.");
       return;
     }
     const source = inviteQuery.data;
@@ -392,6 +410,9 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     const eventRows = control.events.map((item) => `<tr><td>${escapeHtml(formatDateTime(item.created_at))}</td><td>${escapeHtml(humanize(item.event_type))}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(assigneeName(assignees, item.actor_user_id))}</td></tr>`).join("");
     const blockerItems = control.closure_readiness.blockers.map((item) => `<li><strong>${escapeHtml(item.code)}</strong> — ${escapeHtml(item.message)}</li>`).join("");
     const rcaRecord = rcaQuery.data;
+    const qmsParetoRows = (paretoQuery.data || []).flatMap(snapshot => snapshot.categories.map(row =>
+      `<tr><td>${escapeHtml(snapshot.created_at)}</td><td>${escapeHtml(snapshot.filters.group_by)}</td><td>${escapeHtml(row.category)}</td><td>${row.count}</td><td>${row.share_percent.toFixed(2)}%</td><td>${row.cumulative_percent.toFixed(2)}%</td></tr>`
+    )).join("");
     const documented = rcaRecord?.submitted_snapshot?.investigation || rcaRecord?.draft.investigation;
     const methodRows = documented?.investigations.flatMap(method => method.nodes.map(node =>
       `<tr><td>${escapeHtml(method.method.replaceAll("_", " "))}</td><td>${escapeHtml(node.category)}</td><td>${escapeHtml(node.statement)}</td><td>${escapeHtml(node.entry_type)}</td><td>${escapeHtml(node.parent_id || "")}</td><td>${escapeHtml(node.evidence_references.join("; "))}</td></tr>`
@@ -440,6 +461,9 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <h3>Pareto analysis — respondent-reported source counts, Quality confirmation pending</h3>
       <div class="box">Population: ${escapeHtml(paretoMethod?.context?.population || "Not specified")}; Period: ${escapeHtml(paretoMethod?.context?.period_from || "not set")} — ${escapeHtml(paretoMethod?.context?.period_to || "not set")}; Sample total: ${paretoTotal}</div>
       <table><thead><tr><th>Category</th><th>Count</th><th>Cumulative %</th><th>Provenance</th></tr></thead><tbody>${paretoRows || '<tr><td colspan="4">No Pareto data recorded.</td></tr>'}</tbody></table>
+      <h3>Controlled QMS source-backed Pareto snapshots</h3>
+      <p>These are full-cohort aggregate frequencies from documented Quality audit findings, not proof of individual root causation.</p>
+      <table><thead><tr><th>Saved at</th><th>Grouping</th><th>Category</th><th>Count</th><th>Frequency</th><th>Cumulative</th></tr></thead><tbody>${qmsParetoRows || '<tr><td colspan="6">No saved QMS-source Pareto snapshots.</td></tr>'}</tbody></table>
       <h2>Individually controlled corrective actions</h2><table><thead><tr><th>No.</th><th>Kind</th><th>Action</th><th>Owner</th><th>Due</th><th>State</th><th>Implementation evidence</th><th>Quality decision</th></tr></thead><tbody>${actionRows || '<tr><td colspan="8">No individually governed actions.</td></tr>'}</tbody></table>
       <h3>RCA revision history</h3><table><thead><tr><th>Time</th><th>Revision</th><th>Event</th><th>Actor kind</th><th>Attribution</th><th>Reason</th></tr></thead><tbody>${rcaHistoryRows || '<tr><td colspan="6">No structured RCA revisions.</td></tr>'}</tbody></table>
       <h2>Governed lifecycle milestones</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Owner</th><th>Original due</th><th>Current due</th><th>Evidence ref</th><th>Control note</th></tr></thead><tbody>${milestoneRows || '<tr><td colspan="7">No milestones recorded.</td></tr>'}</tbody></table>
