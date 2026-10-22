@@ -95,8 +95,10 @@ function escapeHtml(value: unknown): string {
 }
 
 function csvCell(value: unknown): string {
-  const text = String(value ?? "").replaceAll('"', '""');
-  return `"${text}"`;
+  // Prevent spreadsheet formula execution from responder-entered CAR text.
+  const raw = String(value ?? "");
+  const safe = /^[\s\u0000-\u001f]*[=+@-]/.test(raw) ? "'" + raw : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 function dependencyDraft(row: CarControlDependency): DependencyDraft {
