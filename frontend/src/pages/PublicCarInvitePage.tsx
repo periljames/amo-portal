@@ -590,6 +590,7 @@ const PublicCarInvitePage: React.FC = () => {
   const saveRca = async (tokenValue: string, force = false): Promise<boolean> => {
     const current = latestEntries.current.find(item => item.token === tokenValue);
     if (!current?.rcaLoaded || !current.invite || !isInviteEditable(current.invite)) return false;
+    if (!current.invite.structured_rca_required && !current.rca.investigations.length && !current.rca.supported_cause_ids.length) return true;
     if (pendingRcaSaves.current.has(tokenValue)) return false;
     const saved = JSON.stringify({ form: current.form, investigation: current.rca });
     if (saved === current.rcaSavedSignature) return true;
@@ -607,6 +608,7 @@ const PublicCarInvitePage: React.FC = () => {
         ...entry,
         rcaSaving: false,
         rcaRevision: result.revision,
+        invite: entry.invite ? { ...entry.invite, structured_rca_required: result.revision > 0 } : null,
         rcaSavedSignature: saved,
         rcaError: null,
       }));
@@ -625,6 +627,7 @@ const PublicCarInvitePage: React.FC = () => {
   useEffect(() => {
     const unsaved = entries.filter(entry =>
       entry.state === "ready" && entry.rcaLoaded && !entry.rcaSaving && !entry.rcaError &&
+      (entry.invite?.structured_rca_required || entry.rca.investigations.length > 0 || entry.rca.supported_cause_ids.length > 0) &&
       !entry.submitting && !entry.recalling && entry.invite && isInviteEditable(entry.invite) &&
       JSON.stringify({ form: entry.form, investigation: entry.rca }) !== entry.rcaSavedSignature
     );
@@ -854,11 +857,13 @@ const PublicCarInvitePage: React.FC = () => {
     if (!canSubmitInvite(entry.invite)) return entry.invite.locked_reason || "This CAR cannot be submitted right now.";
     if (entry.uploading) return "Wait for the evidence upload to finish before submitting.";
     if (entry.attachmentsError) return "Resolve the evidence loading or upload error before submitting.";
-    if (!entry.rcaLoaded || entry.rcaError) return "The controlled RCA draft is unavailable. Reload the invitation and try again.";
-    if (!entry.rca.conclusion.trim() || !entry.rca.supported_cause_ids.length || !entry.rca.conclusion_evidence_references.length) {
-      return "Complete the structured root-cause investigation, mark a supported cause, and cite the conclusion evidence.";
+    if (entry.invite.structured_rca_required) {
+      if (!entry.rcaLoaded || entry.rcaError) return "The controlled RCA draft is unavailable. Reload the invitation and try again.";
+      if (!entry.rca.conclusion.trim() || !entry.rca.supported_cause_ids.length || !entry.rca.conclusion_evidence_references.length) {
+        return "Complete the structured root-cause investigation, mark a supported cause, and cite the conclusion evidence.";
+      }
+      if (!entry.rcaActions.some(action => action.kind === "CORRECTIVE")) return "Add at least one individually managed corrective action.";
     }
-    if (!entry.rcaActions.some(action => action.kind === "CORRECTIVE")) return "Add at least one individually managed corrective action.";
     const stepError = INVITE_STEPS.slice(0, -1).map((step) => validateStep(entry, step.id)).find(Boolean);
     if (stepError) return stepError;
     if (!entry.consentAccepted) return "Accept the submission declaration before submitting.";
@@ -876,7 +881,8 @@ const PublicCarInvitePage: React.FC = () => {
     pendingSubmissions.current.add(tokenValue);
     updateEntry(tokenValue, (entry) => ({ ...entry, error: null, notice: null, submitting: true }));
     try {
-      if (!await saveRca(tokenValue, true)) throw new Error("The controlled RCA draft has not been saved. Resolve the save error before submitting.");
+      if (current.invite.structured_rca_required && !await saveRca(tokenValue, true))
+        throw new Error("The controlled RCA draft has not been saved. Resolve the save error before submitting.");
       await qmsSubmitCarInvite(tokenValue, {
         submitted_by_name: current.form.submitted_by_name.trim(),
         submitted_by_email: current.form.submitted_by_email.trim(),
@@ -1303,6 +1309,14 @@ const PublicCarInvitePage: React.FC = () => {
                                       }))}>Keep server version</button>
                                     </div>}
                                     {entry.rcaError && <div className="car-invite-error" role="alert">{entry.rcaError}<button type="button" onClick={() => void loadInvite(entry.token)}>Reload investigation</button></div>}
+                                    {!invite.structured_rca_required && <StructuredTextField
+                                      label="Root cause analysis (legacy narrative response)"
+                                      required value={entry.form.root_cause} disabled={locked}
+                                      onChange={(value) => updateFormField(entry.token, "root_cause", value)}
+                                      placeholder="Describe the cause, contributing factors and the evidence supporting your conclusion."
+                                      note={invite.root_cause_review_note}
+                                    />}
+                                    {!invite.structured_rca_required && <p className="car-invite-subtitle">This CAR predates controlled structured RCA. The existing response remains valid. You may optionally adopt the guided methods below; doing so requires completing and saving their supporting evidence before final submission.</p>}
                                     <CarRcaWorkbench value={entry.rca} disabled={locked || !entry.rcaLoaded}
                                       onChange={(investigation) => updateEntry(entry.token, (current) => ({
                                         ...current, rca: investigation,
