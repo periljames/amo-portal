@@ -39,6 +39,12 @@ def _enable_rls(name):
 
 
 def upgrade():
+    # Established CARs retain their pre-rollout narrative response contract.
+    # Newly created records after this migration use governed structured RCA.
+    op.create_table("quality_car_rca_rollout",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("activated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()))
+    op.execute(sa.text("INSERT INTO quality_car_rca_rollout (id, activated_at) VALUES (1, CURRENT_TIMESTAMP)"))
     op.create_table("quality_car_rca_documents",
         sa.Column("id", UUID(as_uuid=True), primary_key=True), *_scoped_columns(),
         sa.Column("revision", sa.Integer(), nullable=False, server_default="0"),
@@ -148,3 +154,4 @@ def downgrade():
             op.execute(sa.text("DROP FUNCTION IF EXISTS prevent_" + table + "_mutation()"))
     for table in reversed(TABLES):
         op.drop_table(table)
+    op.drop_table("quality_car_rca_rollout")
