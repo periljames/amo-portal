@@ -6860,6 +6860,8 @@ def get_car_invite_by_token(invite_token: str, request: Request, db: Session = D
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return _car_invite_payload(car, request=request, db=db)
 
 
@@ -6879,6 +6881,8 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
     text_fields = {
@@ -7015,6 +7019,8 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     state = _car_invite_state(db, car)
     if not state["can_recall"]:
         raise HTTPException(status_code=409, detail=state["locked_reason"] or "This submission can no longer be recalled.")
@@ -7088,6 +7094,8 @@ def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return [_serialize_attachment(invite_token, attachment) for attachment in car.attachments]
 
 
@@ -7109,6 +7117,8 @@ def upload_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
     target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
@@ -7147,6 +7157,8 @@ def update_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7177,6 +7189,8 @@ def delete_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7217,6 +7231,8 @@ def download_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     attachment = (
         db.query(models.CARAttachment)
         .filter(
@@ -7246,6 +7262,8 @@ def download_car_invite_form(invite_token: str, request: Request, db: Session = 
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     try:
         payload = _car_invite_payload(car, request=request, db=db)
         output_path = generate_car_form_pdf(car, invite_url=str(payload.get("invite_url") or ""))
@@ -7267,6 +7285,8 @@ def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return (
         db.query(models.CARActionLog)
         .filter(models.CARActionLog.car_id == car.id)
