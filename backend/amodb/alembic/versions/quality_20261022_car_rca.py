@@ -143,9 +143,9 @@ def upgrade():
         for table in ("quality_car_rca_revisions", "quality_car_rca_action_events", "quality_car_rca_pareto_snapshots", "quality_car_response_retained_revisions"):
             fn = "prevent_" + table + "_mutation"
             op.execute(sa.text(
-                "CREATE OR REPLACE FUNCTION " + fn + "() RETURNS trigger AS $ "
+                "CREATE OR REPLACE FUNCTION " + fn + "() RETURNS trigger AS $car_rca_immutable$ "
                 "BEGIN RAISE EXCEPTION '" + table + " is append-only'; END; "
-                "$ LANGUAGE plpgsql"
+                "$car_rca_immutable$ LANGUAGE plpgsql"
             ))
             op.execute(sa.text(
                 'CREATE TRIGGER trg_' + table + '_append_only BEFORE UPDATE OR DELETE ON "' +
