@@ -584,6 +584,56 @@ const PublicCarInvitePage: React.FC = () => {
     setEntries((prev) => prev.map((entry) => (entry.token === tokenValue ? updater(entry) : entry)));
   };
 
+  // Revision-based server persistence is authoritative. The original
+  // sessionStorage draft remains only as an unsent network-failure backup.
+  const saveRca = async (tokenValue: string, force = false): Promise<boolean> => {
+    const current = latestEntries.current.find(item => item.token === tokenValue);
+    if (!current?.rcaLoaded || !current.invite || !isInviteEditable(current.invite)) return false;
+    if (pendingRcaSaves.current.has(tokenValue)) return false;
+    const saved = JSON.stringify({ form: current.form, investigation: current.rca });
+    if (saved === current.rcaSavedSignature) return true;
+    if (current.rcaError && !force) return false;
+    pendingRcaSaves.current.add(tokenValue);
+    updateEntry(tokenValue, entry => ({ ...entry, rcaSaving: true, rcaError: null }));
+    try {
+      const result = await saveCarRcaInvite(tokenValue, {
+        expected_revision: current.rcaRevision,
+        mutation_key: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        form: current.form,
+        investigation: current.rca,
+      });
+      updateEntry(tokenValue, entry => ({
+        ...entry,
+        rcaSaving: false,
+        rcaRevision: result.revision,
+        rcaSavedSignature: saved,
+        rcaError: null,
+      }));
+      return true;
+    } catch (error) {
+      updateEntry(tokenValue, entry => ({
+        ...entry, rcaSaving: false,
+        rcaError: getErrorMessage(error, "Your draft could not be saved. Resolve the error before submitting."),
+      }));
+      return false;
+    } finally {
+      pendingRcaSaves.current.delete(tokenValue);
+    }
+  };
+
+  useEffect(() => {
+    const unsaved = entries.filter(entry =>
+      entry.state === "ready" && entry.rcaLoaded && !entry.rcaSaving && !entry.rcaError &&
+      !entry.submitting && !entry.recalling && entry.invite && isInviteEditable(entry.invite) &&
+      JSON.stringify({ form: entry.form, investigation: entry.rca }) !== entry.rcaSavedSignature
+    );
+    if (!unsaved.length) return;
+    const timer = window.setTimeout(() => {
+      unsaved.forEach(entry => void saveRca(entry.token));
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [entries]);
+
   const updateFormField = (tokenValue: string, field: keyof InviteForm, value: string) => {
     const nextValue = field === "evidence_ref"
       ? clampEvidenceReference(value)
