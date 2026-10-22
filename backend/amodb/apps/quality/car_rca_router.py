@@ -19,7 +19,7 @@ from amodb.database import get_db, get_read_db, get_write_db
 from . import models
 from .car_rca_models import (
     QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
-    QualityCarRcaMutation, QualityCarRcaRevision
+    QualityCarRcaMutation, QualityCarRcaRevision, QualityCarRcaRollout
 )
 from .tenant_security import (
     TenantContext, assert_quality_permission, require_quality_permission,
@@ -334,6 +334,25 @@ def _save(db: Session, car, payload: CarRcaSave, *, actor, actor_ref):
     return _public_projection(db, car)
 
 
+def structured_rca_required(db: Session, car) -> bool:
+    """Preserve pre-migration invitation contracts without a bypass for new CARs."""
+    rollout = db.query(QualityCarRcaRollout).filter(QualityCarRcaRollout.id == 1).first()
+    if rollout is None:
+        # Missing migration data is not a reason to downgrade review controls.
+        raise HTTPException(status_code=503, detail="RCA policy activation is unavailable.")
+    creation = car.created_at
+    activation = rollout.activated_at
+    if creation is not None:
+        if creation.tzinfo is None:
+            creation = creation.replace(tzinfo=timezone.utc)
+        if activation.tzinfo is None:
+            activation = activation.replace(tzinfo=timezone.utc)
+        if creation >= activation:
+            return True
+    document = _document(db, car)
+    return document is not None and document.revision > 0
+
+
 def submit_rca_document(db: Session, car, root_cause_text: str | None, *, responder_email: str | None = None):
     """Stage the structured evidence in the SAME transaction as base CAR submission.
 
@@ -341,8 +360,11 @@ def submit_rca_document(db: Session, car, root_cause_text: str | None, *, respon
     submissions. Newly created structured investigations require a supported
     conclusion and evidence-backed cause; a hypothesis alone is never verified.
     """
+    required = structured_rca_required(db, car)
     doc = _document(db, car, lock=True)
     if doc is None or doc.revision == 0:
+        if required:
+            raise HTTPException(status_code=422, detail="This newly issued CAR requires a saved, structured RCA investigation before submission.")
         return
     data = InvestigationDocument.model_validate(doc.draft.get("investigation") or {})
     if not data.conclusion.strip() or not data.supported_cause_ids:
