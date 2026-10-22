@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from amodb.database import get_db, get_read_db, get_write_db
+from amodb.security import get_current_active_user
+from amodb.apps.accounts import models as account_models
 from . import models
 from .car_rca_models import (
     QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
@@ -718,9 +720,16 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
 @router.patch("/corrective-actions/{action_id}/review")
 def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview,
     ctx: TenantContext = Depends(write_tenant_context),
-    db: Session = Depends(get_write_db)):
+    db: Session = Depends(get_write_db),
+    current_user: account_models.User = Depends(get_current_active_user)):
     assert_quality_permission(db, ctx, "qms.car.manage")
     car = _car_for_employee(db, ctx, car_id, lock=True)
+    if str(current_user.id) != str(ctx.user_id):
+        raise HTTPException(status_code=403, detail="Authenticated reviewer does not match tenant context.")
+    # Keep the governed CAR's assigned lead-auditor review authority; simply
+    # having generic Quality manage permission does not authorize approval.
+    from .router import _require_car_review_access
+    _require_car_review_access(db, current_user, car)
     if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
         raise HTTPException(status_code=409, detail="Closed or escalated CAR cannot receive action approvals.")
     row = db.query(QualityCarRcaAction).filter(
