@@ -549,7 +549,10 @@ def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
 def report_public_action(invite_token: str, action_id: uuid.UUID, payload: ActionProgress,
     db: Session = Depends(get_db)):
     car = _car_for_guest(db, invite_token, lock=True)
-    _assert_guest_editable(db, car)
+    # After CAR submission, the narrative is locked for independent review,
+    # but accepted corrective actions still require real implementation.
+    if str(getattr(car.status, "value", car.status)) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+        raise HTTPException(status_code=409, detail="The CAR is closed or restricted.")
     row = db.query(QualityCarRcaAction).filter(
         QualityCarRcaAction.id == action_id,
         QualityCarRcaAction.amo_id == str(car.amo_id),
@@ -557,8 +560,10 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
     ).with_for_update().first()
     if not row:
         raise HTTPException(status_code=404, detail="Action not found for this CAR")
-    if row.state not in {"PROPOSED", "ACCEPTED", "IN_PROGRESS", "REJECTED"}:
-        raise HTTPException(status_code=409, detail="Action is not open for respondent updates.")
+    if car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED":
+        raise HTTPException(status_code=409, detail="Quality must accept the RCA and CAPA before implementation progress can be recorded.")
+    if row.state not in {"ACCEPTED", "IN_PROGRESS"}:
+        raise HTTPException(status_code=409, detail="Only an approved corrective action can enter implementation.")
     previous = row.state
     row.state = payload.state
     row.completion_note = payload.completion_note.strip()
@@ -594,6 +599,8 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
         raise HTTPException(status_code=403, detail="Action implementer cannot approve their own action.")
     if payload.state == "ACCEPTED" and row.state != "PROPOSED":
         raise HTTPException(status_code=409, detail="Only proposed actions may be approved.")
+    if payload.state == "ACCEPTED" and (car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED"):
+        raise HTTPException(status_code=409, detail="Accept the governed RCA and CAPA response before approving proposed implementation.")
     if payload.state == "VERIFIED" and (row.state != "SUBMITTED" or not row.evidence_references):
         raise HTTPException(status_code=409, detail="Verify submitted implementation evidence before approving.")
     if payload.state == "VERIFIED" and (
