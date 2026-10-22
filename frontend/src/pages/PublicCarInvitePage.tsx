@@ -1360,6 +1360,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       <input className="car-invite-input" type="date" value={entry.form.due_date} disabled={locked || invite.deadline_change_requires_review} onChange={(event) => updateFormField(entry.token, "due_date", event.target.value)} />
                                     </label>
                                     <CarRcaActions token={entry.token} actions={entry.rcaActions} disabled={locked || !entry.rcaLoaded}
+                                      canProgress={!locked && invite.root_cause_status === "ACCEPTED" && invite.capa_status === "ACCEPTED"}
                                       causeIds={entry.rca.investigations.flatMap(method => method.nodes.filter(node => node.entry_type === "CAUSAL_CONCLUSION").map(node => ({ id: node.id, statement: node.statement })))}
                                       onChanged={async () => {
                                         const updated = await getCarRcaInvite(entry.token);
@@ -1480,6 +1481,21 @@ const PublicCarInvitePage: React.FC = () => {
                           </div>
                         </div>
                       </form>
+                      {!isInviteEditable(invite) && !["CLOSED", "CANCELLED", "ESCALATED"].includes(invite.status) &&
+                        invite.root_cause_status === "ACCEPTED" && invite.capa_status === "ACCEPTED" &&
+                        entry.rcaActions.length > 0 && (
+                          <div className="car-invite-stage__body">
+                            <CarRcaActions token={entry.token} actions={entry.rcaActions} disabled
+                              canProgress={!entry.submitting && entry.rcaLoaded}
+                              causeIds={entry.rca.investigations.flatMap(method =>
+                                method.nodes.filter(node => node.entry_type === "CAUSAL_CONCLUSION")
+                                  .map(node => ({ id: node.id, statement: node.statement })))}
+                              onChanged={async () => {
+                                const updated = await getCarRcaInvite(entry.token);
+                                updateEntry(entry.token, current => ({ ...current, rcaActions: updated.actions }));
+                              }} />
+                          </div>
+                        )}
                     </>
                   )}
                 </article>
