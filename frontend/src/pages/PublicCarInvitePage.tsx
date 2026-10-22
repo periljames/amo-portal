@@ -40,6 +40,10 @@ import {
 } from "../services/qms";
 import { getApiBaseUrl } from "../services/config";
 import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
+import { emptyCarRca, getCarRcaInvite, saveCarRcaInvite, type CarRcaDocument, type CarRcaAction } from "../services/qmsCarRca";
+import CarRcaWorkbench from "../components/QMS/carRca/CarRcaWorkbench";
+import CarRcaActions from "../components/QMS/carRca/CarRcaActions";
+import "../components/QMS/carRca/car-rca.css";
 import { personDisplay } from "../utils/personDisplay";
 import "../styles/car-invite.css";
 import "../styles/car-invite-responsive.css";
@@ -126,6 +130,13 @@ type InviteEntry = {
   notice: string | null;
   invite: CARInviteOut | null;
   form: InviteForm;
+  rca: CarRcaDocument;
+  rcaRevision: number;
+  rcaSavedSignature: string;
+  rcaLoaded: boolean;
+  rcaSaving: boolean;
+  rcaError: string | null;
+  rcaActions: CarRcaAction[];
   consentAccepted: boolean;
   attachments: CARAttachmentOut[];
   actions: CARActionOut[];
@@ -511,6 +522,7 @@ const PublicCarInvitePage: React.FC = () => {
   const [now, setNow] = useState(() => new Date());
   const initialized = useRef<string | null | undefined>(undefined);
   const pendingSubmissions = useRef(new Set<string>());
+  const pendingRcaSaves = useRef(new Set<string>());
   const pendingUploads = useRef(new Set<string>());
   const knownTokens = useRef(new Set<string>());
   const loadGeneration = useRef(0);
@@ -588,6 +600,13 @@ const PublicCarInvitePage: React.FC = () => {
     notice: null,
     invite: null,
     form: emptyForm(),
+    rca: emptyCarRca(),
+    rcaRevision: 0,
+    rcaSavedSignature: "",
+    rcaLoaded: false,
+    rcaSaving: false,
+    rcaError: null,
+    rcaActions: [],
     consentAccepted: false,
     attachments: [],
     actions: [],
@@ -676,19 +695,33 @@ const PublicCarInvitePage: React.FC = () => {
     const generation = loadGeneration.current;
     updateEntry(tokenValue, (entry) => ({ ...entry, state: "loading", error: null, notice: notice ?? entry.notice }));
     try {
-      const [data, attachmentsResult, actionsResult] = await Promise.allSettled([
+      const [data, attachmentsResult, actionsResult, rcaResult] = await Promise.allSettled([
         qmsGetCarInviteByToken(tokenValue),
         qmsListCarInviteAttachments(tokenValue),
         qmsListCarInviteActions(tokenValue),
+        getCarRcaInvite(tokenValue),
       ]);
       if (generation !== loadGeneration.current) return;
       if (data.status === "rejected") throw data.reason;
       const restoredDraft = isInviteEditable(data.value) ? readCarInviteDraft(data.value) : null;
       if (!isInviteEditable(data.value)) removeCarInviteDraft(data.value.car_id);
+      const savedRca = rcaResult.status === "fulfilled" ? rcaResult.value : null;
+      const fallbackForm = toForm(data.value);
+      const serverForm = savedRca?.revision ? savedRca.draft.form : null;
+      const selectedForm = restoredDraft || { ...fallbackForm, ...(serverForm || {}) };
+      const investigation = savedRca?.draft.investigation || emptyCarRca(data.value.summary);
+      if (investigation.conclusion && !restoredDraft) selectedForm.root_cause = investigation.conclusion;
       const nextEntry: InviteEntry = {
           ...createEntry(tokenValue),
           invite: data.value,
-          form: restoredDraft || toForm(data.value),
+          form: selectedForm,
+          rca: investigation,
+          rcaRevision: savedRca?.revision || 0,
+          rcaSavedSignature: JSON.stringify({ form: savedRca?.revision ? savedRca.draft.form : selectedForm, investigation }),
+          rcaLoaded: Boolean(savedRca),
+          rcaSaving: false,
+          rcaError: rcaResult.status === "rejected" ? getErrorMessage(rcaResult.reason, "Structured RCA could not be loaded.") : null,
+          rcaActions: savedRca?.actions || [],
           attachments: attachmentsResult.status === "fulfilled" ? attachmentsResult.value : [],
           actions: actionsResult.status === "fulfilled" ? actionsResult.value : [],
           attachmentsError: attachmentsResult.status === "rejected" ? getErrorMessage(attachmentsResult.reason, "Could not load attachments.") : null,
@@ -745,6 +778,11 @@ const PublicCarInvitePage: React.FC = () => {
     if (!canSubmitInvite(entry.invite)) return entry.invite.locked_reason || "This CAR cannot be submitted right now.";
     if (entry.uploading) return "Wait for the evidence upload to finish before submitting.";
     if (entry.attachmentsError) return "Resolve the evidence loading or upload error before submitting.";
+    if (!entry.rcaLoaded || entry.rcaError) return "The controlled RCA draft is unavailable. Reload the invitation and try again.";
+    if (!entry.rca.conclusion.trim() || !entry.rca.supported_cause_ids.length || !entry.rca.conclusion_evidence_references.length) {
+      return "Complete the structured root-cause investigation, mark a supported cause, and cite the conclusion evidence.";
+    }
+    if (!entry.rcaActions.some(action => action.kind === "CORRECTIVE")) return "Add at least one individually managed corrective action.";
     const stepError = INVITE_STEPS.slice(0, -1).map((step) => validateStep(entry, step.id)).find(Boolean);
     if (stepError) return stepError;
     if (!entry.consentAccepted) return "Accept the submission declaration before submitting.";
@@ -762,6 +800,7 @@ const PublicCarInvitePage: React.FC = () => {
     pendingSubmissions.current.add(tokenValue);
     updateEntry(tokenValue, (entry) => ({ ...entry, error: null, notice: null, submitting: true }));
     try {
+      if (!await saveRca(tokenValue, true)) throw new Error("The controlled RCA draft has not been saved. Resolve the save error before submitting.");
       await qmsSubmitCarInvite(tokenValue, {
         submitted_by_name: current.form.submitted_by_name.trim(),
         submitted_by_email: current.form.submitted_by_email.trim(),
@@ -1176,15 +1215,16 @@ const PublicCarInvitePage: React.FC = () => {
 
                                 {active && step.id === "analysis" && (
                                   <div className="car-invite-stage__body">
-                                    <StructuredTextField
-                                      label="Root cause analysis"
-                                      required
-                                      value={entry.form.root_cause}
-                                      disabled={locked}
-                                      onChange={(value) => updateFormField(entry.token, "root_cause", value)}
-                                      placeholder="State the verified root cause. Example: The inspection control was missed because the checklist did not identify the required sign-off."
-                                      note={invite.root_cause_review_note}
+                                    {entry.rcaError && <div className="car-invite-error" role="alert">{entry.rcaError}<button type="button" onClick={() => void loadInvite(entry.token)}>Reload investigation</button></div>}
+                                    <CarRcaWorkbench value={entry.rca} disabled={locked || !entry.rcaLoaded}
+                                      onChange={(investigation) => updateEntry(entry.token, (current) => ({
+                                        ...current, rca: investigation,
+                                        form: { ...current.form, root_cause: investigation.conclusion },
+                                      }))}
+                                      onSave={() => void saveRca(entry.token, true)}
+                                      saveState={entry.rcaSaving ? "Saving…" : entry.rcaError ? "Save failed — retry" : JSON.stringify({ form: entry.form, investigation: entry.rca }) === entry.rcaSavedSignature ? "Saved" : "Unsaved changes"}
                                     />
+                                    {invite.root_cause_review_note && <p className="car-invite-notice">Quality review: {invite.root_cause_review_note}</p>
                                     <div className="car-invite-stage__actions">
                                       <button type="button" className="car-invite-btn" disabled={locked} onClick={() => setActiveStep(entry.token, "containment")}>Back</button>
                                       <button type="button" className="car-invite-btn car-invite-btn--primary" disabled={locked} onClick={() => advanceStep(entry, "analysis")}>Save root cause and continue</button>
@@ -1218,6 +1258,13 @@ const PublicCarInvitePage: React.FC = () => {
                                       <span>Due date</span>
                                       <input className="car-invite-input" type="date" value={entry.form.due_date} disabled={locked || invite.deadline_change_requires_review} onChange={(event) => updateFormField(entry.token, "due_date", event.target.value)} />
                                     </label>
+                                    <CarRcaActions token={entry.token} actions={entry.rcaActions} disabled={locked || !entry.rcaLoaded}
+                                      causeIds={entry.rca.investigations.flatMap(method => method.nodes.filter(node => node.entry_type === "CAUSAL_CONCLUSION").map(node => ({ id: node.id, statement: node.statement })))}
+                                      onChanged={async () => {
+                                        const updated = await getCarRcaInvite(entry.token);
+                                        updateEntry(entry.token, current => ({ ...current, rcaActions: updated.actions }));
+                                      }}
+                                    />
                                     <div className="car-invite-stage__actions">
                                       {invite.deadline_change_requires_review ? <p className="car-invite-subtitle">These are agreed deadlines. Contact Quality to request an extension; submitting a CAP does not change them.</p> : null}
                                       <button type="button" className="car-invite-btn" disabled={locked} onClick={() => setActiveStep(entry.token, "analysis")}>Back</button>
@@ -1301,7 +1348,7 @@ const PublicCarInvitePage: React.FC = () => {
                                     <div className="car-invite-review-grid">
                                       <div><span>Responder</span><strong>{personDisplay(entry.form.submitted_by_name, "Pending")}</strong></div>
                                       <div><span>Containment</span><strong>{entry.form.containment_action || "Pending"}</strong></div>
-                                      <div><span>Root cause</span><strong>{entry.form.root_cause || "Pending"}</strong></div>
+                                      <div><span>Root cause</span><strong>{entry.form.root_cause || "Pending"} — {entry.rca.supported_cause_ids.length} documented causes</strong></div>
                                       <div><span>Corrective action</span><strong>{entry.form.corrective_action || "Pending"}</strong></div>
                                       <div><span>Evidence</span><strong>{entry.form.evidence_ref || `${entry.attachments.length} uploaded file(s)`}</strong></div>
                                     </div>
