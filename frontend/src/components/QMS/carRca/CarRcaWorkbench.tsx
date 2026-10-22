@@ -71,12 +71,13 @@ const labelFor = (id: CarRcaMethod) => METHOD_GUIDE.find(m => m.id === id)?.titl
 const valueOf = (value: unknown) => typeof value === "string" ? value : "";
 const countOf = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0;
 
-export default function CarRcaWorkbench({ value, disabled, onChange, onSave, saveState }: {
+export default function CarRcaWorkbench({ value, disabled, onChange, onSave, saveState, attachments = [] }: {
   value: CarRcaDocument;
   disabled: boolean;
   onChange: (next: CarRcaDocument) => void;
   onSave: () => void;
   saveState: string;
+  attachments?: Array<{ id: string; filename: string }>;
 }) {
   const [selected, setSelected] = useState<CarRcaMethod>("FIVE_WHYS");
   const [category, setCategory] = useState("Process");
@@ -356,7 +357,15 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
         <textarea value={statement} onChange={e => setStatement(e.target.value)} disabled={disabled} rows={3} maxLength={4000} />
       </label>
       <label className="car-rca-field">Evidence references (one record per line)
-        <textarea value={evidence} onChange={e => setEvidence(e.target.value)} disabled={disabled} rows={2} placeholder="Attachment name, controlled record ID, interview record..." />
+        <textarea value={evidence} onChange={e => setEvidence(e.target.value)} disabled={disabled} rows={2} placeholder="CAR attachment ID, controlled record ID, interview record..." />
+        {attachments.length > 0 && <select aria-label="Link uploaded CAR evidence to this cause" disabled={disabled} value=""
+          onChange={event => {
+            const nextRef = event.target.value;
+            if (nextRef) setEvidence(existing => [...new Set([...csv(existing), nextRef])].join("\n"));
+          }}>
+          <option value="">Select an already uploaded CAR attachment…</option>
+          {attachments.map(file => <option key={file.id} value={`CAR-ATTACHMENT:${file.id}`}>{file.filename}</option>)}
+        </select>}
       </label>
       <label className="car-rca-field">Evidence interpretation / why this cause is supported
         <textarea value={rationale} onChange={e => setRationale(e.target.value)} disabled={disabled} rows={2} maxLength={4000}/>
@@ -385,6 +394,13 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       <label className="car-rca-field">Evidence supporting the consolidated conclusion (one per line)
         <textarea value={value.conclusion_evidence_references.join("\n")} disabled={disabled} rows={2}
           onChange={e => onChange({ ...value, conclusion_evidence_references: csv(e.target.value) })}/>
+        {attachments.length > 0 && <select aria-label="Link uploaded CAR evidence to the conclusion" value="" disabled={disabled}
+          onChange={event => event.target.value && onChange({
+            ...value, conclusion_evidence_references: [...new Set([...value.conclusion_evidence_references, event.target.value])],
+          })}>
+          <option value="">Select an already uploaded CAR attachment…</option>
+          {attachments.map(file => <option key={file.id} value={`CAR-ATTACHMENT:${file.id}`}>{file.filename}</option>)}
+        </select>}
       </label>
       <p className="car-rca-note">Submission requires a supported causal entry and evidence references. An approved RCA is distinct from corrective-action implementation and effectiveness verification.</p>
     </div>
