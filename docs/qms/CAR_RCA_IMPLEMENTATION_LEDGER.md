@@ -140,3 +140,10 @@ See [Phase 1 baseline](CAR_RCA_PHASE1_BASELINE.md) for detailed source reference
 **Phase 3 is the first permitted execution of** pytest, Vitest, Playwright, lint, typecheck, frontend build, migrations, PostgreSQL negative tenant tests and end-to-end report/attachment/closure tests. No source-only entry above is a claim that those checks passed.
 
 **Important:** Phase 2 source still needs final focused source-level closure and evidence-storage integration review; F08 and F12 are not accurately described as completed until that source or operational proof exists. Do not merge PR #568 before resolving them and Phase 3.
+
+### Additional Phase 2 source hardening after reconciliation
+
+- The Fishbone/Five Whys editor now blocks selecting a node's own descendants as parents before a cycle reaches the backend. Server-side graph validation remains authoritative.
+- The public RCA workbench now links previously uploaded CAR attachments by stable `CAR-ATTACHMENT:{id}` reference rather than requiring duplicate uploads. Backend verification checks that those referenced files actually belong to the exact CAR at structured RCA submission, corrective-action proposal, and implementation progress.
+- Existing non-CAR controlled evidence references remain narrative/record references subject to independent Quality review; they are **not** represented as cryptographically verified uploaded files.
+- **Remaining Phase 2 source concern:** evidence upload itself still uses the established storage mechanism. Platform-wide shared object-store migration, resumable uploads, failover and restore are not established by these changes. These must not be represented as delivered unless separately implemented/verified.
