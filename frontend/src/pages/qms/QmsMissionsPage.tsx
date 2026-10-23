@@ -31,7 +31,8 @@ import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
 import QmsMissionActions from "./missions/QmsMissionActions";
 
 const ACTIVE_STATUSES: Array<{ value: "" | QmsMissionStatus; label: string }> = [
-  { value: "", label: "All missions" },
+  { value: "", label: "All stages" },
+  { value: "DRAFT", label: "Draft" },
   { value: "PLANNING", label: "Planning" },
   { value: "IN_PROGRESS", label: "In progress" },
   { value: "GATE_REVIEW", label: "Gate review" },
@@ -39,6 +40,7 @@ const ACTIVE_STATUSES: Array<{ value: "" | QmsMissionStatus; label: string }> = 
   { value: "APPROVED", label: "Approved" },
   { value: "SUBMITTED_TO_AUTHORITY", label: "With authority" },
   { value: "COMPLETE", label: "Complete" },
+  { value: "CANCELLED", label: "Cancelled" },
 ];
 
 function humanise(value: string): string {
@@ -75,6 +77,7 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
     queryKey: ["qms-mission", amoCode, missionId],
     queryFn: ({ signal }) => getQmsMission(amoCode, missionId, signal),
     staleTime: 5_000,
+    refetchOnWindowFocus: false,
   });
   const mission = detailQuery.data;
 
@@ -97,6 +100,7 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
     <section className="qms-mission-detail" aria-label={`${mission.mission_ref} ${mission.title}`}>
       <header className="qms-mission-detail__header">
         <button type="button" className="qms-mission-detail__back" onClick={onBack}><ArrowLeft size={15} /> Missions</button>
+        <button type="button" disabled={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}><RefreshCw size={15}/> Reload latest change</button>
         <div className="qms-mission-detail__title">
           <div>
             <span>{mission.mission_ref} · {humanise(mission.mission_type)}</span>
@@ -104,22 +108,23 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
             <p>{mission.description || "No mission description has been recorded."}</p>
           </div>
           <div className="qms-mission-detail__badges">
-            <span>{humanise(mission.status)}</span>
+            <span>{humanise(mission.next_action || mission.status)}</span>
             <span className={`is-${riskTone(mission.risk_level)}`}>{humanise(mission.risk_level)} risk</span>
           </div>
         </div>
       </header>
 
       <div className="qms-mission-detail__summary">
-        <article><span>Hard gates</span><strong>{hard.passed}/{hard.total}</strong><small>All must pass before Quality self-evaluation.</small></article>
-        <article><span>Blocking gates</span><strong>{readiness.blocking_gates.length}</strong><small>Hard dependencies still preventing approval.</small></article>
-        <article><span>Target date</span><strong>{dateLabel(mission.target_date)}</strong><small>Planning target, not an approval claim.</small></article>
-        <article><span>Accountable Executive</span><strong>{mission.sponsor_user_id ? "Assigned" : "Not assigned"}</strong><small>An attributable sponsor is required before executive approval.</small></article>
+        <article><span>Hard gates</span><strong>{hard.passed}/{hard.total}</strong></article>
+        <article><span>Blocking gates</span><strong>{readiness.blocking_gates.length}</strong></article>
+        <article><span>Target date</span><strong>{dateLabel(mission.target_date)}</strong></article>
+        <article><span>Accountable Executive</span><strong>{mission.sponsor_user_id ? "Assigned" : "Not assigned"}</strong></article>
       </div>
 
+      <QmsMissionActions key={`${mission.id}:${mission.updated_at}`} amoCode={amoCode} mission={mission} />
       <section className="qms-mission-detail__gates">
         <header>
-          <div><ShieldCheck size={17} /><span><strong>Readiness gates</strong><small>Evidence pointers reference authoritative source modules; this Mission does not duplicate their records.</small></span></div>
+          <div><ShieldCheck size={17} /><strong>Readiness gates</strong></div>
           <span className={readiness.ready_for_quality_self_evaluation ? "is-ready" : ""}>
             {readiness.ready_for_quality_self_evaluation ? "Ready for Quality self-evaluation" : "Hard gates remain open"}
           </span>
@@ -138,13 +143,12 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
         ))}
       </section>
 
-      <QmsMissionActions key={`${mission.id}:${mission.updated_at}`} amoCode={amoCode} mission={mission} />
       <div className="qms-mission-detail__lower-grid">
         <section>
           <header><strong>Decision chain</strong><small>Decisions are immutable, human-attributed records.</small></header>
           {mission.decisions?.length ? mission.decisions.map((decision) => (
             <article key={decision.id}>
-              <span><strong>{humanise(decision.decision_type)}</strong><small>{humanise(decision.status)}</small></span>
+              <span><strong>{humanise(String(decision.evidence_snapshot?.workflow_action || decision.decision_type))}</strong><small>{humanise(decision.status)}</small></span>
               <p>{decision.rationale}</p>
               <small>{new Date(decision.decided_at).toLocaleString()}</small>
             </article>
@@ -153,7 +157,7 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
         <section>
           <header><strong>Mission scope</strong><small>Structured request context carried with the assurance case.</small></header>
           {Object.keys(mission.scope || {}).length ? (
-            <dl>{Object.entries(mission.scope).map(([key, value]) => <React.Fragment key={key}><dt>{humanise(key)}</dt><dd>{String(value ?? "—")}</dd></React.Fragment>)}</dl>
+            <dl>{Object.entries(mission.scope).filter(([key]) => key !== "change_workflow_version").map(([key, value]) => <React.Fragment key={key}><dt>{humanise(key)}</dt><dd>{typeof value === "object" && value ? Object.entries(value).map(([field, fact]) => `${humanise(field)}: ${typeof fact === "boolean" ? fact ? "Yes" : "No" : String(fact)}`).join(" · ") : String(value ?? "—")}</dd></React.Fragment>)}</dl>
           ) : <p className="qms-mission-detail__empty">No structured scope fields have been recorded.</p>}
         </section>
       </div>
@@ -169,7 +173,7 @@ const CHANGE_TYPES: Array<{ value: QmsMissionType; label: string }> = [
   { value: "REGULATORY_TRANSITION", label: "Regulatory / organization change" },
 ];
 
-const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; changeControl?: boolean }> = ({ amoCode, initialCreate = false, changeControl = false }) => {
+const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; changeControl?: boolean; view?: string }> = ({ amoCode, initialCreate = false, changeControl = false, view = "register" }) => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<"" | QmsMissionStatus>("");
@@ -185,8 +189,8 @@ const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; chan
   const selectedMissionId = searchParams.get("missionId");
 
   const listQuery = useQuery({
-    queryKey: ["qms-missions", amoCode.trim().toLowerCase(), statusFilter, offset],
-    queryFn: ({ signal }) => listQmsMissions(amoCode, { status: statusFilter || undefined, limit: 25, offset }, signal),
+    queryKey: ["qms-missions", amoCode.trim().toLowerCase(), view, statusFilter, offset],
+    queryFn: ({ signal }) => listQmsMissions(amoCode, { view, status: statusFilter || undefined, limit: 25, offset }, signal),
     staleTime: 10_000,
     enabled: !selectedMissionId,
   });
@@ -246,10 +250,11 @@ const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; chan
   return (
     <main className="qms-missions" aria-label="Quality Missions">
       <header className="qms-missions__header">
-        <div><h1>{changeControl ? "Change Control" : "Change & capability projects"}</h1></div>
+        <div><h1>{changeControl ? view === "register" ? "Change Control" : humanise(view.replaceAll("-", " ")) : "Change & capability projects"}</h1></div>
         <div>
-          <button type="button" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}><RefreshCw size={15} className={listQuery.isFetching ? "is-spinning" : ""} /> Refresh</button>
-          {canManage ? <button type="button" className="is-primary" onClick={() => setShowCreate((value) => !value)}><Plus size={15} /> New controlled change</button> : null}
+          {changeControl ? <Link to={`/maintenance/${amoCode}/quality/change-control/register?legacy=1`}>Historical records</Link> : null}
+          {!showCreate ? <button type="button" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}><RefreshCw size={15} className={listQuery.isFetching ? "is-spinning" : ""} /> Refresh</button> : null}
+          {canManage && !showCreate ? <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={15} /> New controlled change</button> : null}
         </div>
       </header>
 
@@ -274,16 +279,16 @@ const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; chan
       {!showCreate ? <section className="qms-missions__portfolio">
         <header><strong>Controlled projects</strong><label><span>Status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as "" | QmsMissionStatus); setOffset(0); }}>{ACTIVE_STATUSES.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select></label></header>
         {listQuery.error ? <p role="alert">{listQuery.error.message}</p> : null}
-        <QmsWorkspaceGrid<QmsMission> rowData={missions} loading={listQuery.isLoading} getRowId={({ data }) => data.id} onRowDoubleClicked={({ data }) => { if (data) openMission(data.id); }} columnDefs={[
+        {!listQuery.error && (!listQuery.isLoading && !missions.length ? <div className="qms-missions__state" role="status">No controlled changes in this view.{offset > 0 ? <button type="button" onClick={() => setOffset(0)}>First page</button> : null}</div> : <QmsWorkspaceGrid<QmsMission> rowData={missions} loading={listQuery.isLoading} getRowId={({ data }) => data.id} onRowDoubleClicked={({ data }) => { if (data) openMission(data.id); }} columnDefs={[
           { field: "mission_ref", headerName: "Reference" },
           { field: "title", headerName: "Project", minWidth: 260, flex: 2 },
-          { field: "status", headerName: "Stage", valueFormatter: ({ value }) => humanise(value) },
+          { headerName: "Next action / stage", valueGetter: ({ data }) => data ? humanise(data.next_action || data.status) : "" },
           { field: "target_date", headerName: "Target", valueFormatter: ({ value }) => dateLabel(value) },
           { field: "risk_level", headerName: "Risk" },
           { headerName: "Open hard gates", valueGetter: ({ data }) => data ? data.readiness.hard_gates.total - data.readiness.hard_gates.passed : 0 },
           { headerName: "Action", filter: false, sortable: false, cellRenderer: ({ data }: { data?: QmsMission }) => data ? <button type="button" onClick={() => openMission(data.id)}>Manage project</button> : null },
-        ]} />
-        <Pagination label="Projects" page={Math.floor(offset/25)+1} pageSize={25} total={listQuery.data?.total} visibleCount={listQuery.data?.items?.length || 0} hasNext={Boolean(listQuery.data?.has_more)} busy={listQuery.isFetching} onPageChange={value=>setOffset((value-1)*25)} />
+        ]} />)}
+        {missions.length > 0 ? <Pagination label="Projects" page={Math.floor(offset/25)+1} pageSize={25} total={listQuery.data?.total} visibleCount={listQuery.data?.items?.length || 0} hasNext={Boolean(listQuery.data?.has_more)} busy={listQuery.isFetching} onPageChange={value=>setOffset((value-1)*25)} /> : null}
       </section> : null}
     </main>
   );

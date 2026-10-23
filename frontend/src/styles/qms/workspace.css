@@ -10,6 +10,9 @@
 .qms-personal-tasks { display: grid; gap: 1rem; min-width: 0; padding: 1rem; border: 1px solid var(--surface-border, #dbe3ef); border-radius: .6rem; }
 .qms-workspace-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .8rem; padding: 1rem; background: var(--surface-muted, #f5f7fb); border-radius: .5rem; }
 .qms-workspace-form label { display: grid; gap: .3rem; min-width: 0; font-size: .8rem; }
+.qms-workspace-form label:has(> input[type="checkbox"]) { display: flex; align-items: flex-start; gap: .5rem; }
+.qms-workspace-form input[type="checkbox"] { width: auto; flex: 0 0 auto; margin-top: .15rem; }
+.qms-workspace-form > h3 { grid-column: 1 / -1; margin: 0; }
 .qms-workspace-form :is(input, select, textarea) { box-sizing: border-box; width: 100%; min-width: 0; padding: .6rem; border: 1px solid var(--surface-border, #dbe3ef); border-radius: .35rem; color: var(--text-primary); background: var(--surface-elevated, #fff); }
 
 .qms-workspace-grid { display:flex; flex-direction:column; min-height:0; }

@@ -105,6 +105,7 @@ export type QmsMission = {
   readiness: QmsMissionReadiness;
   gates?: QmsMissionGate[];
   decisions?: QmsMissionDecision[];
+  next_action?: QmsMissionDecisionType | "IMPLEMENTATION" | "EFFECTIVENESS_REVIEW" | null;
 };
 
 export type QmsMissionListResponse = {
@@ -128,6 +129,7 @@ export type QmsMissionCreate = {
 };
 
 export type QmsMissionGatePatch = {
+  expected_updated_at?: string;
   status?: QmsMissionGateStatus;
   source_owner_module?: string | null;
   source_type?: string | null;
@@ -141,15 +143,25 @@ export type QmsMissionGatePatch = {
 };
 
 export type QmsMissionDecisionCreate = {
+  expected_updated_at?: string;
   decision_type: QmsMissionDecisionType;
   status: QmsMissionDecisionStatus;
   rationale: string;
   evidence_asset_id?: string;
+  notified_on?: string;
 };
 
 export type MissionAuthorityEvidence = { asset_id: string; filename: string; sha256: string; size_bytes: number };
 export function listMissionAuthorityEvidence(amoCode: string, missionId: string, search: string) {
   return apiRequest<{ items: MissionAuthorityEvidence[] }>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}/authority-evidence?search=${encodeURIComponent(search)}`), { cacheTtlMs: 0 });
+}
+
+export function listMissionReadinessEvidence(amoCode: string, missionId: string, search: string) {
+  return apiRequest<{ items: MissionAuthorityEvidence[] }>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}/readiness-evidence?search=${encodeURIComponent(search)}`), { cacheTtlMs: 0 });
+}
+
+export function recordMissionDelivery(amoCode: string, missionId: string, action: "IMPLEMENTATION" | "EFFECTIVENESS_REVIEW", payload: { rationale: string; evidence_asset_id: string; effective_date?: string; conditions_satisfied: boolean; expected_updated_at: string }) {
+  return apiRequest<QmsMission>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}/${action === "IMPLEMENTATION" ? "implementation" : "effectiveness-review"}`), jsonOptions("POST", payload));
 }
 
 function jsonOptions(method: string, body: unknown): RequestInit {
@@ -162,11 +174,12 @@ function jsonOptions(method: string, body: unknown): RequestInit {
 
 export function listQmsMissions(
   amoCode: string,
-  options: { status?: QmsMissionStatus; missionType?: QmsMissionType; ownerUserId?: string; limit?: number; offset?: number } = {},
+  options: { status?: QmsMissionStatus; missionType?: QmsMissionType; ownerUserId?: string; limit?: number; offset?: number; view?: string } = {},
   signal?: AbortSignal,
 ): Promise<QmsMissionListResponse> {
   const params = new URLSearchParams();
   if (options.status) params.set("status", options.status);
+  if (options.view) params.set("view", options.view);
   if (options.missionType) params.set("mission_type", options.missionType);
   if (options.ownerUserId) params.set("owner_user_id", options.ownerUserId);
   params.set("limit", String(options.limit ?? 25));
@@ -190,7 +203,7 @@ export function createQmsMission(amoCode: string, payload: QmsMissionCreate): Pr
   return apiRequest<QmsMission>(qmsPath(amoCode, "/missions"), jsonOptions("POST", payload));
 }
 
-export function updateQmsMission(amoCode: string, missionId: string, payload: { owner_user_id: string | null; sponsor_user_id: string | null; target_date: string | null }): Promise<QmsMission> {
+export function updateQmsMission(amoCode: string, missionId: string, payload: { title?: string; description?: string; owner_user_id?: string | null; sponsor_user_id?: string | null; target_date?: string | null; scope?: Record<string, unknown>; expected_updated_at?: string }): Promise<QmsMission> {
   return apiRequest<QmsMission>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}`), jsonOptions("PATCH", payload));
 }
 

@@ -414,3 +414,23 @@
 .qms-missions__counts { display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--qms-muted);font-size:13px; }
 .qms-missions__create button { white-space:nowrap; }
 .qms-missions__header > div:last-child { justify-self: end; justify-content: flex-end; width: auto; }
+
+.qms-mission-detail__summary article { min-height: 76px; padding: 12px 16px; }
+.qms-mission-detail__summary strong { font-size: 20px; }
+.qms-mission-detail__gate > span { min-width: 0; overflow-wrap: anywhere; }
+.qms-mission-detail__header > button { margin-right: 8px; }
+.qms-mission-detail button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .qms-missions__header { align-items: stretch; }
+  .qms-missions__header > div:last-child { width: 100%; justify-content: flex-start; }
+  .qms-missions__header > div:last-child > a { flex-basis: 100%; font-size: 13px; }
+  .qms-missions__header button { flex: 1 1 auto; white-space: nowrap; }
+  .qms-mission-detail__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qms-mission-detail__summary article { padding: 10px; }
+  .qms-mission-detail__summary strong { font-size: 17px; }
+  .qms-mission-detail__gates { overflow-x: hidden; }
+  .qms-mission-detail__gates > header { flex-wrap: wrap; }
+  .qms-mission-detail__gate-head { display: none; }
+  .qms-mission-detail__gate { min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .qms-mission-detail__badges span { white-space: normal; }
+}

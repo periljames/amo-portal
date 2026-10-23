@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { mockPortalBackgroundRequests } from "./helpers/portalBackgroundMocks";
+import type { QmsMission } from "../../src/services/qmsMissions";
 
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -43,7 +44,8 @@ function mission(id = "mission-1") {
     mission_type: "CAPABILITY_ADDITION",
     title: "DHC-8-400 capability inclusion",
     description: "Add DHC-8-400 line and base maintenance capability.",
-    scope: { capability: "DHC-8-400 · Airframe · Line + Base" },
+    scope: { capability: "DHC-8-400 · Airframe · Line + Base" } as Record<string, unknown>,
+    next_action: undefined as QmsMission["next_action"],
     regulatory_basis: ["Capability self-evaluation"],
     risk_level: "HIGH",
     status: "PLANNING",
@@ -287,4 +289,103 @@ test("Authority decisions select retained correspondence and remain disabled wit
   await page.getByLabel("Retained Authority evidence").selectOption({ label: "Authority approval letter.pdf" });
   await expect(page.getByRole("button", { name: "Record decision", exact: true })).toBeEnabled();
   await page.screenshot({ path: "../.artifacts/qms-authority-evidence-fixture.png", fullPage: true });
+});
+
+test("Every Change Control queue reads governed projects with its own server filter", async ({ page }) => {
+  await prepare(page);
+  const legacyCalls: string[] = [];
+  page.on("request", request => { if (/\/api\/maintenance\/.*\/quality\/change-control\//.test(request.url())) legacyCalls.push(request.url()); });
+  for (const [view, title] of [["pending-approval","Pending Approval"],["implemented","Implemented"],["rejected","Rejected"]]) {
+    const request = page.waitForRequest(request => request.url().includes(`/quality/missions?view=${view}`));
+    await page.goto(`/maintenance/tenant-a/quality/change-control/${view}`, { waitUntil: "domcontentloaded" });
+    await request;
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Manage project" })).toBeVisible();
+  }
+  expect(legacyCalls).toEqual([]);
+});
+
+test("Empty approval queues do not reserve a blank grid or pagination", async ({ page }) => {
+  await prepare(page);
+  await page.route("**/quality/missions?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({items:[],total:0,limit:25,offset:0,has_more:false}) }));
+  await page.goto("/maintenance/tenant-a/quality/change-control/pending-approval", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("status").filter({hasText:"No controlled changes in this view."})).toBeVisible();
+  await expect(page.locator(".qms-workspace-grid")).toHaveCount(0);
+  await expect(page.getByRole("navigation",{name:"Projects pagination"})).toHaveCount(0);
+  expect((await page.locator(".qms-missions__portfolio").boundingBox())!.height).toBeLessThan(250);
+});
+
+test("Controlled readiness selects retained evidence and requires review findings", async ({ page }) => {
+  await prepare(page, { scope: { change_workflow_version: 2, affected_scope: "DHC-8 capability" } });
+  let peopleUrl = "";
+  page.on("request", request => { if (request.url().includes("/audits/personnel/options")) peopleUrl = request.url(); });
+  await page.route("**/missions/mission-1/readiness-evidence?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ asset_id: "readiness-proof", filename: "Safety assessment.pdf", sha256: "a".repeat(64), size_bytes: 100 }] }) }));
+  await page.goto("/maintenance/tenant-a/quality/change-control/register?missionId=mission-1", { waitUntil: "domcontentloaded" });
+  await page.getByRole("combobox", { name: "Readiness gate", exact: true }).selectOption("gate-1");
+  expect(new URL(peopleUrl).searchParams.get("auditors_only")).toBe("false");
+  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("PASS");
+  await page.getByRole("combobox", { name: "Evidence", exact: true }).selectOption("VERIFIED");
+  await expect(page.getByRole("button", { name: "Save gate" })).toBeDisabled();
+  await page.getByLabel("Retained readiness evidence").selectOption("readiness-proof");
+  await page.getByLabel("Readiness review findings").fill("Reviewed the signed assessment and its applicable mitigations.");
+  await expect(page.getByRole("button", { name: "Save gate" })).toBeEnabled();
+  await expect(page.getByLabel("Source record", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Open Document Control to retain evidence" })).not.toHaveAttribute("target", "_blank");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByLabel("Readiness review findings")).toHaveValue("Reviewed the signed assessment and its applicable mitigations.");
+  await expect(page.getByRole("combobox", { name: "Readiness gate", exact: true })).toHaveValue("gate-1");
+  await page.getByRole("region", { name: "Mission actions" }).screenshot({ path: "../.artifacts/change-readiness-desktop.png" });
+});
+
+test("Historical changes remain accessible separately from governed approvals", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/maintenance/tenant-a/quality/change-control/register", { waitUntil: "domcontentloaded" });
+  await page.getByRole("link", { name: "Historical records", exact: true }).click();
+  await expect(page).toHaveURL(/legacy=1/);
+  await expect(page.getByText("Historical change records", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Manage controlled changes and approvals" }).click();
+  await expect(page.getByRole("heading", { name: "Change Control", exact: true })).toBeVisible();
+  await expect(page.getByText("Historical change records", { exact: true })).toHaveCount(0);
+});
+
+test("Authority acceptance leads to implementation and a separate effectiveness review", async ({ page }) => {
+  test.setTimeout(60_000);
+  let current = { ...mission(), status: "SUBMITTED_TO_AUTHORITY", next_action: "IMPLEMENTATION" as QmsMission["next_action"], scope: { change_workflow_version: 2, affected_scope: "Approved maintenance procedure" } };
+  await prepare(page, current);
+  await page.route("**/missions/mission-1", route => route.fulfill({ contentType: "application/json", body: JSON.stringify(current) }));
+  await page.route("**/missions/mission-1/readiness-evidence?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ asset_id: "implementation-proof", filename: "Implementation report.pdf", sha256: "a".repeat(64), size_bytes: 100 }] }) }));
+  await page.route("**/missions/mission-1/implementation", route => {
+    current = { ...current, next_action: "EFFECTIVENESS_REVIEW", updated_at: "2026-10-23T12:00:00Z" };
+    return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(current) });
+  });
+  await page.route("**/missions/mission-1/effectiveness-review", route => {
+    current = { ...current, status: "COMPLETE", next_action: null, updated_at: "2026-10-23T13:00:00Z" };
+    return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(current) });
+  });
+  await page.goto("/maintenance/tenant-a/quality/change-control/register?missionId=mission-1", { waitUntil: "domcontentloaded" });
+  const implementation = page.getByRole("form", { name: "Record implementation", exact: true });
+  await expect(implementation).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record decision", exact: true })).toHaveCount(0);
+  await implementation.getByLabel("Actual implementation date").fill("2026-10-23");
+  await implementation.getByLabel("Implementation and conditions met").fill("Implemented the approved revision within its operating conditions.");
+  await implementation.getByLabel("Implementation / review evidence").selectOption("implementation-proof");
+  await expect(implementation.getByRole("button", { name: "Record implementation", exact: true })).toBeDisabled();
+  await implementation.getByRole("checkbox").check();
+  const implementationVersion = current.updated_at;
+  const request = page.waitForRequest(request => request.url().endsWith("/implementation") && request.method() === "POST");
+  await implementation.getByRole("button", { name: "Record implementation", exact: true }).click();
+  expect((await request).postDataJSON()).toMatchObject({ conditions_satisfied: true, effective_date: "2026-10-23", evidence_asset_id: "implementation-proof", expected_updated_at: implementationVersion });
+  const review = page.getByRole("form", { name: "Effectiveness review", exact: true });
+  await expect(review).toBeVisible();
+  await review.getByLabel("Effectiveness findings and closure basis").fill("Verified that the procedure is effective and all assigned actions are resolved.");
+  await review.getByLabel("Implementation / review evidence").selectOption("implementation-proof");
+  await review.getByRole("checkbox").check();
+  await review.screenshot({ path: "../.artifacts/change-effectiveness-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await review.screenshot({ path: "../.artifacts/change-effectiveness-mobile.png" });
+  await page.locator(".qms-mission-detail__gate").first().screenshot({ path: "../.artifacts/change-readiness-mobile-card.png" });
+  expect(await page.locator(".qms-mission-detail__gate").first().evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await review.getByRole("button", { name: "Close change", exact: true }).click();
+  await expect(page.getByText("Decision chain closed.", { exact: true })).toBeVisible();
 });

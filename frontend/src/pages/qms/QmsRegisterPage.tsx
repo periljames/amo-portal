@@ -197,7 +197,8 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
   const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
   const workspace = context ? `${context.amoCode}/${context.module.id}/${context.view}?${searchParams}` : "";
-  const governedChange = context?.module.id === "change-control" && ["register", "new"].includes(context.view);
+  const historicalChanges = context?.module.id === "change-control" && context.view !== "new" && searchParams.get("legacy") === "1";
+  const governedChange = context?.module.id === "change-control" && !historicalChanges;
   const isEvidence = context?.module.id === "evidence-vault";
   const evidenceQuery = useQuery({
     queryKey: ["qms-evidence-vault", context?.amoCode, context?.view, query, status, limit, offset],
@@ -283,8 +284,8 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   if (!hasQmsRolePermission(module.permission)) return <Navigate to={qmsBasePath(amoCode)} replace />;
 
-  if (module.id === "change-control" && ["register", "new"].includes(view)) {
-    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><Suspense fallback={<InlineLoading label="Opening controlled changes"/>}><QmsMissionsPage key={view} amoCode={amoCode} changeControl initialCreate={view === "new"}/></Suspense></DepartmentLayout>;
+  if (governedChange) {
+    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><Suspense fallback={<InlineLoading label="Opening controlled changes"/>}><QmsMissionsPage key={view} amoCode={amoCode} changeControl initialCreate={view === "new"} view={view === "new" ? "register" : view}/></Suspense></DepartmentLayout>;
   }
 
   const responseLimit = data?.limit ?? limit;

@@ -78,3 +78,35 @@ def test_authority_evidence_is_selected_by_filename_and_snapshot_keeps_checksum(
     payload = MissionDecisionCreate(decision_type="AUTHORITY_ACCEPTANCE", status="APPROVED", rationale="Recorded decision", evidence_asset_id="valid")
     snapshot = authority_decision_evidence(evidence_db, amo_id="amo-a", payload=payload)
     assert snapshot["asset_id"] == "valid" and snapshot["sha256"] == "a"*64
+
+
+@pytest.mark.parametrize("scope", [{"affected_scope": {"bad":"object"}}, {"affected_scope":"x"*501}])
+def test_controlled_change_scope_requires_bounded_plain_text(scope):
+    with pytest.raises(ValidationError):
+        MissionCreate(mission_type="PROCEDURE_CHANGE", title="Scope check", description="Valid description of the change.", scope=scope)
+
+
+def test_whitespace_is_not_an_approval_rationale():
+    with pytest.raises(ValidationError):
+        MissionDecisionCreate(decision_type="QUALITY_SELF_EVALUATION", status="APPROVED", rationale="   ")
+
+
+@pytest.mark.parametrize("requirements", [{"approval_required":True,"notification_required":False}, {"approval_required":False,"notification_required":False,"physical_address_change":True}, {"approval_required":"false"}])
+def test_authority_policy_rejects_unsafe_or_ambiguous_requirements(requirements):
+    from amodb.apps.quality.mission_workflow import ChangeAuthorityPolicy
+    with pytest.raises(ValidationError):
+        ChangeAuthorityPolicy.model_validate(requirements)
+
+
+def test_physical_address_change_requires_fourteen_days_notice():
+    from datetime import datetime, timezone, timedelta
+    from amodb.apps.quality.mission_workflow import assert_implementation_date
+    now = datetime.now(timezone.utc)
+    notified = now.date() - timedelta(days=14)
+    change = SimpleNamespace(scope={"authority_policy":{"physical_address_change":True}},decisions=[
+        SimpleNamespace(decision_type="AUTHORITY_SUBMISSION",status="APPROVED",decided_at=now-timedelta(days=14),evidence_snapshot={"notified_on":notified.isoformat()}),
+        SimpleNamespace(decision_type="AUTHORITY_ACCEPTANCE",status="APPROVED",decided_at=now-timedelta(days=2),evidence_snapshot={})])
+    with pytest.raises(HTTPException) as error:
+        assert_implementation_date(change, now.date()-timedelta(days=1))
+    assert "14 days" in error.value.detail
+    assert_implementation_date(change, now.date())
