@@ -653,7 +653,7 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
          "due":due,"amo":amo,"id":case_id})
     if due:
         db.execute(text("""UPDATE quality_external_provider_profiles
-            SET next_review_due_on=:due,updated_at=NOW()
+            SET last_reviewed_on=CURRENT_DATE,next_review_due_on=:due,updated_at=NOW()
             WHERE amo_id=:amo AND supplier_id=:supplier"""),
             {"due":due,"amo":amo,"supplier":row["supplier_id"]})
     _record(db,amo,row["supplier_id"],user,"QUALIFICATION_"+new_status,

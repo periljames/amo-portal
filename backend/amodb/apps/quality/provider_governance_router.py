@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
 from amodb.database import get_read_db, get_write_db
+from .provider_review_policy import apply_review_status
 
 from .tenant_security import (
     TenantContext,
@@ -364,9 +365,7 @@ def _provider_detail(db: Session, *, ctx: TenantContext, provider_id: int) -> di
     provider["active_contract_count"] = sum(item["effective_status"] == "ACTIVE" for item in contracts)
     provider["verified_evidence_count"] = sum(item["effective_status"] == "VERIFIED" for item in evidence)
     provider["active_scope_count"] = sum(str(item.get("status") or "") == "ACTIVE" for item in scopes)
-    provider["review_due"] = bool(
-        provider.get("next_review_due_on") and provider["next_review_due_on"] <= _today()
-    )
+    apply_review_status(provider, today=_today())
     provider["allowed_transitions"] = sorted(_PROVIDER_TRANSITIONS.get(str(provider.get("status") or ""), set()))
     return provider
 
@@ -488,7 +487,18 @@ def provider_governance_summary(
               COUNT(*) FILTER (WHERE s.is_active IS TRUE) AS total,
               COUNT(*) FILTER (WHERE CAST(s.status AS TEXT) = 'APPROVED' AND s.is_active IS TRUE) AS approved,
               COUNT(*) FILTER (WHERE CAST(s.status AS TEXT) = 'SUSPENDED' AND s.is_active IS TRUE) AS suspended,
-              COUNT(*) FILTER (WHERE p.next_review_due_on IS NOT NULL AND p.next_review_due_on <= :today AND s.is_active IS TRUE) AS review_due,
+              COUNT(*) FILTER (
+                WHERE s.is_active IS TRUE
+                  AND CAST(s.status AS TEXT) NOT IN ('PROSPECTIVE', 'UNDER_REVIEW', 'REJECTED', 'ARCHIVED')
+                  AND (
+                    COALESCE(p.last_reviewed_on, CAST(s.approved_at AS DATE)) IS NULL
+                    OR COALESCE(p.last_reviewed_on, CAST(s.approved_at AS DATE)) > :today
+                    OR LEAST(
+                      COALESCE(p.last_reviewed_on, CAST(s.approved_at AS DATE)) + LEAST(COALESCE(NULLIF(p.review_interval_days, 0), 365), 365),
+                      p.next_review_due_on
+                    ) <= :today
+                  )
+              ) AS review_due,
               COUNT(*) FILTER (
                 WHERE p.contract_required IS TRUE AND s.is_active IS TRUE
                   AND NOT EXISTS (
@@ -553,6 +563,7 @@ def list_external_providers(
               COALESCE(p.provider_kind, s.supplier_type, 'SUPPLIER') AS provider_kind,
               COALESCE(p.contract_required, FALSE) AS contract_required,
               p.oversight_owner_user_id, p.next_review_due_on,
+              s.approved_at, p.last_reviewed_on, p.review_interval_days,
               COALESCE(p.version, 0) AS governance_version,
               (SELECT COUNT(*) FROM procurement_supplier_approval_scopes a
                  WHERE a.amo_id = s.amo_id AND a.supplier_id = s.id
@@ -592,7 +603,7 @@ def list_external_providers(
     for row in rows:
         item = dict(row)
         item["provider_kind"] = _normalise_provider_kind(item.get("provider_kind"))
-        item["review_due"] = bool(item.get("next_review_due_on") and item["next_review_due_on"] <= _today())
+        apply_review_status(item, today=_today())
         item["contract_gap"] = bool(item.get("contract_required") and not int(item.get("active_contract_count") or 0))
         items.append(item)
     return {"items": items, "total": int(count or 0), "limit": limit, "offset": offset}

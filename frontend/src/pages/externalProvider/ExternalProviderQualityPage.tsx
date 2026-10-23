@@ -117,14 +117,12 @@ export default function ExternalProviderQualityPage() {
     .toLowerCase().includes(search.toLowerCase()));
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="vendor-portal vendor-quality-workspace">
     <div className="vendor-shell">
-      <header className="vendor-header">
-        <div>
+      <header className="vendor-header vendor-header--quality">
           <h1>External provider access</h1>
           <nav aria-label="Provider management">
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers register</Link>
             <a href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Open vendor sign in</a>
           </nav>
-        </div>
         <button type="button" disabled={busy} onClick={() => void refresh().catch((e) => setError(String(e)))}>Refresh access register</button>
       </header>
       {error ? <div role="alert" className="vendor-error">{error}</div> : null}

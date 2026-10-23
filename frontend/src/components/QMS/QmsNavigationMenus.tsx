@@ -41,8 +41,9 @@ export default function QmsNavigationMenus({ amoCode }: { amoCode: string }) {
             {hasQmsRolePermission("qms.people.view") && <details className="qms-page-menu__module"><summary>People & authorizations</summary><div>{(["overview", "people", "cases", "reviews", "administration"] as const).map(tab => link(qmsPeopleWorkspacePath(amoCode, { tab }), qmsViewLabel(tab)))}</div></details>}
           </>}
           {modules.map(module => <div className="qms-page-menu__destination" key={module.id}>
-            {link(qmsModulePath(amoCode, module.id, module.defaultView), module.id === "settings" ? "Settings" : module.navigationLabel)}
-            {module.validViews.length > 1 && <details className="qms-page-menu__module"><summary>{module.navigationLabel} pages</summary><div>{module.validViews.map(view => link(qmsModulePath(amoCode, module.id, view), qmsViewLabel(view)))}</div></details>}
+            {module.validViews.length > 1
+              ? <details className="qms-page-menu__module"><summary>{module.navigationLabel}</summary><div>{module.validViews.map(view => link(qmsModulePath(amoCode, module.id, view), qmsViewLabel(view)))}</div></details>
+              : link(qmsModulePath(amoCode, module.id, module.defaultView), module.navigationLabel)}
           </div>)}
         </nav>}
       </div>;

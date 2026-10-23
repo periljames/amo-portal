@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v14";
+const VERSION = "v15";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];

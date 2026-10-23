@@ -41,7 +41,7 @@ test("settings is a configuration workspace and saves only changed policy groups
   await expect(page.locator(".qms-settings-page h1")).toHaveText("Settings");
   await expect(page.getByRole("grid")).toHaveCount(0);
   await page.getByRole("button", { name: "Controls & settings", exact: true }).click();
-  await page.getByText("Settings pages", { exact: true }).click();
+  await page.locator(".qms-page-menu__panel summary").filter({ hasText: /^Settings$/ }).click();
   await page.getByRole("navigation", { name: "QMS controls and settings" }).getByRole("link", { name: "Numbering", exact: true }).click();
   await page.getByLabel("Audit Prefix").fill("QA");
   await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
@@ -128,9 +128,11 @@ test("controls remain reachable at narrow widths without covering the page", asy
   await page.goto("/maintenance/tenant-a/quality/settings/general");
   await page.getByText("Controls & settings", { exact: true }).click();
   const controls = page.getByRole("navigation", { name: "QMS controls and settings" });
-  await expect(controls.getByRole("link", { name: "External Providers", exact: true })).toBeVisible();
-  await expect(controls.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
-  await controls.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(controls.locator("summary").filter({ hasText: /^External Providers$/ })).toBeVisible();
+  await expect(controls.locator("summary").filter({ hasText: /^Settings$/ })).toHaveCount(1);
+  await expect(controls.getByText("Settings pages", { exact: true })).toHaveCount(0);
+  await controls.locator("summary").filter({ hasText: /^Settings$/ }).click();
+  await controls.getByRole("link", { name: "General", exact: true }).click();
   await expect(controls).not.toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.locator(".tenant-shell__main").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
@@ -146,7 +148,7 @@ test("one compact menu owns page navigation and the drawer has readable width", 
   await expect(page.locator(".quality-context-bar__tabs,.quality-context-bar__subtabs,.qa-workspace-rail,.qms-register-views")).toHaveCount(0);
   await bar.getByRole("button", { name: "Assurance", exact: true }).click();
   const assurance = page.getByRole("navigation", { name: "Assurance pages", exact: true });
-  await assurance.getByText("Audits pages", { exact: true }).click();
+  await assurance.locator("summary").filter({ hasText: /^Audits$/ }).click();
   await expect(assurance.getByRole("link", { name: "Checklists", exact: true })).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/checklists");
   await page.keyboard.press("Escape");
   await expect(assurance).toHaveCount(0);
@@ -208,7 +210,7 @@ test("reviews every shared QMS register view for rendering and navigation errors
     const target = `/maintenance/tenant-a/quality/${module.segment}/${view}`;
     await page.getByRole("navigation", { name: "QMS page menus" }).getByRole("button", { name: menuLabels[module.section], exact: true }).click();
     const panel = page.locator(".qms-page-menu__panel");
-    if (view !== module.defaultView) await panel.getByText(`${module.navigationLabel} pages`, { exact: true }).click();
+    if (module.validViews.length > 1) await panel.locator("summary").filter({ hasText: new RegExp(`^${module.navigationLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }).click();
     await panel.locator(`a[href="${target}"]`).first().click();
     await expect(page).toHaveURL(new RegExp(`${target}$`));
     await expect(page.locator(".qms-register-page")).toBeVisible();

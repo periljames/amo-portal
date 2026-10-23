@@ -35,6 +35,8 @@ This change adds explicit own-AMO approved-scope and unrestricted Authority-acce
 
 Category surveillance defaults to 365 days and may be shortened to 30–365 days. New qualification decisions cap legacy longer intervals at 365 days. Existing qualification records and their recorded decisions are not rewritten as if freshly reviewed.
 
+The follow-up review found that scheduling alone did not prevent operational use after review expiry. Supplier-use checks now require a completed, current review before quote awards, purchase orders and contracted-work transitions that use the common gate. The deadline is the earliest of the recorded date, the risk interval and 365 days after the last completed review (or initial approval for legacy profiles). Missing/future review anchors fail closed; commercial overrides cannot bypass this check. Approved qualification decisions record the completed review date. Detail, list and summary calculations use the same UTC date basis. Providers awaiting initial qualification are excluded from overdue periodic-review counts.
+
 ## Functional coverage and boundaries
 
 | MOPM content | Portal owner / handling |
