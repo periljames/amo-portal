@@ -1,0 +1,45 @@
+.car-rca { min-width: 0; display: grid; gap: 1rem; border: 1px solid var(--border, #cbd5e1); padding: clamp(.75rem, 2vw, 1.4rem); border-radius: 12px; color: inherit; background: var(--card-bg, transparent); }
+.car-rca * { box-sizing: border-box; }
+.car-rca-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.car-rca-heading h4, .car-rca-conclusions h4 { margin: 0 0 .4rem; font-size: 1.08rem; }
+.car-rca-heading p, .car-rca-conclusions p { margin: 0; line-height: 1.55; }
+.car-rca-save { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; font-size: .85rem; }
+.car-rca button, .car-rca input, .car-rca select, .car-rca textarea { font: inherit; max-width: 100%; color: inherit; }
+.car-rca button { border: 1px solid var(--border, #94a3b8); border-radius: 8px; padding: .48rem .7rem; cursor: pointer; background: var(--surface, transparent); }
+.car-rca button:hover:not(:disabled) { background: var(--surface-hover, rgba(103, 120, 140, .12)); }
+.car-rca button:disabled { cursor: not-allowed; opacity: .52; }
+.car-rca button:focus-visible, .car-rca input:focus-visible, .car-rca select:focus-visible, .car-rca textarea:focus-visible { outline: 3px solid var(--focus-ring, #0a74bf); outline-offset: 2px; }
+.car-rca-methods { display: flex; flex-wrap: wrap; gap: .5rem; }
+.car-rca-methods button[aria-pressed=true] { background: var(--primary, #215888); color: var(--primary-contrast, #fff); border-color: transparent; }
+.car-rca-note { margin: 0; line-height: 1.55; font-size: .92rem; opacity: .84; }
+.car-rca-field, .car-rca-grid label { min-width: 0; display: grid; align-content: start; gap: .3rem; line-height: 1.4; font-weight: 550; }
+.car-rca-field textarea, .car-rca-grid input, .car-rca-grid select, .car-rca-grid textarea { display: block; width: 100%; border: 1px solid var(--border, #94a3b8); border-radius: 8px; background: var(--input-bg, transparent); color: inherit; padding: .6rem .7rem; line-height: 1.45; font-weight: 400; }
+.car-rca-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 195px), 1fr)); gap: .7rem; align-items: end; }
+.car-rca-analysis { display: grid; gap: .9rem; }
+.car-rca-row { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.car-rca-table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--border, #cbd5e1); border-radius: 8px; }
+.car-rca table { width: 100%; border-collapse: collapse; font-size: .91rem; min-width: 480px; }
+.car-rca th, .car-rca td { text-align: left; vertical-align: top; padding: .58rem .6rem; border-bottom: 1px solid var(--border, #cbd5e1); overflow-wrap: anywhere; }
+.car-rca td button { margin-right: .4rem; }
+.car-rca th { font-weight: 650; background: var(--surface, rgba(125, 125, 125, .08)); }
+.car-rca caption { caption-side: top; text-align: left; padding: .55rem; font-weight: 600; }
+.car-rca-fishbone { min-width: 0; display: grid; gap: .6rem; }
+.car-rca-diagram-controls { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.car-rca-diagram-scroller { width: 100%; overflow: auto; border: 1px solid var(--border, #94a3b8); background: var(--surface, transparent); border-radius: 10px; max-height: 38rem; }
+.car-rca-diagram-scroller svg { display: block; max-width: none; }
+.car-rca-pareto { max-width: 100%; height: auto; overflow: visible; }
+.car-rca-conclusions { display: grid; gap: .8rem; border-top: 1px solid var(--border, #cbd5e1); padding-top: .9rem; }
+.car-rca-check { display: flex; align-items: flex-start; gap: .5rem; line-height: 1.5; }
+.car-rca-check input { flex: 0 0 auto; margin-top: .3rem; }
+@media (max-width: 660px) {
+  .car-rca { padding: .65rem; }
+  .car-rca-heading { display: grid; }
+  .car-rca-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .car-rca-methods button { text-align: left; overflow-wrap: anywhere; }
+  .car-rca-grid { grid-template-columns: 1fr; }
+}
+@media print {
+  .car-rca-methods, .car-rca-save, .car-rca-diagram-controls, .car-rca-row, .car-rca td button { display: none !important; }
+  .car-rca-diagram-scroller { max-height: none; overflow: visible; }
+  .car-rca-diagram-scroller svg { width: 100%; height: auto; }
+}

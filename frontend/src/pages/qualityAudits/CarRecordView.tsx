@@ -8,6 +8,7 @@ import { qmsListCarAttachments, qmsDownloadCarAttachmentBlob, qmsUploadCarAttach
 import { saveDownloadedFile } from "../../utils/downloads";
 import "./caseWorkspace.css";
 import { carHasReview, carNextAction, caseDate } from "./carCaseModel";
+import CarRcaInternalReview from "../../components/QMS/carRca/CarRcaInternalReview";
 
 type Props = { car: CAROut; amoCode: string; owner: string; canManage: boolean; canAttach: boolean; canReview: boolean;
   onEdit: () => void; onReview: () => void; onInvite: () => void; onExport: () => void };
@@ -45,6 +46,7 @@ export default function CarRecordView({car, amoCode, owner, canManage, canAttach
       <section className="case-section"><h2>Finding & requirement</h2><p>{car.finding_description || car.summary}</p>{car.finding_description && car.summary !== car.finding_description ? <details><summary>Original CAR statement</summary><p>{car.summary}</p></details> : null}</section>
       {section("Immediate correction / containment",car.containment_action)}
       {section("Root cause analysis",car.root_cause_text || car.root_cause,car.root_cause_review_note)}
+      <CarRcaInternalReview amoCode={amoCode} carId={car.id} canReview={canReview} />
       {section("Corrective action plan",car.capa_text || car.corrective_action,car.capa_review_note)}
       {section("Preventive action",car.preventive_action)}
     </div><aside>

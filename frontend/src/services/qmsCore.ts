@@ -2063,6 +2063,7 @@ export async function qmsForwardCarExtensionRequest(
 
 export interface CARInviteOut {
   deadline_change_requires_review?: boolean;
+  structured_rca_required?: boolean;
   car_id: string;
   invite_token: string;
   invite_url: string;
