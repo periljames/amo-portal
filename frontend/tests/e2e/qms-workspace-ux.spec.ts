@@ -1,6 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Locator } from "@playwright/test";
 import { QMS_ROUTE_REGISTRY } from "../../src/pages/qms/routes/qmsRouteRegistry";
 import { mockQualityShell } from "./helpers/mockQualityShell";
+
+async function expandModule(summary: Locator) {
+  if (!await summary.evaluate(element => element.parentElement?.hasAttribute("open"))) await summary.click();
+}
 
 async function prepare(page: Page, admin = false) {
   await mockQualityShell(page);
@@ -41,7 +45,7 @@ test("settings is a configuration workspace and saves only changed policy groups
   await expect(page.locator(".qms-settings-page h1")).toHaveText("Settings");
   await expect(page.getByRole("grid")).toHaveCount(0);
   await page.getByRole("button", { name: "Controls & settings", exact: true }).click();
-  await page.locator(".qms-page-menu__panel summary").filter({ hasText: /^Settings$/ }).click();
+  await expandModule(page.locator(".qms-page-menu__panel summary").filter({ hasText: /^Settings$/ }));
   await page.getByRole("navigation", { name: "QMS controls and settings" }).getByRole("link", { name: "Numbering", exact: true }).click();
   await page.getByLabel("Audit Prefix").fill("QA");
   await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
@@ -168,7 +172,7 @@ test("controls remain reachable at narrow widths without covering the page", asy
   await expect(controls.locator("summary").filter({ hasText: /^External Providers$/ })).toBeVisible();
   await expect(controls.locator("summary").filter({ hasText: /^Settings$/ })).toHaveCount(1);
   await expect(controls.getByText("Settings pages", { exact: true })).toHaveCount(0);
-  await controls.locator("summary").filter({ hasText: /^Settings$/ }).click();
+  await expandModule(controls.locator("summary").filter({ hasText: /^Settings$/ }));
   await controls.getByRole("link", { name: "General", exact: true }).click();
   await expect(controls).not.toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -247,7 +251,7 @@ test("reviews every shared QMS register view for rendering and navigation errors
     const target = `/maintenance/tenant-a/quality/${module.segment}/${view}`;
     await page.getByRole("navigation", { name: "QMS page menus" }).getByRole("button", { name: menuLabels[module.section], exact: true }).click();
     const panel = page.locator(".qms-page-menu__panel");
-    if (module.validViews.length > 1) await panel.locator("summary").filter({ hasText: new RegExp(`^${module.navigationLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }).click();
+    if (module.validViews.length > 1) await expandModule(panel.locator("summary").filter({ hasText: new RegExp(`^${module.navigationLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }));
     await panel.locator(`a[href="${target}"]`).first().click();
     await expect(page).toHaveURL(new RegExp(`${target}$`));
     await expect(page.locator(".qms-register-page")).toBeVisible();

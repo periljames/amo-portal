@@ -211,6 +211,7 @@ function NavBranch({
 }: NavBranchProps): React.ReactElement {
   const active = isPortalPathActive(pathname, item, search);
   const isLeaf = !item.children?.length;
+  const expandOnLabel = /\/(?:quality|qms)(?:\/|$)/.test(pathname);
   const workspaceOpen = Boolean(
     new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("workspace"),
   );
@@ -234,13 +235,17 @@ function NavBranch({
         <button
           type="button"
           className="tenant-nav__link"
-          data-preload-route={item.path}
-          onClick={() => onNavigate(item.path)}
+          data-preload-route={isLeaf || !expandOnLabel ? item.path : undefined}
+          onClick={() => !isLeaf && expandOnLabel ? onToggle(item.id) : onNavigate(item.path)}
+          aria-label={!isLeaf && expandOnLabel ? `${open ? "Collapse" : "Expand"} ${item.label}` : undefined}
+          aria-expanded={!isLeaf && expandOnLabel ? open : undefined}
+          aria-controls={!isLeaf && expandOnLabel ? `tenant-nav-children-${item.id}` : undefined}
           aria-current={active && isLeaf ? "page" : undefined}
           title={item.label}
         >
           {Icon ? <Icon size={17} strokeWidth={2} aria-hidden="true" /> : <span className="tenant-nav__rail" aria-hidden="true" />}
           <span>{item.label}</span>
+          {!isLeaf && expandOnLabel ? <ChevronRight size={15} className={`tenant-nav__branch-chevron${open ? " is-open" : ""}`} aria-hidden="true"/> : null}
         </button>
         {isLeaf ? (
           <button
@@ -253,18 +258,7 @@ function NavBranch({
           >
             <Star size={13} fill={favourites.has(item.id) ? "currentColor" : "none"} aria-hidden="true" />
           </button>
-        ) : (
-          <button
-            type="button"
-            className="tenant-nav__expand"
-            onClick={() => onToggle(item.id)}
-            aria-label={`${open ? "Collapse" : "Expand"} ${item.label}`}
-            aria-expanded={open}
-            aria-controls={`tenant-nav-children-${item.id}`}
-          >
-            {open ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
-          </button>
-        )}
+        ) : !expandOnLabel ? <button type="button" className="tenant-nav__expand" onClick={() => onToggle(item.id)} aria-label={`${open ? "Collapse" : "Expand"} ${item.label}`} aria-expanded={open} aria-controls={`tenant-nav-children-${item.id}`}><ChevronRight size={15} style={{transform:open?"rotate(90deg)":undefined}} aria-hidden="true"/></button> : null}
       </div>
       {open && item.children?.length ? (
         <div id={`tenant-nav-children-${item.id}`} className="tenant-nav__children">
@@ -514,7 +508,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     const focusable = () => Array.from(sidebar?.querySelectorAll<HTMLElement>(
       'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
     ) || []);
-    focusable()[0]?.focus();
+    focusable()[0]?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -528,16 +522,16 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       const last = controls[controls.length - 1];
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
-        last.focus();
+        last.focus({ preventScroll: true });
       } else if (!event.shiftKey && document.activeElement === last) {
         event.preventDefault();
-        first.focus();
+        first.focus({ preventScroll: true });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      previousFocus?.focus();
+      previousFocus?.focus({ preventScroll: true });
     };
   }, [drawerOpen, pinnedVisible]);
 
@@ -572,10 +566,17 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
     setExpanded((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else {
+        const siblingsOf = (items: PortalNavItem[]): string[] => {
+          if (items.some(item => item.id === id)) return items.map(item => item.id);
+          return items.flatMap(item => siblingsOf(item.children || []));
+        };
+        if (activeDepartment === "quality") navigation.flatMap(group => siblingsOf(group.items)).forEach(sibling => next.delete(sibling));
+        next.add(id);
+      }
       return next;
     });
-  }, []);
+  }, [navigation, activeDepartment]);
 
   const toggleFavourite = useCallback((item: PortalNavItem) => {
     setFavourites((previous) => {

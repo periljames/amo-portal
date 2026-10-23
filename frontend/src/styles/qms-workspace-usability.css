@@ -100,6 +100,21 @@ a.qms-settings__card:hover { border-color:var(--accent-primary,#2454c6); }
 .qms-page-menu__destination+.qms-page-menu__destination { border-top:1px solid var(--surface-border,#dbe2ea);padding-top:4px; }
 .qms-page-menu__module>summary { padding:9px 10px;cursor:pointer;font-size:14px;font-weight:500;color:var(--text-primary); }
 .qms-page-menu__module>div { margin:3px 0 6px 14px;padding-left:6px;border-left:2px solid var(--surface-border,#dbe2ea); }
+.qms-page-menu__module > summary[data-active="true"] { color: var(--accent-primary,#2454c6); font-weight:650; }
+.qms-page-menu > button > svg { transition: transform 120ms ease; }
+.qms-page-menu > button[aria-expanded="true"] > svg { transform:rotate(180deg); }
+.qms-page-menu__panel { transform-origin: top left; animation:qms-menu-appear 110ms ease-out; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.qms-page-menu__panel :is(a,summary):focus-visible { outline:2px solid var(--accent-primary,#2454c6);outline-offset:-2px; }
+.tenant-nav__branch-chevron { margin-left:auto;flex:0 0 auto;transition:transform 120ms ease; }
+.tenant-nav__branch-chevron.is-open { transform:rotate(90deg); }
+.tenant-shell[data-workspace-module="quality"] .tenant-nav__row:has(> .tenant-nav__link[aria-expanded]) { grid-template-columns:minmax(0,1fr); }
+.tenant-shell[data-workspace-module="quality"] .tenant-nav__link[aria-expanded] { grid-template-columns:19px minmax(0,1fr) 15px; }
+.tenant-shell[data-workspace-module="quality"] .tenant-nav__link[aria-expanded] > span:nth-child(2) { overflow:hidden;font-size:var(--font-size-label);font-weight:var(--font-weight-label);line-height:1.4;text-overflow:ellipsis;white-space:nowrap; }
+.tenant-shell[data-workspace-module="quality"] .tenant-shell__sidebar { transition-duration:160ms; }
+@keyframes qms-menu-appear { from { opacity:0;transform:translateY(-3px); } to { opacity:1;transform:translateY(0); } }
+@media(prefers-reduced-motion:reduce) { .qms-page-menu__panel { animation:none; } .qms-page-menu > button > svg,.tenant-nav__branch-chevron,.tenant-shell[data-workspace-module="quality"] .tenant-shell__sidebar { transition:none; } }
+:root[data-portal-motion="reduced"] .qms-page-menu__panel { animation:none; }
+:root[data-portal-motion="reduced"] :is(.qms-page-menu > button > svg,.tenant-nav__branch-chevron) { transition:none; }
 .tenant-shell[data-workspace-module="quality"] .qa-workspace-shell--unified { grid-template-columns:minmax(0,1fr); }
 .tenant-shell[data-workspace-module="quality"] .qa-workspace-current-page-heading { display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 0 10px;margin:0; }
 .qa-workspace-current-page-heading h1 { margin:0;font-size:22px;line-height:1.3; }
