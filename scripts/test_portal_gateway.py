@@ -98,6 +98,44 @@ def test_disconnected_backend_returns_actionable_503_without_spa_fallback(root):
         assert response.headers["cache-control"] == "no-store"
 
 
+def test_stale_connection_is_retried_once_for_a_bodyless_read(root):
+    calls = []
+    def upstream(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.RemoteProtocolError("Upstream closed its idle connection", request=request)
+        return httpx.Response(200, stream=Chunks(b"complete response"))
+    with TestClient(gateway.create_app(root, transport=httpx.MockTransport(upstream)), base_url="http://localhost") as client:
+        response = client.get("/api/maintenance/amo/quality/reports/audit-performance?limit=30", headers={"Authorization":"Bearer test-token"})
+        assert response.status_code == 200 and response.content == b"complete response"
+        assert len(calls) == 2
+        assert calls[0].url == calls[1].url
+        assert calls[1].headers["authorization"] == "Bearer test-token"
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_interrupted_mutations_return_structured_failure_without_replay(root, method):
+    calls = []
+    async def upstream(request):
+        calls.append(await request.aread())
+        raise httpx.ReadError("Acknowledgement lost", request=request)
+    with TestClient(gateway.create_app(root, transport=httpx.MockTransport(upstream)), base_url="http://localhost") as client:
+        response = client.request(method, "/api/upload", content=b"uploaded once")
+        assert response.status_code == 502 and response.json()["retryable"] is False
+        assert calls == [b"uploaded once"]
+
+
+def test_repeated_read_transport_failures_are_bounded_and_never_become_an_unhandled_500(root):
+    calls = []
+    def upstream(request):
+        calls.append(request)
+        raise httpx.ReadError("Connection reset", request=request)
+    with TestClient(gateway.create_app(root, transport=httpx.MockTransport(upstream)), base_url="http://localhost") as client:
+        response = client.get("/api/report")
+        assert len(calls) == 2 and response.status_code == 502
+        assert response.json()["retryable"] is True
+
+
 def test_public_navigation_stays_spa_while_ops_and_json_stay_api(root):
     requests = []
 

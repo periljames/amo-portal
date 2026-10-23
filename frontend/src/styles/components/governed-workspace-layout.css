@@ -127,7 +127,22 @@
 }
 
 .tenant-shell[data-workspace-module="quality"] .qms-register-workspace > :is(.qms-register-empty, .qms-register-loading, .qms-register-error) {
-  flex: 1 0 auto;
+  flex: 0 0 auto;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-workspace:has(> :is(.qms-register-empty, .qms-register-loading, .qms-register-error)) {
+  flex: 0 0 auto;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-page .page-header {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.tenant-shell[data-workspace-module="quality"] .qms-register-page .page-header__title {
+  font-size: 24px;
 }
 
 .tenant-shell[data-workspace-module="quality"] .qms-register-workspace .qms-workspace-grid {

@@ -39,6 +39,14 @@ The follow-up review found that scheduling alone did not prevent operational use
 
 ## Functional coverage and boundaries
 
+### Controlled changes (MOPM 1.9 / 1.10)
+
+Change Control register/new entries now open the governed project owner instead of a creation placeholder. Users can start capability additions/changes, line-station/additional-location changes, procedure changes and regulatory/organization changes. Capability additions retain their 11 readiness gates. The other exposed change types receive five pending hard gates for scope/approval impact, safety assessment, controlled revisions, personnel/resources and Authority requirements. The source requirements remain fixed defaults; adding a project does not pass any gate. Scope/reason validation runs before storage, and the UI gives inline field feedback.
+
+Quality self-evaluation, named Executive approval, Authority submission and Authority acceptance retain separate attributable decisions. Approved Authority submission/acceptance now requires selecting a retained Authority evidence asset belonging to the same AMO; disposed, general-category, foreign or missing assets cannot qualify. Decision snapshots preserve the selected asset/checksum. PostgreSQL gate updates lock the gate table explicitly, fixing an outer-join locking failure found by the real database probe. Generic create/update/delete/action routes for historical change-register records cannot bypass this owner; historical pending/implemented/rejected views remain read-only.
+
+This is readiness and approval workflow coverage, not proof of actual implementation. Physical-address notice timing, operational implementation/conditions verification, post-implementation review, and the content of each submitted assessment still require further governed handling and validation. Existing source references marked verified are accountable attestations; a string reference alone is not independent verification of an external approval document. Existing projects are not silently rewritten or approved.
+
 | MOPM content | Portal owner / handling |
 | --- | --- |
 | Organization, responsibilities, appointments and access | Tenant accounts, workforce authorizations and Quality roles. Tenant administrators inherit operational entry/capability gates; tenant boundaries, independence and domain evidence checks remain enforced. |

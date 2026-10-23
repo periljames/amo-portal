@@ -42,6 +42,23 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("confirms a user-requested reload only after refreshing canonical HTML", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("new release", { headers: { "Content-Type": "text/html" } })));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("new release");
+    expect(postMessage).toHaveBeenCalledWith({ ok: true });
+  });
+  it("does not replace saved HTML with a gateway error during an update", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("Bad gateway", { status: 502 })));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("saved release")]]));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(postMessage).toHaveBeenCalledWith({ ok: false });
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("saved release");
+  });
   it("serves content-addressed chunks without re-downloading them on a weak link", async () => {
     const fetch = vi.fn(() => new Promise<Response>(() => {}));
     const { context } = worker(fetch);

@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
-from amodb.database import get_write_db
+from amodb.database import get_write_db, get_read_db
 
 from .mission_models import QualityMissionDecision
 from .mission_router import (
@@ -24,6 +25,39 @@ router = APIRouter(prefix="/missions", tags=["Quality mission lifecycle"])
 
 class MissionCancellation(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
+
+
+def _authority_evidence(db, *, amo_id, asset_id=None, search=""):
+    return db.execute(text("""SELECT a.id AS asset_id,a.filename,a.sha256,a.size_bytes,a.category
+        FROM document_evidence_assets a
+        WHERE a.tenant_id=:amo AND a.category='AUTHORITY'
+          AND (CAST(:asset AS TEXT) IS NULL OR a.id=:asset)
+          AND LOWER(a.filename) LIKE :search
+          AND NOT EXISTS (SELECT 1 FROM document_retention_dispositions d
+            WHERE d.tenant_id=a.tenant_id AND d.source_type='EVIDENCE_ASSET'
+              AND d.source_id=a.id AND d.status='DISPOSED')
+        ORDER BY a.created_at DESC LIMIT 50"""),
+        {"amo":amo_id,"asset":asset_id,"search":f"%{search.lower()}%"}).mappings().all()
+
+
+def authority_decision_evidence(db, *, amo_id, payload):
+    if payload.decision_type not in {"AUTHORITY_SUBMISSION", "AUTHORITY_ACCEPTANCE"}:
+        return None
+    if payload.status != "APPROVED" and not payload.evidence_asset_id:
+        return None
+    if not payload.evidence_asset_id:
+        raise HTTPException(422, "Select the retained Authority correspondence before recording this decision.")
+    rows = _authority_evidence(db, amo_id=amo_id, asset_id=payload.evidence_asset_id)
+    if not rows or len(rows[0]["sha256"] or "") != 64 or (rows[0]["size_bytes"] or 0) <= 0:
+        raise HTTPException(422, "Authority evidence must be a retained, available Authority document in this AMO.")
+    return dict(rows[0])
+
+
+@router.get("/{mission_id}/authority-evidence")
+def mission_authority_evidence(mission_id: str, search: str = "", ctx: TenantContext = Depends(require_quality_permission("qms.change.view")), db: Session = Depends(get_read_db)):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id)
+    return {"items": [dict(row) for row in _authority_evidence(db, amo_id=ctx.amo_id, search=search[:120])]}
 
 
 def assert_mission_actor_allowed(mission, payload: MissionDecisionCreate, actor_user_id: str) -> None:
@@ -73,6 +107,7 @@ def record_governed_mission_decision(
     mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
     assert_mission_actor_allowed(mission, payload, ctx.user_id)
     assert_mission_decision_allowed(mission, payload)
+    authority_evidence = authority_decision_evidence(db, amo_id=ctx.amo_id, payload=payload)
 
     now = _utcnow()
     decision = QualityMissionDecision(
@@ -81,7 +116,7 @@ def record_governed_mission_decision(
         decision_type=payload.decision_type,
         status=payload.status,
         rationale=payload.rationale.strip(),
-        evidence_snapshot=_decision_evidence_snapshot(mission),
+        evidence_snapshot={**_decision_evidence_snapshot(mission), "authority_evidence": authority_evidence},
         decided_by_user_id=ctx.user_id,
         decided_at=now,
         created_at=now,

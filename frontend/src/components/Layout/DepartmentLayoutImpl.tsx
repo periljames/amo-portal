@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import PortalUpdateMenuItem from "../feedback/PortalUpdateMenuItem";
 import { useLocation, useNavigate } from "react-router-dom";
 import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 import "../../styles/qms-workspace-usability.css";
@@ -725,6 +726,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
 
                     {profileOpen ? (
                       <div className="tenant-shell__profile-menu" role="menu">
+                        <PortalUpdateMenuItem />
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(assignedWorkPath); }}><ClipboardCheck size={15} /> Assigned work</button>
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
                         {adminProfile?.eligible || standingAdmin ? (

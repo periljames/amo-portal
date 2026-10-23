@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v15";
+const VERSION = "v16";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
@@ -127,6 +127,18 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "REFRESH_PORTAL_SHELL") {
+    event.waitUntil((async () => {
+      try {
+        const response = await fetch("/", { cache: "no-store" });
+        if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) throw new Error("Shell unavailable");
+        const cache = await caches.open(SHELL_CACHE);
+        await cache.put("/", response);
+        event.ports?.[0]?.postMessage({ ok: true });
+      } catch { event.ports?.[0]?.postMessage({ ok: false }); }
+    })());
+    return;
+  }
   if (event.data?.type === "PRECACHE_PORTAL") event.waitUntil(precachePortal().catch(() => undefined));
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
   if (event.data?.type === "PREPARE_AUDIT_SHELL") {

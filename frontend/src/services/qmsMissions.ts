@@ -144,7 +144,13 @@ export type QmsMissionDecisionCreate = {
   decision_type: QmsMissionDecisionType;
   status: QmsMissionDecisionStatus;
   rationale: string;
+  evidence_asset_id?: string;
 };
+
+export type MissionAuthorityEvidence = { asset_id: string; filename: string; sha256: string; size_bytes: number };
+export function listMissionAuthorityEvidence(amoCode: string, missionId: string, search: string) {
+  return apiRequest<{ items: MissionAuthorityEvidence[] }>(qmsPath(amoCode, `/missions/${encodeURIComponent(missionId)}/authority-evidence?search=${encodeURIComponent(search)}`), { cacheTtlMs: 0 });
+}
 
 function jsonOptions(method: string, body: unknown): RequestInit {
   return {

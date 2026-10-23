@@ -77,16 +77,27 @@ def create_app(root: Path, api_target="http://127.0.0.1:8080", ops_target="http:
         # not point a remote browser at its own 127.0.0.1.
         headers = forwarded_headers(request.headers.raw)
         # The backend's existing auth, tenant and CORS rules remain authoritative.
-        upstream_request = request.app.state.upstream.build_request(
-            request.method, upstream_url, headers=headers, content=request.stream(),
-        )
+        safe_read = request.method in {"GET", "HEAD"} and request.headers.get("content-length", "0") == "0" and "transfer-encoding" not in request.headers
+        def build_request():
+            return request.app.state.upstream.build_request(
+                request.method, upstream_url, headers=headers, content=None if safe_read else request.stream(),
+            )
         try:
-            response = await request.app.state.upstream.send(upstream_request, stream=True)
+            try:
+                response = await request.app.state.upstream.send(build_request(), stream=True)
+            except (httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError):
+                # A stale pooled connection may reset before response headers.
+                # Retry one bodyless read; never replay an upload or mutation.
+                if not safe_read:
+                    raise
+                response = await request.app.state.upstream.send(build_request(), stream=True)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
             return JSONResponse({"detail": "The backend is temporarily unavailable. Please retry.", "retryable": True}, status_code=503, headers={"Retry-After": "3", "X-AMO-Proxy-Transport-Error": "1", "Cache-Control": "no-store"})
         except httpx.TimeoutException:
             # Uploads are never replayed: a failed acknowledgement may follow a commit.
             return JSONResponse({"detail": "The backend transfer stalled. Check the record before retrying an upload.", "retryable": False}, status_code=504, headers={"Cache-Control": "no-store"})
+        except httpx.TransportError:
+            return JSONResponse({"detail": "The backend connection was interrupted. Retry the read; check the record before repeating a write.", "retryable": safe_read}, status_code=502, headers={"X-AMO-Proxy-Transport-Error": "1", "Cache-Control": "no-store"})
 
         async def body():
             try:

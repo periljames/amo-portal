@@ -16,6 +16,7 @@ import { isTenantAdmin } from "../../utils/tenantAccess";
 import type { AgGridReactProps } from "ag-grid-react";
 import InlineLoading from "../../components/shared/InlineLoading";
 const QmsPersonalTasks = lazy(()=>import("./inbox/QmsPersonalTasks"));
+const QmsMissionsPage = lazy(()=>import("./QmsMissionsPage"));
 import QmsCalendarSyncDialog from "../../components/QMS/QmsCalendarSyncDialog";
 import type { ColDef } from "ag-grid-community";
 import type { QmsSourceError } from "../../types/qms";
@@ -182,7 +183,8 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const abortRef = useRef<AbortController | null>(null);
   const searchTimerRef = useRef<number | null>(null);
   const [legacyState, setState] = useState<LoadState>("idle");
-  const [legacyData, setData] = useState<QmsRegisterResponse | null>(null);
+  const [legacyData, setData] = useState<{ workspace: string; response: QmsRegisterResponse } | null>(null);
+  const [loadWorkspace, setLoadWorkspace] = useState("");
   const [syncOpen, setSyncOpen] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -194,6 +196,8 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const requestedOffset = Number(searchParams.get("offset") || 0);
   const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
   const controlledNew = Boolean(context && CONTROLLED_NEW_VIEWS.has(context.view));
+  const workspace = context ? `${context.amoCode}/${context.module.id}/${context.view}?${searchParams}` : "";
+  const governedChange = context?.module.id === "change-control" && ["register", "new"].includes(context.view);
   const isEvidence = context?.module.id === "evidence-vault";
   const evidenceQuery = useQuery({
     queryKey: ["qms-evidence-vault", context?.amoCode, context?.view, query, status, limit, offset],
@@ -208,9 +212,9 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
     },
   });
   const { refetch: refetchEvidence } = evidenceQuery;
-  const data = isEvidence ? evidenceQuery.data ?? null : legacyData;
-  const state: LoadState = isEvidence ? evidenceQuery.isFetching ? "loading" : evidenceQuery.isError ? "error" : "ready" : legacyState;
-  const error = isEvidence ? evidenceQuery.isError ? friendlyError(evidenceQuery.error) : null : legacyError;
+  const data = isEvidence ? evidenceQuery.data ?? null : legacyData?.workspace === workspace ? legacyData.response : null;
+  const state: LoadState = isEvidence ? evidenceQuery.isFetching ? "loading" : evidenceQuery.isError ? "error" : "ready" : loadWorkspace === workspace ? legacyState : "loading";
+  const error = isEvidence ? evidenceQuery.isError ? friendlyError(evidenceQuery.error) : null : loadWorkspace === workspace ? legacyError : null;
 
   const updateSearch = useCallback((updates: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -234,11 +238,12 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   }, [searchParams]);
 
   const load = useCallback(async (fresh = false) => {
-    if (!context || controlledNew) return;
+    if (!context || controlledNew || governedChange) return;
     if (isEvidence) { await refetchEvidence(); return; }
     abortRef.current?.abort(new DOMException("Superseded by a newer Quality register request", "AbortError"));
     const controller = new AbortController();
     abortRef.current = controller;
+    setLoadWorkspace(workspace);
     setState("loading");
     setError(null);
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -250,14 +255,14 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
         { timeoutMs: 15_000, cacheTtlMs: fresh ? 0 : undefined, signal: controller.signal },
       );
       if (controller.signal.aborted) return;
-      setData(response);
+      setData({ workspace, response });
       setState("ready");
     } catch (loadError) {
       if (controller.signal.aborted) return;
       setError(friendlyError(loadError));
       setState("error");
     }
-  }, [context, controlledNew, limit, offset, query, status, isEvidence, refetchEvidence]);
+  }, [context, controlledNew, governedChange, workspace, limit, offset, query, status, isEvidence, refetchEvidence]);
 
   useEffect(() => {
     if (isEvidence) return;
@@ -277,6 +282,10 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
   const { amoCode, module, view } = context;
   if (isPlatformSuperuser()) return <Navigate to="/platform/control" replace />;
   if (!hasQmsRolePermission(module.permission)) return <Navigate to={qmsBasePath(amoCode)} replace />;
+
+  if (module.id === "change-control" && ["register", "new"].includes(view)) {
+    return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><Suspense fallback={<InlineLoading label="Opening controlled changes"/>}><QmsMissionsPage key={view} amoCode={amoCode} changeControl initialCreate={view === "new"}/></Suspense></DepartmentLayout>;
+  }
 
   const responseLimit = data?.limit ?? limit;
   const responseOffset = data?.offset ?? offset;
@@ -316,9 +325,10 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
   const content = (
     <div className={`qms-register-page qms-register-page--${module.id}`}>
+      {module.id === "change-control" ? <div className="qms-workspace-actions"><strong>Historical change records</strong><Link to={qmsModulePath(amoCode, module.id, "register")}>Manage controlled changes and approvals <ArrowRight size={14}/></Link></div> : null}
       {!embedded ? <PageHeader compact title={module.label} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
 
-      {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></> : null}
+      {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><details className="qms-register-diagnostics"><summary>Personal to-dos</summary><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></details></> : null}
       {controlledNew ? (
         <section className="qms-register-controlled" role="status"><ShieldCheck size={24} aria-hidden="true" /><div><span>Controlled workflow</span><h2>Creation belongs to the governed source workflow</h2><p>{module.label} records require their approved source workflow, mandatory fields, numbering, ownership and approval controls. This register does not manufacture a reduced duplicate form.</p><Link to={qmsModulePath(amoCode, module.id, module.defaultView)}>Open {viewLabel(module.defaultView)} <ArrowRight size={14} /></Link></div></section>
       ) : (
@@ -333,9 +343,9 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
 
             {downloadError ? <p className="qms-register-error" role="alert">Download failed: {downloadError}</p> : null}
             {module.id === "evidence-vault" ? <div className="qms-evidence-mobile">{rows.map(row => <article key={rowId(row)}><strong>{String(row.filename || "Evidence file")}</strong><p>{String(row.source || "")} · {String(row.reference || "")}</p><small>{formatValue(row.created_at)}{typeof row.size_bytes === "number" ? ` · ${(row.size_bytes / 1024).toFixed(1)} KB` : ""}</small><footer>{row.download_url ? <button type="button" disabled={downloadingId === rowId(row)} onClick={() => void downloadEvidence(row)}>{downloadingId === rowId(row) ? "Downloading…" : <><Download size={16}/> Download</>}</button> : null}{openRoute(row) ? <Link to={openRoute(row)!}>Open source</Link> : null}</footer></article>)}</div> : null}
-            {isEvidence ? <div className="qms-register-records"><RecordTable<QmsRow> label="Evidence files" rows={rows} columns={gridColumns} getRowId={(row)=>String(rowId(row) || row.download_url || `${row.filename}:${row.created_at}:${row.source}`)} loading={state === "loading"} onRowDoubleClick={(row)=>{const route=openRoute(row);if(route)navigate(route);}} /></div> : (<Suspense fallback={<InlineLoading label="Opening register"/>}><QmsWorkspaceGrid rowData={rows} columnDefs={gridColumns} loading={state === "loading"} onRowDoubleClicked={({ data: row }) => { if (row) { const route = openRoute(row); if (route) navigate(route); } }} /></Suspense>)}
+            {rows.length > 0 ? isEvidence ? <div className="qms-register-records"><RecordTable<QmsRow> label="Evidence files" rows={rows} columns={gridColumns} getRowId={(row)=>String(rowId(row) || row.download_url || `${row.filename}:${row.created_at}:${row.source}`)} loading={state === "loading"} onRowDoubleClick={(row)=>{const route=openRoute(row);if(route)navigate(route);}} /></div> : (<Suspense fallback={<InlineLoading label="Opening register"/>}><QmsWorkspaceGrid rowData={rows} columnDefs={gridColumns} loading={state === "loading"} onRowDoubleClicked={({ data: row }) => { if (row) { const route = openRoute(row); if (route) navigate(route); } }} /></Suspense>) : null}
 
-            <Pagination label={module.navigationLabel} page={page} pageSize={responseLimit} visibleCount={rows.length} total={data ? data.total ?? (data.has_more ? undefined : responseOffset + rows.length) : undefined} hasNext={Boolean(data?.has_more)} busy={state === "loading"} onPageChange={(value)=>updateSearch({offset:String((value-1)*responseLimit)})} onPageSizeChange={(value)=>updateSearch({limit:String(value),offset:null})} pageSizes={PAGE_SIZES} />
+            {rows.length > 0 || responseOffset > 0 || data?.has_more ? <Pagination label={module.navigationLabel} page={page} pageSize={responseLimit} visibleCount={rows.length} total={data ? data.total ?? (data.has_more ? undefined : responseOffset + rows.length) : undefined} hasNext={Boolean(data?.has_more)} busy={state === "loading"} onPageChange={(value)=>updateSearch({offset:String((value-1)*responseLimit)})} onPageSizeChange={(value)=>updateSearch({limit:String(value),offset:null})} pageSizes={PAGE_SIZES} /> : null}
           </section>
 
 

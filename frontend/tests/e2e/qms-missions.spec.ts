@@ -93,9 +93,9 @@ function mission(id = "mission-1") {
   };
 }
 
-async function prepare(page: Page): Promise<void> {
+async function prepare(page: Page, overrides: Partial<ReturnType<typeof mission>> = {}): Promise<void> {
   const token = futureToken();
-  let currentMission = mission();
+  let currentMission = { ...mission(), ...overrides };
 
   await page.addInitScript(({ storedToken }) => {
     sessionStorage.setItem("amo_portal_token", storedToken);
@@ -223,7 +223,7 @@ test("Mission portfolio uses hard readiness gates rather than a compliance perce
 
   await expect(page.getByRole("heading", { name: "Change & capability projects", exact: true })).toBeVisible();
   await expect(page.getByText("DHC-8-400 capability inclusion", { exact: true })).toBeVisible();
-  await expect(page.getByText(/compliance percentage/i)).toBeVisible();
+  await expect(page.getByLabel("Mission portfolio summary")).toBeVisible();
 
   // The grid opens detail on its explicit action; a cell click alone only selects the row.
   await page.getByRole("button", { name: "Manage project" }).click();
@@ -242,18 +242,49 @@ test("Quality Manager can create a capability Mission and receives seeded hard g
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality?workspace=missions", { waitUntil: "domcontentloaded" });
 
-  await page.getByRole("button", { name: "New capability mission" }).click();
+  await page.getByRole("button", { name: "New controlled change" }).click();
   const form = page.locator("form.qms-missions__create");
-  await form.getByLabel("Mission title").fill("C208 EX capability expansion");
-  await form.getByLabel("Capability / scope").fill("C208 EX · Base maintenance");
+  await form.getByLabel("Change title").fill("C208 EX capability expansion");
+  await form.getByLabel("Affected capability, location or procedure").fill("C208 EX · Base maintenance");
   await form.getByLabel("Target date").fill("2026-09-30");
   await form.getByLabel("Initial risk").selectOption("HIGH");
-  await form.getByLabel("Description").fill("Add the controlled C208 EX base-maintenance capability.");
-  await form.getByRole("button", { name: "Create Mission" }).click();
+  await form.getByLabel("Proposed change and reason").fill("Add the controlled C208 EX base-maintenance capability.");
+  await form.getByRole("button", { name: "Create controlled change" }).click();
 
   await expect(page).toHaveURL(/workspace=missions.*missionId=mission-created|missionId=mission-created.*workspace=missions/);
   await expect(page.getByRole("heading", { name: "C208 EX capability expansion" })).toBeVisible();
   await expect(page.getByText("0/11", { exact: true })).toBeVisible();
   await expect(page.locator(".qms-mission-detail__gate")).toHaveCount(11);
   await expect(page.getByText("Hard gates remain open", { exact: true })).toBeVisible();
+});
+
+test("Change Control opens a real governed procedure-change form with early field validation", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/maintenance/tenant-a/quality/change-control/new", { waitUntil: "domcontentloaded" });
+  const form = page.locator("form.qms-missions__create");
+  await expect(page.getByRole("heading", { name: "Change Control", exact: true })).toBeVisible();
+  await expect(form.getByLabel("Change type")).toHaveValue("PROCEDURE_CHANGE");
+  await expect(form.getByRole("button", { name: "Create controlled change" })).toBeDisabled();
+  await form.getByLabel("Change title").fill("x"); await form.getByLabel("Change title").blur();
+  await expect(form.getByLabel("Change title")).toHaveAttribute("aria-invalid", "true");
+  await expect(form.getByLabel("Change title", { exact: true })).toHaveAccessibleName("Change title");
+  await form.getByLabel("Change title").fill("Revise incoming inspection procedure");
+  await form.getByLabel("Affected capability, location or procedure").fill("MOPM 2.2 incoming inspection");
+  await form.getByLabel("Proposed change and reason").fill("Update the inspection responsibilities and controlled evidence requirements.");
+  const request = page.waitForRequest(r => r.url().includes("/quality/missions") && r.method() === "POST");
+  await form.getByRole("button", { name: "Create controlled change" }).click();
+  expect((await request).postDataJSON()).toMatchObject({ mission_type: "PROCEDURE_CHANGE", scope: { affected_scope: "MOPM 2.2 incoming inspection" }, regulatory_basis: ["MOPM 1.9; 1.10"] });
+  await expect(page.locator(".qms-mission-detail")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record decision", exact: true })).toHaveCount(0);
+});
+
+test("Authority decisions select retained correspondence and remain disabled without evidence", async ({ page }) => {
+  await prepare(page, { status: "APPROVED" });
+  await page.route("**/missions/mission-1/authority-evidence?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ asset_id: "authority-letter", filename: "Authority approval letter.pdf", sha256: "a".repeat(64), size_bytes: 100 }] }) }));
+  await page.goto("/maintenance/tenant-a/quality/change-control/register?missionId=mission-1", { waitUntil: "domcontentloaded" });
+  await page.getByLabel("Rationale", { exact: true }).fill("Submit the approved change package to the Authority.");
+  await expect(page.getByRole("button", { name: "Record decision", exact: true })).toBeDisabled();
+  await page.getByLabel("Retained Authority evidence").selectOption({ label: "Authority approval letter.pdf" });
+  await expect(page.getByRole("button", { name: "Record decision", exact: true })).toBeEnabled();
+  await page.screenshot({ path: "../.artifacts/qms-authority-evidence-fixture.png", fullPage: true });
 });

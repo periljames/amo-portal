@@ -19,6 +19,7 @@ export default function QmsFormFeedback() {
   useEffect(() => {
     const touched = new WeakSet<Field>();
     const nodes = new Map<Field, HTMLElement>();
+    const namedFields = new Set<Field>();
     let sequence = 0;
     const show = (field: Field) => {
       if (!editable(field) || field.closest('[data-qms-validation="off"]')) return;
@@ -29,10 +30,20 @@ export default function QmsFormFeedback() {
           field.removeAttribute("aria-invalid");
           field.setAttribute("aria-describedby", (field.getAttribute("aria-describedby") || "").split(" ").filter(id => id !== node!.id).join(" "));
           node.remove(); nodes.delete(field);
+          if (namedFields.delete(field)) field.removeAttribute("aria-label");
         }
         return;
       }
       if (!node) {
+        // Feedback remains in the field's layout slot, but must not become
+        // part of a wrapping label's accessible name. Keep its original name
+        // explicit and expose the error separately through aria-describedby.
+        if (!field.hasAttribute("aria-label") && !field.hasAttribute("aria-labelledby") && field.labels?.length) {
+          const label = field.labels[0].cloneNode(true) as HTMLElement;
+          label.querySelectorAll("input,select,textarea,button,.qms-field-feedback,[aria-hidden='true']").forEach(child => child.remove());
+          const name = label.textContent?.replace(/\s+/g, " ").trim();
+          if (name) { field.setAttribute("aria-label", name); namedFields.add(field); }
+        }
         node = document.createElement("small");
         node.id = `qms-field-feedback-${Date.now()}-${++sequence}`;
         node.className = "qms-field-feedback";
@@ -64,7 +75,7 @@ export default function QmsFormFeedback() {
     prepare(document);
     const observer = new MutationObserver(records => {
       for (const record of records) for (const node of record.addedNodes) if (node instanceof Element) prepare(node.parentElement || node);
-      for (const [field, node] of nodes) if (!field.isConnected) { node.remove(); nodes.delete(field); }
+      for (const [field, node] of nodes) if (!field.isConnected) { node.remove(); nodes.delete(field); if (namedFields.delete(field)) field.removeAttribute("aria-label"); }
     });
     observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("focusout", blur, true);
@@ -77,6 +88,7 @@ export default function QmsFormFeedback() {
       document.removeEventListener("focusout", blur, true); document.removeEventListener("input", input, true);
       document.removeEventListener("change", input, true); document.removeEventListener("invalid", invalid, true); document.removeEventListener("submit", submit, true);
       for (const [field, node] of nodes) { field.removeAttribute("aria-invalid"); field.setAttribute("aria-describedby", (field.getAttribute("aria-describedby") || "").split(" ").filter(id => id !== node.id).join(" ")); node.remove(); }
+      for (const field of namedFields) field.removeAttribute("aria-label");
     };
   }, []);
   return null;

@@ -11,6 +11,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.database import get_write_db
 
 from .mission_models import QualityMission, QualityMissionGate
+from .mission_change_policy import mission_gate_template
 from .mission_router import (
     CAPABILITY_ADDITION_GATE_TEMPLATE,
     GatePatch,
@@ -83,7 +84,7 @@ def _assert_mission_mutable(mission: QualityMission) -> None:
 
 
 def _seed_capability_gates(db: Session, *, mission: QualityMission, amo_id: str, now) -> None:
-    for item in CAPABILITY_ADDITION_GATE_TEMPLATE:
+    for item in mission_gate_template(mission.mission_type, CAPABILITY_ADDITION_GATE_TEMPLATE):
         db.add(
             QualityMissionGate(
                 amo_id=amo_id,
@@ -148,7 +149,7 @@ def create_governed_mission(
     )
     db.add(mission)
     db.flush()
-    if payload.mission_type == "CAPABILITY_ADDITION":
+    if mission_gate_template(payload.mission_type, CAPABILITY_ADDITION_GATE_TEMPLATE):
         _seed_capability_gates(db, mission=mission, amo_id=ctx.amo_id, now=now)
 
     mission_id = str(mission.id)
@@ -268,7 +269,7 @@ def update_governed_mission_gate(
             QualityMissionGate.mission_id == mission.id,
             QualityMissionGate.id == gate_id,
         )
-        .with_for_update()
+        .with_for_update(of=QualityMissionGate)
         .first()
     )
     if not gate:

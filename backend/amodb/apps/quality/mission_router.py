@@ -5,12 +5,13 @@ from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.database import get_read_db
 
 from .mission_models import QualityMission, QualityMissionDecision, QualityMissionGate
+from .mission_change_policy import CHANGE_GATE_TEMPLATE, CONTROLLED_CHANGE_TYPES
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -53,6 +54,7 @@ DecisionStatus = Literal["APPROVED", "REJECTED", "RETURNED"]
 
 
 class MissionCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     mission_type: MissionType
     title: str = Field(min_length=3, max_length=255)
     description: str | None = None
@@ -62,6 +64,17 @@ class MissionCreate(BaseModel):
     owner_user_id: str | None = Field(default=None, max_length=36)
     sponsor_user_id: str | None = Field(default=None, max_length=36)
     target_date: date | None = None
+
+    @model_validator(mode="after")
+    def validate_controlled_change(self):
+        if self.mission_type in CONTROLLED_CHANGE_TYPES:
+            if len(str(self.scope.get("affected_scope") or "").strip()) < 3:
+                raise ValueError("Identify the affected capability, location or procedure.")
+            if len(self.description or "") < 10:
+                raise ValueError("Describe the proposed change and reason in at least 10 characters.")
+            if not self.regulatory_basis:
+                self.regulatory_basis = ["MOPM 1.9; 1.10"]
+        return self
 
 
 class GatePatch(BaseModel):
@@ -81,6 +94,7 @@ class MissionDecisionCreate(BaseModel):
     decision_type: DecisionType
     status: DecisionStatus
     rationale: str = Field(min_length=3)
+    evidence_asset_id: str | None = Field(default=None, max_length=36)
 
 
 CAPABILITY_ADDITION_GATE_TEMPLATE: tuple[dict[str, Any], ...] = (
@@ -299,7 +313,7 @@ def _load_mission(db: Session, *, amo_id: str, mission_id: str, for_update: bool
         .filter(QualityMission.id == mission_id)
     )
     if for_update:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityMission)
     mission = query.first()
     if not mission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quality Mission not found.")
@@ -411,7 +425,8 @@ def mission_templates(
                 "label": "Aircraft / capability inclusion",
                 "description": "Govern the readiness evidence and approval chain for adding an aircraft, article or maintenance capability.",
                 "hard_gates": [dict(item) for item in CAPABILITY_ADDITION_GATE_TEMPLATE],
-            }
+            },
+            *[{"mission_type": kind, "label": kind.replace("_", " ").title(), "hard_gates": [dict(item) for item in CHANGE_GATE_TEMPLATE]} for kind in sorted(CONTROLLED_CHANGE_TYPES)],
         ],
         "tenant": {"amo_code": ctx.amo_code},
     }

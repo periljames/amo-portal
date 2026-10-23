@@ -7,7 +7,6 @@ import {
   ArrowRight,
   CheckCircle2,
   CircleDashed,
-  FolderKanban,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -25,6 +24,7 @@ import {
   type QmsMissionGate,
   type QmsMissionRisk,
   type QmsMissionStatus,
+  type QmsMissionType,
 } from "../../services/qmsMissions";
 import "../../styles/qms/missions.css";
 import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
@@ -138,7 +138,7 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
         ))}
       </section>
 
-      <QmsMissionActions key={mission.id} amoCode={amoCode} mission={mission} />
+      <QmsMissionActions key={`${mission.id}:${mission.updated_at}`} amoCode={amoCode} mission={mission} />
       <div className="qms-mission-detail__lower-grid">
         <section>
           <header><strong>Decision chain</strong><small>Decisions are immutable, human-attributed records.</small></header>
@@ -161,12 +161,21 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
   );
 };
 
-const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
+const CHANGE_TYPES: Array<{ value: QmsMissionType; label: string }> = [
+  { value: "CAPABILITY_ADDITION", label: "New capability" },
+  { value: "CAPABILITY_CHANGE", label: "Capability change" },
+  { value: "LINE_STATION", label: "Line station / additional location" },
+  { value: "PROCEDURE_CHANGE", label: "MOPM / procedure change" },
+  { value: "REGULATORY_TRANSITION", label: "Regulatory / organization change" },
+];
+
+const QmsMissionsPage: React.FC<{ amoCode: string; initialCreate?: boolean; changeControl?: boolean }> = ({ amoCode, initialCreate = false, changeControl = false }) => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<"" | QmsMissionStatus>("");
   const [offset, setOffset] = useState(0);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(initialCreate);
+  const [missionType, setMissionType] = useState<QmsMissionType>(changeControl ? "PROCEDURE_CHANGE" : "CAPABILITY_ADDITION");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [scopeLabel, setScopeLabel] = useState("");
@@ -224,10 +233,11 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
   const submitCreate = (event: React.FormEvent) => {
     event.preventDefault();
     createMutation.mutate({
-      mission_type: "CAPABILITY_ADDITION",
+      mission_type: missionType,
       title: title.trim(),
       description: description.trim() || undefined,
-      scope: scopeLabel.trim() ? { capability: scopeLabel.trim() } : {},
+      scope: { affected_scope: scopeLabel.trim() },
+      regulatory_basis: [missionType === "CAPABILITY_ADDITION" ? "MOPM 1.8; capability self-evaluation" : "MOPM 1.9; 1.10"],
       risk_level: riskLevel,
       target_date: targetDate || undefined,
     });
@@ -236,37 +246,33 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
   return (
     <main className="qms-missions" aria-label="Quality Missions">
       <header className="qms-missions__header">
-        <div><span><FolderKanban size={15} /> Controlled change & capability projects</span><h1>Change & capability projects</h1><p>Track capability introductions, resolve evidence gaps and record approval decisions.</p></div>
+        <div><h1>{changeControl ? "Change Control" : "Change & capability projects"}</h1></div>
         <div>
           <button type="button" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}><RefreshCw size={15} className={listQuery.isFetching ? "is-spinning" : ""} /> Refresh</button>
-          {canManage ? <button type="button" className="is-primary" onClick={() => setShowCreate((value) => !value)}><Plus size={15} /> New capability mission</button> : null}
+          {canManage ? <button type="button" className="is-primary" onClick={() => setShowCreate((value) => !value)}><Plus size={15} /> New controlled change</button> : null}
         </div>
       </header>
 
       {showCreate ? (
         <form className="qms-missions__create" onSubmit={submitCreate}>
-          <header><div><strong>Aircraft / capability inclusion</strong><small>The first governed Mission template seeds 11 hard readiness gates. Nothing is marked compliant automatically.</small></div><button type="button" onClick={() => setShowCreate(false)}>Cancel</button></header>
+          <header><strong>New controlled change</strong><button type="button" onClick={() => setShowCreate(false)}>Cancel</button></header>
           <div>
-            <label><span>Mission title</span><input value={title} onChange={(event) => setTitle(event.target.value)} required minLength={3} placeholder="DHC-8-400 capability inclusion" /></label>
-            <label><span>Capability / scope</span><input value={scopeLabel} onChange={(event) => setScopeLabel(event.target.value)} placeholder="DHC-8-400 · Airframe · Line + Base" /></label>
+            <label><span>Change type</span><select value={missionType} onChange={event => setMissionType(event.target.value as QmsMissionType)}>{CHANGE_TYPES.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
+            <label><span>Change title</span><input value={title} onChange={(event) => setTitle(event.target.value)} required minLength={3} maxLength={255} /></label>
+            <label><span>Affected capability, location or procedure</span><input required minLength={3} maxLength={500} value={scopeLabel} onChange={(event) => setScopeLabel(event.target.value)} /></label>
             <label><span>Target date</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
             <label><span>Initial risk</span><select value={riskLevel} onChange={(event) => setRiskLevel(event.target.value as QmsMissionRisk)}><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></label>
-            <label className="is-wide"><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="What capability is being introduced and why?" /></label>
+            <label className="is-wide"><span>Proposed change and reason</span><textarea required minLength={10} maxLength={4000} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} /></label>
           </div>
           {createMutation.error ? <p className="qms-missions__create-error">{createMutation.error instanceof Error ? createMutation.error.message : "Mission could not be created."}</p> : null}
-          <footer><small>Accountable Executive assignment and source-system evidence remain explicit governed steps.</small><button type="submit" className="is-primary" disabled={createMutation.isPending || title.trim().length < 3}>{createMutation.isPending ? "Creating…" : "Create Mission"}</button></footer>
+          <footer><small>{missionType === "CAPABILITY_ADDITION" ? "11 capability readiness gates" : "5 MOPM change readiness gates"} · Quality, Executive and Authority decisions remain separate.</small><button type="submit" className="is-primary" disabled={createMutation.isPending || title.trim().length < 3 || scopeLabel.trim().length < 3 || description.trim().length < 10}>{createMutation.isPending ? "Creating…" : "Create controlled change"}</button></footer>
         </form>
       ) : null}
 
-      <section className="qms-missions__metrics" aria-label="Mission portfolio summary">
-        <article><span>Visible missions</span><strong>{listQuery.data?.total ?? 0}</strong><small>server-bounded portfolio records</small></article>
-        <article><span>Active in this page</span><strong>{totals.active}</strong><small>not complete or cancelled</small></article>
-        <article className={totals.blocked ? "is-attention" : ""}><span>Blocked / failed</span><strong>{totals.blocked}</strong><small>missions with failed hard gates</small></article>
-        <article><span>Decision-ready</span><strong>{totals.gateReview}</strong><small>gate review or ready for approval</small></article>
-      </section>
+      {!showCreate ? <div className="qms-missions__counts" aria-label="Mission portfolio summary"><span>{listQuery.data?.total ?? 0} projects</span><span>{totals.active} active on this page</span><span>{totals.blocked} blocked</span><span>{totals.gateReview} awaiting decisions</span></div> : null}
 
-      <section className="qms-missions__portfolio">
-        <header><div><strong>Mission portfolio</strong><small>Readiness is expressed as passed hard gates, never as a regulatory compliance percentage.</small></div><label><span>Status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as "" | QmsMissionStatus); setOffset(0); }}>{ACTIVE_STATUSES.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select></label></header>
+      {!showCreate ? <section className="qms-missions__portfolio">
+        <header><strong>Controlled projects</strong><label><span>Status</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as "" | QmsMissionStatus); setOffset(0); }}>{ACTIVE_STATUSES.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select></label></header>
         {listQuery.error ? <p role="alert">{listQuery.error.message}</p> : null}
         <QmsWorkspaceGrid<QmsMission> rowData={missions} loading={listQuery.isLoading} getRowId={({ data }) => data.id} onRowDoubleClicked={({ data }) => { if (data) openMission(data.id); }} columnDefs={[
           { field: "mission_ref", headerName: "Reference" },
@@ -278,7 +284,7 @@ const QmsMissionsPage: React.FC<{ amoCode: string }> = ({ amoCode }) => {
           { headerName: "Action", filter: false, sortable: false, cellRenderer: ({ data }: { data?: QmsMission }) => data ? <button type="button" onClick={() => openMission(data.id)}>Manage project</button> : null },
         ]} />
         <Pagination label="Projects" page={Math.floor(offset/25)+1} pageSize={25} total={listQuery.data?.total} visibleCount={listQuery.data?.items?.length || 0} hasNext={Boolean(listQuery.data?.has_more)} busy={listQuery.isFetching} onPageChange={value=>setOffset((value-1)*25)} />
-      </section>
+      </section> : null}
     </main>
   );
 };

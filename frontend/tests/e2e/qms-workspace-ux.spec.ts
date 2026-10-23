@@ -52,6 +52,43 @@ test("settings is a configuration workspace and saves only changed policy groups
   await page.screenshot({ path: "../.artifacts/qms-settings-desktop.png", fullPage: true });
 });
 
+test("an available portal update leaves unsaved settings intact and remains reachable from the profile", async ({ page }) => {
+  await prepare(page);
+  await page.route("**/portal-precache.json", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ urls: ["/", "/assets/index-next-release.js"] }) }));
+  await page.goto("/maintenance/tenant-a/quality/settings/numbering");
+  await page.getByLabel("Audit Prefix").fill("DRAFT");
+  const notice = page.getByRole("status", { name: "Portal update available" });
+  await expect(notice).toBeVisible();
+  await expect(page.getByLabel("Audit Prefix")).toHaveValue("DRAFT");
+  await notice.getByRole("button", { name: "Later", exact: true }).click();
+  await expect(notice).toHaveCount(0);
+  await page.getByRole("button", { name: "Account and appearance" }).click();
+  await expect(page.getByRole("menuitem", { name: "Reload portal update", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Audit Prefix")).toHaveValue("DRAFT");
+});
+
+test("switching registers never shows the previous page's rows under the new title", async ({ page }) => {
+  await prepare(page);
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/quality/system/processes?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ id: "process-one", title: "Only the process register owns this row" }], columns: ["title"] }) }));
+  await page.route("**/quality/risk/register?**", async route => { await pending; await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [], columns: ["title"], total: 0, has_more: false }) }); });
+  await page.goto("/maintenance/tenant-a/quality/system/processes");
+  await expect(page.getByText("Only the process register owns this row", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Assurance", exact: true }).click();
+  const panel = page.locator(".qms-page-menu__panel");
+  await panel.locator("summary").filter({ hasText: /^Risk & Opportunities$/ }).click();
+  await panel.getByRole("link", { name: "Register", exact: true }).click();
+  try {
+    await expect(page.getByRole("heading", { name: "Risk and Opportunities", exact: true })).toBeVisible();
+    await expect(page.getByText("Only the process register owns this row", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".qms-register-loading")).toBeVisible();
+  } finally { release(); }
+  await expect(page.getByText("No records in this view", { exact: true })).toBeVisible();
+  expect((await page.locator(".qms-register-empty").boundingBox())!.height).toBeLessThanOrEqual(130);
+  await expect(page.locator(".qms-register-workspace .ag-root-wrapper")).toHaveCount(0);
+});
+
 test("retention settings preserve the MOPM floor and allow a longer tenant period", async ({ page }) => {
   const state = await prepare(page);
   await page.goto("/maintenance/tenant-a/quality/settings/retention");
@@ -202,7 +239,7 @@ test("reviews every shared QMS register view for rendering and navigation errors
   await prepare(page);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  const modules = QMS_ROUTE_REGISTRY.filter(module => module.componentType === "canonical" && !["calendar", "findings"].includes(module.id));
+  const modules = QMS_ROUTE_REGISTRY.filter(module => module.componentType === "canonical" && !["calendar", "findings", "change-control"].includes(module.id));
   await page.goto("/maintenance/tenant-a/quality/settings/general", { waitUntil: "domcontentloaded" });
   const menuLabels = { command: "Work", assurance: "Assurance", control: "Controls & settings", administration: "Controls & settings", reporting: "Reports" };
   let reviewed = 0;

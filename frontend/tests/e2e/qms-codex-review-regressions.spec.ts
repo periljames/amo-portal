@@ -209,6 +209,7 @@ test("Personal to-dos save reminders, complete and reopen", async ({ page }) => 
     return json(route, task);
   });
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByText("Personal to-dos", { exact: true }).click();
   await page.getByRole("button", { name: "New to-do", exact: true }).click();
   await page.getByLabel("Task", { exact: true }).fill("Review new evidence");
   await page.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");

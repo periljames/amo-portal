@@ -2183,6 +2183,11 @@ def _update_parent_status(
     return dict(row) if row else None
 
 
+def _require_governed_change_write(module: str) -> None:
+    if module == "change-control":
+        raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
+
+
 @core_router.post("/{module}/{record_id}/{action}")
 def qms_workflow_action(
     module: str,
@@ -2194,6 +2199,7 @@ def qms_workflow_action(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     _reject_unknown_audit_operation(f"{module}/{record_id}/{action}")
+    _require_governed_change_write(module)
     action_config = _WORKFLOW_ACTIONS.get((module, action))
     if not action_config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported QMS workflow action.")
@@ -2369,6 +2375,7 @@ def generic_qms_create(
     if not parts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QMS module is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or config["permission"]))
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -2393,6 +2400,7 @@ def generic_qms_update(
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or config["permission"]))
     view = _resolve_view(module, parts[1:])
@@ -2421,6 +2429,7 @@ def generic_qms_delete(
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or "qms.settings.manage"))
     view = _resolve_view(module, parts[1:])
