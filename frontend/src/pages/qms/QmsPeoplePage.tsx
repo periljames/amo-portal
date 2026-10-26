@@ -700,7 +700,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       <header className="qms-authz-header">
         <div>
           <h1 className="qms-authz-page-heading">People & authorization</h1>
-
+          <p className="qms-authz-page-description">Authorization governance: prepare and review evidence, record controlled decisions, and track permissions without bypassing independent approval.</p>
         </div>
         <button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={refresh} disabled={pageLoading || busy}>
           <RefreshCw size={16} /> Refresh
