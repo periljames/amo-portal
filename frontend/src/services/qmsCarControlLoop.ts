@@ -157,7 +157,7 @@ function controlPath(amoCode: string, carId: string, suffix = ""): string {
 }
 
 export function getCarControlLoop(amoCode: string, carId: string, signal?: AbortSignal): Promise<CarControlLoop> {
-  return apiRequest<CarControlLoop>(controlPath(amoCode, carId), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "controlLoop"));
+  return apiRequest<CarControlLoop>(controlPath(amoCode, carId), { timeoutMs: 15_000, cacheTtlMs: 0, signal }).then((data) => requireAuditContract(data, "controlLoop"));
 }
 
 export function initializeCarControlLoop(
