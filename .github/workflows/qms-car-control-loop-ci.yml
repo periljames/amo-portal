@@ -8,6 +8,11 @@ on:
     paths:
       - "backend/amodb/apps/quality/car_control_loop*.py"
       - "backend/amodb/apps/quality/tests/test_car_control_loop*.py"
+      - "backend/amodb/apps/quality/tests/test_car_rca_phase3_contract.py"
+      - "backend/amodb/apps/quality/tests/test_public_invite_extensions.py"
+      - "backend/amodb/apps/quality/car_rca_router.py"
+      - "backend/amodb/apps/quality/car_closure_guards.py"
+      - "backend/amodb/apps/quality/transitions.py"
       - "backend/amodb/apps/quality/__init__.py"
       - "backend/amodb/apps/quality/schemas.py"
       - "backend/amodb/apps/quality/public_invite_extensions.py"
@@ -112,7 +117,12 @@ jobs:
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
       - name: Run deterministic health, closure and governance contracts
-        run: pytest -q amodb/apps/quality/tests/test_car_control_loop.py amodb/apps/quality/tests/test_car_control_loop_governance.py
+        run: >-
+          pytest -q
+          amodb/apps/quality/tests/test_car_control_loop.py
+          amodb/apps/quality/tests/test_car_control_loop_governance.py
+          amodb/apps/quality/tests/test_public_invite_extensions.py
+          amodb/apps/quality/tests/test_car_rca_phase3_contract.py
 
   postgres-contract:
     runs-on: ubuntu-latest
