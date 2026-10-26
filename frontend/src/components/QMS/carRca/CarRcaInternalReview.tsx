@@ -79,7 +79,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
         <p>Only legacy free-text RCA is available for this CAR. No new structured analysis has been recorded.</p>}
       <CarRcaParetoSource amoCode={amoCode} carId={carId}
         canSave={canReview && hasQmsRolePermission("qms.car.manage") && hasQmsRolePermission("qms.reports.view")} />
-      {canReview && <div className="car-rca" aria-label="Create an internal governed corrective action">
+      {canReview && hasQmsRolePermission("qms.car.manage") && <div className="car-rca" aria-label="Create an internal governed corrective action">
         <h4>Record a Quality-managed corrective action</h4>
         <p>This supplements the auditee's plan and retains an individual owner, deadline, causal linkage and independent review trail.</p>
         <div className="car-rca-grid">
