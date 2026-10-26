@@ -525,7 +525,7 @@ const PublicCarInvitePage: React.FC = () => {
   const [now, setNow] = useState(() => new Date());
   const initialized = useRef<string | null | undefined>(undefined);
   const pendingSubmissions = useRef(new Set<string>());
-  const pendingRcaSaves = useRef(new Set<string>());
+  const pendingRcaSaves = useRef(new Map<string, Promise<boolean>>());
   const pendingUploads = useRef(new Set<string>());
   const knownTokens = useRef(new Set<string>());
   const loadGeneration = useRef(0);
@@ -590,40 +590,46 @@ const PublicCarInvitePage: React.FC = () => {
   // Revision-based server persistence is authoritative. The original
   // sessionStorage draft remains only as an unsent network-failure backup.
   const saveRca = async (tokenValue: string, force = false): Promise<boolean> => {
+    const existing = pendingRcaSaves.current.get(tokenValue);
+    if (existing) {
+      // Navigation/submit joins the current autosave instead of racing it.
+      const ok = await existing;
+      if (!ok) return false;
+      const updated = latestEntries.current.find(item => item.token === tokenValue);
+      return Boolean(updated && JSON.stringify({ form: updated.form, investigation: updated.rca }) === updated.rcaSavedSignature);
+    }
     const current = latestEntries.current.find(item => item.token === tokenValue);
     if (!current?.rcaLoaded || !current.invite || !isInviteEditable(current.invite)) return false;
     if (!current.invite.structured_rca_required && !current.rca.investigations.length && !current.rca.supported_cause_ids.length) return true;
-    if (pendingRcaSaves.current.has(tokenValue)) return false;
     const saved = JSON.stringify({ form: current.form, investigation: current.rca });
     if (saved === current.rcaSavedSignature) return true;
     if (current.rcaError && !force) return false;
-    pendingRcaSaves.current.add(tokenValue);
-    updateEntry(tokenValue, entry => ({ ...entry, rcaSaving: true, rcaError: null }));
-    try {
-      const result = await saveCarRcaInvite(tokenValue, {
-        expected_revision: current.rcaRevision,
-        mutation_key: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        form: current.form,
-        investigation: current.rca,
-      });
-      updateEntry(tokenValue, entry => ({
-        ...entry,
-        rcaSaving: false,
-        rcaRevision: result.revision,
-        invite: entry.invite ? { ...entry.invite, structured_rca_required: result.revision > 0 } : null,
-        rcaSavedSignature: saved,
-        rcaError: null,
-      }));
-      return true;
-    } catch (error) {
-      updateEntry(tokenValue, entry => ({
-        ...entry, rcaSaving: false,
-        rcaError: getErrorMessage(error, "Your draft could not be saved. Resolve the error before submitting."),
-      }));
-      return false;
-    } finally {
-      pendingRcaSaves.current.delete(tokenValue);
-    }
+    const work = (async (): Promise<boolean> => {
+      updateEntry(tokenValue, entry => ({ ...entry, rcaSaving: true, rcaError: null }));
+      try {
+        const result = await saveCarRcaInvite(tokenValue, {
+          expected_revision: current.rcaRevision,
+          mutation_key: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          form: current.form,
+          investigation: current.rca,
+        });
+        updateEntry(tokenValue, entry => ({
+          ...entry, rcaSaving: false, rcaRevision: result.revision,
+          invite: entry.invite ? { ...entry.invite, structured_rca_required: result.revision > 0 } : null,
+          rcaSavedSignature: saved, rcaError: null,
+        }));
+        return true;
+      } catch (error) {
+        updateEntry(tokenValue, entry => ({
+          ...entry, rcaSaving: false,
+          rcaError: getErrorMessage(error, "Your draft could not be saved. Resolve the error before submitting."),
+        }));
+        return false;
+      }
+    })();
+    pendingRcaSaves.current.set(tokenValue, work);
+    try { return await work; }
+    finally { pendingRcaSaves.current.delete(tokenValue); }
   };
 
   useEffect(() => {
