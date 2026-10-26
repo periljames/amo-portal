@@ -6,11 +6,16 @@ on:
     paths:
       - "backend/amodb/apps/quality/car_control_loop*.py"
       - "backend/amodb/apps/quality/router.py"
+      - "backend/amodb/apps/quality/transitions.py"
+      - "backend/amodb/apps/quality/car_closure_guards.py"
+      - "backend/amodb/apps/quality/tests/test_car_control_loop_governance.py"
       - "backend/amodb/apps/quality/models.py"
       - "backend/amodb/scripts/seed_qms_live_audit_e2e.py"
       - "backend/amodb/scripts/complete_qms_live_audit_onboarding_e2e.py"
       - "backend/amodb/scripts/seed_qms_car_real_e2e.py"
       - "frontend/src/pages/PublicCarInvitePage.tsx"
+      - "frontend/src/components/QMS/carRca/CarInviteGovernance.tsx"
+      - "frontend/src/utils/carInviteExpiry*.ts"
       - "frontend/src/pages/CanonicalPublicCarAccessPage.tsx"
       - "frontend/src/pages/qms/QmsCarControlLoopPage.tsx"
       - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
@@ -111,7 +116,8 @@ jobs:
         working-directory: frontend
         run: |
           npm ci --prefer-offline --no-audit --fund=false
-          npm exec -- eslint tests/e2e/qms-car-control-loop-real.spec.ts
+          npm exec -- eslint tests/e2e/qms-car-control-loop-real.spec.ts src/components/QMS/carRca/CarInviteGovernance.tsx src/utils/carInviteExpiry.ts src/utils/carInviteExpiry.test.ts
+          npm exec -- vitest run src/utils/carInviteExpiry.test.ts
           npm run build
           npx playwright install --with-deps chromium
       - name: Start production-like stack
