@@ -74,7 +74,7 @@ async function prepare(page: Page): Promise<void> {
       status: 200,
       contentType: "text/csv",
       headers: { "Content-Disposition": 'attachment; filename="qms-car-performance.csv"' },
-      body: "CAR,Status,Due,Closed\\nQMS-CAR-001,CLOSED,2026-08-05,2026-08-04\\nQMS-CAR-002,CLOSED,2026-07-31,2026-08-08\\nQMS-CAR-003,IN_PROGRESS,2026-08-10,\\n",
+      body: "CAR,Status,Due,Closed\nQMS-CAR-001,CLOSED,2026-08-05,2026-08-04\nQMS-CAR-002,CLOSED,2026-07-31,2026-08-08\nQMS-CAR-003,IN_PROGRESS,2026-08-10,\n",
     });
   });
 
@@ -233,9 +233,9 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   expect(await download.failure()).toBeNull();
 
   const analysis = preview.getByRole("link", { name: "Open detailed CAR charts and analysis" });
-  await expect(analysis).toHaveAttribute("href", /\\/quality\\/reports\\/car-performance\\?analysis=1$/);
+  await expect(analysis).toHaveAttribute("href", /\/quality\/reports\/car-performance\?analysis=1$/);
   await analysis.click();
-  await expect(page).toHaveURL(/\\/quality\\/reports\\/car-performance\\?analysis=1$/);
+  await expect(page).toHaveURL(/\/quality\/reports\/car-performance\?analysis=1$/);
 
   await expect(page.getByRole("heading", { name: "Workload", exact: true })).toBeVisible();
   await expect(page.getByLabel("Analysis metric")).toBeVisible();
