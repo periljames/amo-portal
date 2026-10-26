@@ -382,6 +382,10 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       closure_reason: "Quality accepts closure after rejected-response rework, controlled extension, independent action verification and concluded effectiveness.",
     });
     expect(governedClose.status, JSON.stringify(governedClose.body)).toBe(200);
+    const closedControl = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/control-loop`);
+    expect(closedControl.status, JSON.stringify(closedControl.body)).toBe(200);
+    expect((closedControl.body as { car: { status: string }; health: { state: string } }).car.status).toBe("CLOSED");
+    expect((closedControl.body as { car: { status: string }; health: { state: string } }).health.state).toBe("CLOSED");
 
     await internalPage.reload({ waitUntil: "domcontentloaded" });
     await expect(internalPage.getByText("Closed", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
