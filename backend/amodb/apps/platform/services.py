@@ -429,20 +429,64 @@ def set_tenant_lock(db: Session, *, tenant_id: str, locked: bool, actor_id: str,
 
 
 def update_entitlements(db: Session, *, tenant_id: str, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
-    modules = payload.get("modules") or []
-    reason = payload.get("reason")
+    """Apply explicit superuser module-state changes atomically and audibly.
+
+    A module switch never fabricates an effective commercial entitlement.
+    Every item must be a shipped module with a recognized state; validate the
+    whole request before writing so a malformed later item cannot partially
+    enable an earlier module.
+    """
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise ValueError("An audited reason is required for module changes")
+    if db.get(account_models.AMO, tenant_id) is None:
+        raise ValueError("Tenant not found")
+    modules = payload.get("modules")
+    if not isinstance(modules, list) or not modules:
+        raise ValueError("Specify at least one module change")
+    catalog = {item["code"] for item in MODULE_CATALOG}
+    valid_states = {item.value for item in account_models.ModuleSubscriptionStatus}
+    seen = set()
+    changes = []
     for item in modules:
-        code = str(item.get("module_code") or "").strip()
-        if not code:
-            continue
-        row = db.query(account_models.ModuleSubscription).filter(account_models.ModuleSubscription.amo_id == tenant_id, account_models.ModuleSubscription.module_code == code).first()
-        if not row:
-            row = account_models.ModuleSubscription(amo_id=tenant_id, module_code=code)
-            db.add(row)
-        row.status = item.get("status") or row.status
-        row.plan_code = item.get("plan_code") or row.plan_code
-    audit(db, actor_user_id=actor_id, action="tenant.entitlements.updated", tenant_id=tenant_id, reason=reason, details={"modules": modules})
-    db.commit()
+        if not isinstance(item, dict):
+            raise ValueError("Each module change must be an object")
+        code = str(item.get("module_code") or "").strip().lower()
+        if code not in catalog:
+            raise ValueError(f"Unknown platform module: {code}")
+        if code in seen:
+            raise ValueError(f"Duplicate module change: {code}")
+        seen.add(code)
+        state = str(item.get("status") or "").strip().upper()
+        if state not in valid_states:
+            raise ValueError(f"Invalid module state for {code}")
+        plan_code = item.get("plan_code")
+        if plan_code is not None and (not isinstance(plan_code, str) or len(plan_code) > 64):
+            raise ValueError(f"Invalid plan identifier for {code}")
+        changes.append((code, state, plan_code))
+
+    try:
+        for code, state, plan_code in changes:
+            q = db.query(account_models.ModuleSubscription).filter(
+                account_models.ModuleSubscription.amo_id == tenant_id,
+                account_models.ModuleSubscription.module_code == code,
+            )
+            if db.get_bind().dialect.name == "postgresql":
+                q = q.with_for_update()
+            row = q.first()
+            if not row:
+                row = account_models.ModuleSubscription(amo_id=tenant_id, module_code=code)
+                db.add(row)
+            row.status = account_models.ModuleSubscriptionStatus(state)
+            if plan_code is not None:
+                row.plan_code = plan_code
+        audit(db, actor_user_id=actor_id, action="tenant.entitlements.updated",
+              tenant_id=tenant_id, reason=reason,
+              details={"modules": [{"module_code": code, "status": state} for code, state, _ in changes]})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return get_tenant_detail(db, tenant_id)
 
 
