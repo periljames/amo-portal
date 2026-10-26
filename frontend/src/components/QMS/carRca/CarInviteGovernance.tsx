@@ -3,6 +3,7 @@ import {
   getCarInviteAccessControl, updateCarInviteAccessControl, rotateCarInviteAccess,
   type CarInviteAccessControl,
 } from "../../../services/qmsCarRca";
+import { formatInviteExpiryLocal, parseInviteExpiryLocal } from "../../../utils/carInviteExpiry";
 import "./car-rca.css";
 
 export default function CarInviteGovernance({ amoCode, carId, canManage, onChanged }: {
@@ -16,13 +17,16 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newUrl, setNewUrl] = useState("");
+  const showControl = (row: CarInviteAccessControl) => {
+    setControl(row);
+    setExpiry(formatInviteExpiryLocal(row.expires_at));
+  };
   useEffect(() => {
     let mounted = true;
     setError(null); setControl(null); setNewUrl("");
     void getCarInviteAccessControl(amoCode, carId).then(row => {
       if (!mounted) return;
-      setControl(row);
-      setExpiry(row.expires_at ? new Date(row.expires_at).toISOString().slice(0,16) : "");
+      showControl(row);
     }).catch(e => { if (mounted) setError(e instanceof Error ? e.message : "Invitation controls unavailable"); });
     return () => { mounted = false; };
   }, [amoCode, carId]);
@@ -30,9 +34,9 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
     if (!canManage || busy || reason.trim().length < 8 || (revoke && !confirmRevoke)) return;
     setBusy(true); setError(null); setMessage(null); setNewUrl("");
     try {
-      const expires_at = expiry ? new Date(expiry).toISOString() : null;
+      const expires_at = parseInviteExpiryLocal(expiry, control?.expires_at ?? null);
       const next = await updateCarInviteAccessControl(amoCode, carId, { revoke, expires_at, reason: reason.trim() });
-      setControl(next); setConfirmRevoke(false); setReason("");
+      showControl(next); setConfirmRevoke(false); setReason("");
       setMessage(revoke ? "This invitation has been revoked. The old link will no longer work." : "The controlled invitation expiry has been updated.");
       onChanged?.();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not change invitation controls."); }
@@ -43,7 +47,7 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
     setBusy(true); setError(null); setMessage(null);
     try {
       const next = await rotateCarInviteAccess(amoCode, carId, reason.trim());
-      setControl(next); setExpiry(""); setReason(""); setConfirmRevoke(false);
+      showControl(next); setReason(""); setConfirmRevoke(false);
       setNewUrl(next.new_invite_url);
       setMessage("A replacement invitation is ready. The previous bearer token is invalid.");
       onChanged?.();
@@ -54,7 +58,7 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
     <div className="car-rca-heading"><div><h3>Invitation access and security</h3>
       <p>Public CAR links are bearer capabilities. Only Quality may set expiry, revoke access, or rotate a link. Previously issued links remain valid until explicitly limited.</p>
     </div></div>
-    {error && <p role="alert">{error} <button type="button" onClick={() => void getCarInviteAccessControl(amoCode,carId).then(setControl).catch(e => setError(String(e)))}>Retry</button></p>}
+    {error && <p role="alert">{error} <button type="button" onClick={() => void getCarInviteAccessControl(amoCode,carId).then(row => { showControl(row); setError(null); }).catch(e => setError(String(e)))}>Retry</button></p>}
     {!control && !error && <p role="status">Loading invitation controls…</p>}
     {control && <div className="car-rca-analysis">
       <p><strong>Access status:</strong> {control.revoked_at ? "Revoked" :
