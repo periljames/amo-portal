@@ -239,3 +239,36 @@ def test_plain_legacy_car_keeps_backwards_compatible_transition() -> None:
     assert car.status == "CLOSED"
     assert car.evidence_ref == "LEGACY:EVIDENCE"
     audit.assert_called_once()
+
+
+@pytest.mark.parametrize("submitted", [
+    "2026-12-01T15:00:00+03:00",
+    "2026-12-01T12:00:00Z",
+    "2026-12-01T12:00:00",
+])
+def test_invitation_expiry_persists_same_utc_instant(submitted: str) -> None:
+    from datetime import datetime, timezone
+    from amodb.apps.quality import car_rca_router as access
+
+    car_id = UUID("00000000-0000-0000-0000-000000000125")
+    car = SimpleNamespace(id=car_id, amo_id="amo-1")
+    control = SimpleNamespace(
+        revoked_at=None, expires_at=None, reason=None,
+        updated_by_user_id=None, updated_at=None,
+    )
+    db = MagicMock()
+    ctx = SimpleNamespace(amo_id="amo-1", user_id="reviewer-a")
+    payload = access.InviteAccessChange(
+        expires_at=datetime.fromisoformat(submitted.replace("Z", "+00:00")),
+        reason="Confirmed the controlled access expiry.",
+    )
+    with (
+        patch.object(access, "assert_quality_permission"),
+        patch.object(access, "_car_for_employee", return_value=car),
+        patch.object(access, "_control_for_car", return_value=control),
+        patch("amodb.apps.quality.service.add_car_action"),
+    ):
+        access.update_invite_access_control(car_id=car_id, payload=payload, ctx=ctx, db=db)
+    assert control.expires_at == datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
+    assert control.expires_at.tzinfo == timezone.utc
+    db.commit.assert_called_once()
