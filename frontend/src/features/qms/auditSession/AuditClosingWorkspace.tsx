@@ -306,7 +306,27 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       if (!ceremony.challenge_id || !ceremony.options) throw new Error("The server did not return a complete report-signing challenge.");
       const assertion = await getAssertion(decodeRequestOptions(ceremony.options));
       if (!assertion) throw new Error("Passkey approval was cancelled before an assertion was returned.");
-      await verifyApprovedAuditReportSignature(amoCode, auditId, activeRevision.id, ceremony.challenge_id, serializeAssertionCredential(assertion), signReason);
+      const verifiedSignature = await verifyApprovedAuditReportSignature(
+        amoCode, auditId, activeRevision.id, ceremony.challenge_id,
+        serializeAssertionCredential(assertion), signReason,
+      );
+      // Trust only the server's verified signature receipt, never the browser
+      // ceremony alone. Surface it immediately; slower refetches must not keep
+      // Issue disabled after an accepted exact-revision WebAuthn approval.
+      if (verifiedSignature.method !== "WEBAUTHN" ||
+          verifiedSignature.purpose !== "APPROVED_REPORT" ||
+          verifiedSignature.report_revision_id !== activeRevision.id ||
+          verifiedSignature.artifact_sha256 !== activeRevision.sha256) {
+        throw new Error("Verified signature receipt does not match the approved report revision.");
+      }
+      const signatureKey = ["qms-audit-signatures", amoCode, auditId] as const;
+      await queryClient.cancelQueries({ queryKey: signatureKey });
+      queryClient.setQueryData<{ items: AuditSignatureEvidence[] }>(
+        signatureKey,
+        (existing) => ({
+          items: [verifiedSignature, ...(existing?.items || []).filter((item) => item.id !== verifiedSignature.id)],
+        }),
+      );
       setNotice(`Passkey approval recorded against the exact approved report SHA-256 ${activeRevision.sha256}. Report signed and ready to issue.`);
       await invalidateClosing();
     } catch (cause) { setLocalError(cause instanceof Error ? cause.message : "Passkey report approval failed."); }
