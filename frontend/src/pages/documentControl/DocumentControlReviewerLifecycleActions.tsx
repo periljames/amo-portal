@@ -74,8 +74,8 @@ export default function DocumentControlReviewerLifecycleActions({
         : "Record the correction reason before returning the revision.");
       return;
     }
-    if (item.action === "APPROVE_ACCOUNTABLE_MANAGER" && !effectiveAt) {
-      setError("Set the accountable document effectivity date and time before approving.");
+    if (item.action === "APPROVE_ACCOUNTABLE_MANAGER" && !workflow.requires_authority && !workflow.effective_at && (!effectiveAt || Number.isNaN(new Date(effectiveAt).getTime()))) {
+      setError("An accountable effective date and time must be selected before management approval.");
       return;
     }
     if (isApproval && !retainsSourceChecksum && !retainedEvidence.length) {
@@ -91,7 +91,9 @@ export default function DocumentControlReviewerLifecycleActions({
         comments: decisionComments,
         evidence: isApproval ? retainedEvidence : [],
         expected_version: workflow.version,
-        effective_at: item.action === "APPROVE_ACCOUNTABLE_MANAGER" ? new Date(effectiveAt).toISOString() : undefined,
+        effective_at: item.action === "APPROVE_ACCOUNTABLE_MANAGER" && effectiveAt && !workflow.requires_authority
+          ? new Date(effectiveAt).toISOString()
+          : undefined,
       });
       onChanged();
     } catch (caught) {
@@ -110,6 +112,23 @@ export default function DocumentControlReviewerLifecycleActions({
       </div>
     </div>
     <label className="wide"><span>Review comments</span><textarea required value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Required: record the basis for the decision or correction request." /></label>
+    {actions.some((item) => item.action === "APPROVE_ACCOUNTABLE_MANAGER") && !workflow.requires_authority ? (
+      <label><span>Effective date and time</span><input aria-label="Effective date and time" type="datetime-local" required={!workflow.effective_at} value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
+        {workflow.effective_at ? <small>Existing scheduled effectivity: {new Date(workflow.effective_at).toLocaleString()}</small> : <small>Required for accountable management approval; the backend retains this effectivity control.</small>}
+      </label>
+    ) : null}
+    <div className="dc-form__actions">
+      {actions.map((item) => <button
+        key={item.action}
+        type="button"
+        className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`}
+        disabled={busy}
+        onClick={() => void transition(item)}
+      >
+        {item.danger ? <RotateCcw size={14} /> : <CheckCircle2 size={14} />}
+        {item.label}
+      </button>)}
+    </div>
     <DocumentEvidencePicker
       tenant={tenant}
       manualId={detail.document.id}
@@ -132,17 +151,6 @@ export default function DocumentControlReviewerLifecycleActions({
       </label>
     ) : null}
     {error ? <div className="dc-form__error">{error}</div> : null}
-    <div className="dc-form__actions">
-      {actions.map((item) => <button
-        key={item.action}
-        type="button"
-        className={`dc-button ${item.danger ? "dc-button--danger" : "dc-button--primary"}`}
-        disabled={busy}
-        onClick={() => void transition(item)}
-      >
-        {item.danger ? <RotateCcw size={14} /> : <CheckCircle2 size={14} />}
-        {item.label}
-      </button>)}
-    </div>
+
   </div>;
 }
