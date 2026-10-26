@@ -272,3 +272,35 @@ def test_invitation_expiry_persists_same_utc_instant(submitted: str) -> None:
     assert control.expires_at == datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
     assert control.expires_at.tzinfo == timezone.utc
     db.commit.assert_called_once()
+
+
+def test_optional_effectiveness_policy_does_not_waive_structured_action_verification() -> None:
+    from amodb.apps.quality.car_closure_guards import ensure_structured_car_ready_for_closure
+
+    car_id = UUID("00000000-0000-0000-0000-000000000126")
+    db = MagicMock()
+    doc_query, action_query = MagicMock(), MagicMock()
+    db.query.side_effect = [doc_query, action_query]
+    doc_query.filter.return_value.first.return_value = SimpleNamespace(submitted_revision=1)
+    action = SimpleNamespace(
+        kind="CORRECTIVE", state="PROPOSED", sequence_no=1,
+        owner_user_id="implementer-a", reviewed_by_user_id=None,
+        evidence_references=[],
+    )
+    action_query.filter.return_value.all.return_value = [action]
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_structured_car_ready_for_closure(
+            db, amo_id="amo-1", car_id=car_id, effectiveness_required=False,
+        )
+    assert exc_info.value.status_code == 409
+    assert "independently verified" in str(exc_info.value.detail)
+
+    db.query.reset_mock(side_effect=True)
+    db.query.side_effect = [doc_query, action_query]
+    action.state = "VERIFIED"
+    action.reviewed_by_user_id = "independent-quality-reviewer"
+    action.evidence_references = ["EVIDENCE:CONTROL-VERIFICATION"]
+    ensure_structured_car_ready_for_closure(
+        db, amo_id="amo-1", car_id=car_id, effectiveness_required=False,
+    )
+    assert db.query.call_count == 2, "The expressly optional effectiveness plan should not be queried"
