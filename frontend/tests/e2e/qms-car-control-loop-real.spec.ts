@@ -313,6 +313,9 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await expect(responsePanel).toBeVisible({ timeout: 30_000 });
     await expect(responsePanel.getByText(/Responsible Maintenance Manager/)).toBeVisible({ timeout: 30_000 });
     await expect(responsePanel.getByText(/effectiveness checkpoint and evidence-index ownership control rework/)).toBeVisible({ timeout: 30_000 });
+    // Capture the actual authenticated Quality review surface. The synthetic
+    // fixture contains no production identities or live invitation tokens.
+    await internalPage.screenshot({ path: "test-results/phase3-quality-rework.png", fullPage: true });
 
     const deadlineSection = internalPage.getByRole("heading", { name: "Controlled deadline changes" }).locator("xpath=ancestor::section[1]");
     await deadlineSection.getByLabel("Requested new date", { exact: true }).fill(futureDate(35));
@@ -465,6 +468,11 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await publicPage.reload({ waitUntil: "domcontentloaded" });
     await expect(publicPage.getByText("Closed", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(publicPage.getByText(/This CAR is closed/i)).toBeVisible();
+    await internalPage.screenshot({ path: "test-results/phase3-quality-closed.png", fullPage: true });
+    await publicPage.setViewportSize({ width: 390, height: 844 });
+    const mobileWidth = await publicPage.evaluate(() => document.documentElement.scrollWidth);
+    expect(mobileWidth, "Public CAR must not overflow a 390px mobile viewport").toBeLessThanOrEqual(392);
+    await publicPage.screenshot({ path: "test-results/phase3-public-closed-mobile.png", fullPage: true });
 
     // This is an isolated CI-created CAR. Revoke its bearer token after
     // asserting closure to demonstrate that valid former links fail closed.
