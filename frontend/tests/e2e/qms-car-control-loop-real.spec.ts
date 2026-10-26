@@ -215,9 +215,26 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(rejected.status).toBe(200);
 
     await submitResponsibleManagerResponse(publicPage, data, "rework");
+    // Verify the new submission is actually committed and reviewable, not
+    // merely reported as successful in the invited browser.
+    const revisedResponses = await authenticatedRequest(
+      internalPage, "GET",
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/responses?mark_open=false`,
+    );
+    expect(revisedResponses.status, JSON.stringify(revisedResponses.body)).toBe(200);
+    const responseRows = revisedResponses.body as Array<{
+      root_cause: string; is_latest: boolean; submitted_by_name: string;
+    }>;
+    expect(responseRows).toHaveLength(1);
+    expect(responseRows[0].root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
+    expect(responseRows[0].is_latest).toBe(true);
     await internalPage.reload({ waitUntil: "domcontentloaded" });
-    await expect(internalPage.getByText(/Responsible Maintenance Manager/)).toBeVisible({ timeout: 30_000 });
-    await expect(internalPage.getByText(/effectiveness checkpoint and evidence-index ownership control rework/)).toBeVisible();
+    const responsePanel = internalPage.getByRole("region", { name: "Corrective action response" });
+    // The Quality page may hydrate asynchronously; this check must prove the
+    // actual revised response, not match a stale name elsewhere on the page.
+    await expect(responsePanel).toBeVisible({ timeout: 30_000 });
+    await expect(responsePanel.getByText(/Responsible Maintenance Manager/)).toBeVisible({ timeout: 30_000 });
+    await expect(responsePanel.getByText(/effectiveness checkpoint and evidence-index ownership control rework/)).toBeVisible({ timeout: 30_000 });
 
     await internalPage.getByLabel("Requested new date").fill(futureDate(35));
     await internalPage.getByLabel("Reason").fill("Implementation evidence requires an additional controlled observation cycle before effectiveness can be confirmed.");
