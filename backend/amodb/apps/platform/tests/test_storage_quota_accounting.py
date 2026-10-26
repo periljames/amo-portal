@@ -88,6 +88,35 @@ def test_finalize_and_delete_have_exact_balances(storage_db):
                       idempotency_key="new-operation-after-delete")
 
 
+def test_finalization_rejects_foreign_s3_bucket_and_key(storage_db, monkeypatch):
+    monkeypatch.setenv("AMO_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("AMO_STORAGE_S3_BUCKET", "tenant-storage")
+    monkeypatch.setenv("AMO_STORAGE_S3_PREFIX", "amo-portal")
+    quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100,
+                   actor_id=None, reason="Approved storage")
+    reservation = quota.reserve(storage_db, tenant_id="tenant-1",
+                                object_key="evidence/tenant-1/report.pdf",
+                                size_bytes=12, idempotency_key="foreign-uri")
+    digest = hashlib.sha256(b"verified").hexdigest()
+
+    for uri in (
+        "s3://foreign-bucket/amo-portal/evidence/tenant-1/report.pdf",
+        "s3://tenant-storage/amo-portal/evidence/tenant-2/report.pdf",
+        "s3://tenant-storage/evidence/tenant-1/report.pdf",
+    ):
+        with pytest.raises(ValueError, match="does not match"):
+            quota.finalize(storage_db, tenant_id="tenant-1", reservation_id=reservation.id,
+                           storage_uri=uri, checksum_sha256=digest)
+        assert quota.read_quota(storage_db, "tenant-1")["reserved_bytes"] == 12
+
+    receipt = quota.finalize(storage_db, tenant_id="tenant-1",
+                             reservation_id=reservation.id,
+                             storage_uri="s3://tenant-storage/amo-portal/evidence/tenant-1/report.pdf",
+                             checksum_sha256=digest)
+    assert receipt.size_bytes == 12
+    assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 12
+
+
 def test_cancel_and_tenant_boundaries(storage_db):
     quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=10, actor_id=None, reason="Contract")
     quota.allocate(storage_db, tenant_id="tenant-2", quota_bytes=5, actor_id=None, reason="Contract")
