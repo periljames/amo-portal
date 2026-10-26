@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowRight, Settings, Hash, Bell, ShieldCheck, Workflow, Building2, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, Hash, Bell, ShieldCheck, Workflow, Building2, SlidersHorizontal } from "lucide-react";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { hasQmsRolePermission } from "../../app/routeGuards";
@@ -11,6 +11,8 @@ import QmsMailIdentityPage from "./QmsMailIdentityPage";
 import QmsFollowUpControls from "./QmsFollowUpControls";
 import QmsNumberingControls from "./QmsNumberingControls";
 import { validNumbering } from "./numberingRules";
+import { SettingsFeedback, SettingsSaveButton, SettingsSoundControl } from "./QmsSettingsFeedback";
+import { settingsError } from "./settingsError";
 import "./qms-settings.css";
 
 type Value = string | number | boolean | null | Value[] | { [key: string]: Value };
@@ -36,9 +38,8 @@ export default function QmsSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const errorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: "nearest" }); }, [error]);
   const [notice, setNotice] = useState("");
+  useEffect(() => { setNotice(""); setError(""); }, [selected.id]);
   const canManage = hasQmsRolePermission("qms.settings.manage");
   const dirty = selected.keys.some(key => JSON.stringify(draft[key]) !== JSON.stringify(settings?.[key]));
   const extensions = (draft.retention_rules || {}) as RetentionExtensions;
@@ -49,8 +50,8 @@ export default function QmsSettingsPage() {
   }));
   const load = useCallback(async () => {
     setLoading(true); setError("");
-    try { const response = await apiRequest<{ tenant?: { amo_code: string }; settings: Configuration | null; compliance_policy: AmoCompliancePolicy }>(qmsPath(amoCode, "/settings"), { cacheTtlMs: 0 }); setTenant(response.tenant?.amo_code || amoCode); setSettings(response.settings || {}); setDraft(response.settings || {}); setPolicy(response.compliance_policy); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load QMS settings."); }
+    try { const response = await apiRequest<{ tenant?: { amo_code: string }; settings: Configuration | null; compliance_policy: AmoCompliancePolicy }>(qmsPath(amoCode, "/settings"), { cacheTtlMs: 0, headers: { "X-AMO-Silent-Error": "1" } }); setTenant(response.tenant?.amo_code || amoCode); setSettings(response.settings || {}); setDraft(response.settings || {}); setPolicy(response.compliance_policy); }
+    catch (cause) { setError(settingsError(cause, "Could not load QMS settings.")); }
     finally { setLoading(false); }
   }, [amoCode]);
   useEffect(() => { void load(); }, [load]);
@@ -59,21 +60,20 @@ export default function QmsSettingsPage() {
     setSaving(true); setError(""); setNotice("");
     try {
       const keys = selected.keys.filter(key => JSON.stringify(draft[key]) !== JSON.stringify(settings?.[key]));
-      const latest = await apiRequest<{ settings: Configuration | null }>(qmsPath(amoCode, "/settings"), { cacheTtlMs: 0 });
+      const latest = await apiRequest<{ settings: Configuration | null }>(qmsPath(amoCode, "/settings"), { cacheTtlMs: 0, headers: { "X-AMO-Silent-Error": "1" } });
       if (keys.some(key => JSON.stringify(latest.settings?.[key]) !== JSON.stringify(settings?.[key]))) throw new Error("These settings changed while you were editing. Your entries are retained. Reload the current settings before saving.");
       const changes = Object.fromEntries(keys.map(key => [key, draft[key]]));
       const result = await apiRequest<{ settings: Configuration }>(qmsPath(amoCode, "/settings"), { method: "PATCH", headers: { "Content-Type": "application/json", "X-AMO-Silent-Error": "1" }, body: JSON.stringify({ ...changes, expected_settings: Object.fromEntries(keys.map(key => [key, settings?.[key] ?? {}])) }) });
       setSettings(result.settings); setDraft(previous => ({ ...previous, ...Object.fromEntries(keys.map(key => [key, result.settings[key]])) })); setNotice("Settings saved and recorded in Quality activity history.");
       if (keys.includes("numbering_rules")) { void queryClient.invalidateQueries({ queryKey: ["qms-workflow-settings", amoCode] }); void queryClient.invalidateQueries({ queryKey: ["qms-audit-scopes", amoCode] }); }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Settings could not be saved. Your entries are retained."); }
+    } catch (cause) { setError(settingsError(cause, "Settings could not be saved. Your entries are retained.")); }
     finally { setSaving(false); }
   }
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><div className="qms-settings-page">
-    <header className="qms-settings__header"><h1>Settings{selected.id !== "general" ? ` · ${selected.label}` : ""}</h1><Settings size={22} /></header>
+    <header className="qms-settings__header"><h1>Settings{selected.id !== "general" ? ` · ${selected.label}` : ""}</h1><SettingsSoundControl /></header>
     <div className="qms-settings__scope"><Building2 size={16} /><strong>{tenant}</strong><span>Tenant configuration</span><span className="qms-settings__access">{canManage ? "Can configure" : "Read only"}</span></div>
     <nav className="qms-settings__tabs" aria-label="Settings sections">{sections.map(section => { const Icon = icons[section.id as keyof typeof icons]; return <Link key={section.id} to={`${base}/settings/${section.id}`} aria-current={selected.id === section.id ? "page" : undefined}><Icon size={17} /><span>{section.label}</span></Link>; })}</nav>
-    {error && <div ref={errorRef} role="alert" data-portal-error-feedback className="qms-settings__error">{error}<button type="button" onClick={() => void load()} disabled={loading}>Reload settings</button></div>}
-    {notice && <p role="status" className="qms-settings__success">{notice}</p>}
+    {(loading || !settings || !selected.keys.length) && <SettingsFeedback message={error} error onDismiss={() => setError("")}><button type="button" onClick={() => void load()} disabled={loading}>Retry loading settings</button></SettingsFeedback>}
     {loading ? <p role="status">Loading Quality settings…</p> : settings && <>
       {!canManage && <p>You have read-only access to this configuration.</p>}
       {selected.id === "general" ? <div className="qms-settings__cards">{sections.slice(1).map(section => <Link className="qms-settings__card" to={`${base}/settings/${section.id}`} key={section.id}><h2>{(() => { const Icon = icons[section.id as keyof typeof icons]; return <Icon size={21} />; })()}{section.label}<ArrowRight size={18} /></h2><p>{section.description}</p><span>Open configuration</span></Link>)}</div> : <>
@@ -81,7 +81,7 @@ export default function QmsSettingsPage() {
         {selected.id === "workflows" && <Link className="qms-settings__card" to={`${base}/audits/program`}><h2>Audit programme & notice controls <ArrowRight size={18} /></h2><p>Manage audit work and governed notices at their source.</p></Link>}
         {selected.id === "retention" && <Link className="qms-settings__card" to={`${base}/evidence-vault/immutable-archive`}><h2>Retained evidence <ArrowRight size={18} /></h2><p>Open retained evidence and source records.</p></Link>}
         {selected.id === "workflows" && <QmsFollowUpControls amoCode={amoCode} disabled={!canManage} />}
-        <form onSubmit={event => void save(event)} className="qms-settings__form">
+        <form onSubmit={event => void save(event)} className="qms-settings__form" onChangeCapture={() => { setNotice(""); setError(""); }}>
           {selected.id === "numbering" ? <QmsNumberingControls revision={String(settings.updated_at || "")} amoCode={amoCode} value={draft.numbering_rules} disabled={!canManage || saving} onChange={value => setDraft(previous => ({ ...previous, numbering_rules: value }))} /> : selected.id === "retention" ? <section className="qms-settings__card"><h2>MOPM retention minimums</h2><p>Event dates govern retention. Missing dates and preservation holds prevent disposal. Tenant periods may only be longer.</p><div className="qms-retention-policy">{policy?.retention.map(rule => {
             const key = rule.years ? "extensions_years" : "extensions_days";
             const floor = rule.years || rule.days;
@@ -96,7 +96,8 @@ export default function QmsSettingsPage() {
               setDraft(previous => ({ ...previous, retention_rules: updated as Value }));
             }} />{invalid && <small role="status">Enter a whole number of at least {floor}.</small>}</label>}</div>;
           })}</div><h3>Contracting controls</h3><p>Current approved AMO, scope, site, written agreement and authority access are required. Further subcontracting needs prior written acceptance. Complete type-certificated product contracting is excluded.</p><small>{policy?.contracting.reference}</small></section> : null}
-          {canManage && selected.keys.length > 0 && <footer className="qms-settings__save"><span>{dirty ? "Unsaved changes" : "No unsaved changes"}</span><button type="button" disabled={!dirty || saving} onClick={() => setDraft(previous => ({ ...previous, ...Object.fromEntries(selected.keys.map(key => [key, settings[key]])) }))}>Discard changes</button><button type="submit" disabled={!dirty || saving || invalidRetention || invalidNumbering}>{saving ? "Saving…" : "Save changes"}</button></footer>}
+
+          {canManage && selected.keys.length > 0 && <footer className="qms-settings__save"><SettingsFeedback message={error || notice} error={Boolean(error)} onDismiss={() => { setError(""); setNotice(""); }}>{error && <><small>Your entries are retained. Retry saving, or replace your draft with the latest saved values.</small><button type="button" onClick={() => { setNotice(""); void load(); }}>Load current values (replace draft)</button></>}</SettingsFeedback><span><i className={dirty ? "qms-settings__dirty-dot" : "qms-settings__clean-dot"} />{saving ? "Saving to your tenant…" : dirty ? "Unsaved changes" : notice ? "All changes saved" : "No unsaved changes"}</span><button type="button" disabled={!dirty || saving} onClick={() => setDraft(previous => ({ ...previous, ...Object.fromEntries(selected.keys.map(key => [key, settings[key]])) }))}>Discard changes</button><SettingsSaveButton type="submit" busy={saving} saved={Boolean(notice) && !dirty} disabled={!dirty || saving || invalidRetention || invalidNumbering}>{saving ? "Saving..." : "Save changes"}</SettingsSaveButton></footer>}
         </form>
       </>}
     </>}

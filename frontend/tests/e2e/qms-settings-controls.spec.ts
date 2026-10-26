@@ -66,6 +66,10 @@ test("follow-up uses separate reminder inputs and validates before saving", asyn
   expect(writes[0]).toMatchObject({ report_due_days: 10, expected_settings: { report_due_days: 7 } });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  const tray = page.locator(".qms-settings__save");
+  const feedbackBounds = await tray.getByRole("status").boundingBox();
+  expect(feedbackBounds?.height).toBeLessThan(200);
+  expect((await tray.locator(".qms-settings__feedback>div").boundingBox())?.width).toBeGreaterThan(150);
 });
 
 test("read-only capability exposes configuration without edit or reset controls", async ({ page }) => {
@@ -86,4 +90,59 @@ test("reference dates use the server clock and configurable ISO presentation", a
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Settings saved and recorded in Quality activity history.")).toBeVisible();
   expect(writes[0]).toMatchObject({ numbering_rules: { date_format: "YYYY-MM" } });
+});
+
+test("save feedback stays by the action, retains failed drafts and honours muted chimes", async ({ page }) => {
+  await prepare(page);
+  await page.addInitScript(() => {
+    const tones: number[] = [];
+    Object.assign(window, { settingsTestTones: tones });
+    const original = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function () {
+      const oscillator = original.call(this);
+      const setFrequency = oscillator.frequency.setValueAtTime.bind(oscillator.frequency);
+      oscillator.frequency.setValueAtTime = (value, time) => { tones.push(value); return setFrequency(value, time); };
+      return oscillator;
+    };
+  });
+  await page.goto("/maintenance/tenant-a/quality/settings/numbering");
+  await page.getByLabel("Finding Prefix", { exact: true }).fill("FN");
+  let fail = true;
+  let release: () => void = () => undefined;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/quality/settings", async route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    if (fail) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Temporary outage" }) });
+    await pending;
+    return route.fallback();
+  });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await save.click();
+  const tray = page.locator(".qms-settings__save");
+  await expect(tray.getByRole("alert")).toContainText("Your entries are retained");
+  await expect(page.getByRole("alert")).toHaveCount(1);
+  await expect(page.getByLabel("Finding Prefix", { exact: true })).toHaveValue("FN");
+  expect(await page.evaluate(() => (window as Window & { settingsTestTones: number[] }).settingsTestTones)).toEqual([]);
+  fail = false;
+  await save.click();
+  await expect(tray.locator("button[aria-busy=true]")).toBeDisabled();
+  await expect(tray.locator(".qms-settings__spinner")).toBeVisible();
+  release();
+  await expect(tray.getByRole("status")).toContainText("Saved successfully");
+  await expect(save).toHaveAttribute("data-state", "saved");
+  await expect.poll(() => page.evaluate(() => (window as Window & { settingsTestTones: number[] }).settingsTestTones)).toEqual([660,880]);
+  await page.getByRole("button", { name: "Dismiss confirmation" }).click();
+  await expect(tray.getByRole("status")).toHaveCount(0);
+  await page.getByRole("button", { name: "Notification sounds", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Notification sounds", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.getByLabel("Finding Prefix", { exact: true }).fill("FIND");
+  await save.click();
+  await expect(tray.getByRole("status")).toContainText("Saved successfully");
+  expect(await page.evaluate(() => (window as Window & { settingsTestTones: number[] }).settingsTestTones)).toEqual([660,880]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect((await tray.getByRole("status").boundingBox())?.height).toBeLessThan(200);
+  expect((await tray.locator(".qms-settings__feedback>div").boundingBox())?.width).toBeGreaterThan(150);
+  expect(await save.evaluate(el => parseFloat(getComputedStyle(el).transitionDuration))).toBeLessThanOrEqual(0.001);
 });

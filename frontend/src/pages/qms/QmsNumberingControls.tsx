@@ -2,6 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarClock, Hash, RotateCcw, RefreshCw } from "lucide-react";
 import { apiRequest, qmsPath } from "../../services/apiClient";
+import { SettingsFeedback, SettingsSaveButton } from "./QmsSettingsFeedback";
+import { settingsError } from "./settingsError";
 import { defaults, validNumbering, formatReferenceDate, referenceDateFormats } from "./numberingRules";
 
 type Rules = Record<string, string | number>;
@@ -12,9 +14,7 @@ export default function QmsNumberingControls({ amoCode, value, onChange, disable
   const queryClient = useQueryClient();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
-  const errorRef = useRef<HTMLDivElement>(null);
   const dateRef = useRef("");
-  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: "nearest" }); }, [error]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -42,7 +42,7 @@ export default function QmsNumberingControls({ amoCode, value, onChange, disable
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setError("");
     try {
-      const data = await apiRequest<Snapshot>(qmsPath(amoCode, "/settings/numbering"), { cacheTtlMs: 0 });
+      const data = await apiRequest<Snapshot>(qmsPath(amoCode, "/settings/numbering"), { cacheTtlMs: 0, headers: { "X-AMO-Silent-Error": "1" } });
       if (dateRef.current && dateRef.current !== data.server_date) setConfirmed(false);
       dateRef.current = data.server_date;
       setSnapshot(previous => quiet && previous ? { ...previous, server_date: data.server_date, server_period: data.server_period, counter_year: data.counter_year } : data);
@@ -63,7 +63,7 @@ export default function QmsNumberingControls({ amoCode, value, onChange, disable
     try {
       await apiRequest(qmsPath(amoCode, "/settings/numbering/reset"), { method: "POST", headers: { "Content-Type": "application/json", "X-AMO-Silent-Error": "1" }, body: JSON.stringify({ prefix: family, scope: unit, expected_period: snapshot.server_period, expected_date_format: effective.date_format, last_value: last, expected_last_value: current?.last_value ?? 0, reason: reason.trim(), confirmed }) });
       setStatus(`Series updated. The next number is ${last + 1}.`); setConfirmed(false); setReason(""); void queryClient.invalidateQueries({ queryKey: ["qms-audit-scopes", amoCode] }); await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Series change failed. Your entries are retained."); }
+    } catch (cause) { setError(settingsError(cause, "Series change failed. Your entries are retained.")); }
     finally { setBusy(false); }
   }
   return <>
@@ -77,8 +77,8 @@ export default function QmsNumberingControls({ amoCode, value, onChange, disable
       {!validNumbering(rules) && <p role="status" className="qms-settings__error">Check the reference formats and use distinct audit and CAR prefixes.</p>}
       <div className="qms-settings__preview"><span>Format examples · MO scope</span><code>{sample}</code><code>{rules.car_prefix}/MO/{datePart}/{String(1).padStart(Number(rules.sequence_digits), "0")}</code><code>{sample}-{rules.finding_prefix}-{String(1).padStart(Number(rules.sequence_digits), "0")}</code></div>
     </section>
-    <section className="qms-settings__card"><div className="qms-settings__section-heading"><h2><RotateCcw size={19} /> Series & counters</h2><button type="button" onClick={() => void load()} disabled={busy}><RefreshCw size={15} /> Refresh series</button></div><p>Dates and CAR unit codes come from the server. Choose an approved audit scope when needed.</p>
-      {error && <div ref={errorRef} role="alert" data-portal-error-feedback className="qms-settings__error">{error}</div>}{status && <p role="status" className="qms-settings__success">{status}</p>}
+    <section className="qms-settings__card" onChangeCapture={() => { setStatus(""); setError(""); }}><div className="qms-settings__section-heading"><h2><RotateCcw size={19} /> Series & counters</h2><button type="button" onClick={() => void load()} disabled={busy}><RefreshCw size={15} /> Refresh series</button></div><p>Dates and CAR unit codes come from the server. Choose an approved audit scope when needed.</p>
+      <SettingsFeedback message={error || status} error={Boolean(error)} onDismiss={() => { setError(""); setStatus(""); }} />
       <label className="qms-settings__field"><span>Reference series</span><select aria-label="Reference series" value={selected} onChange={event => { setSelected(event.target.value); const item = snapshot?.series.find(c => c.id === event.target.value); setPrefix(item?.prefix || ""); setScope(item?.scope || ""); setLast(item?.last_value || 0); setConfirmed(false); }}><option value="">Current period / configured formats</option>{snapshot?.series.map(item => <option key={item.id} value={item.id}>{item.prefix} / {item.scope} · {Number(snapshot.server_period.slice(0,2)) * 100 + item.year} · next {item.next_value}</option>)}</select></label>
       {(selectedSeries || current) && <p className="qms-settings__counter">Last issued <strong>{(selectedSeries || current)?.last_value}</strong><span>Next <strong>{(selectedSeries || current)?.next_value}</strong></span></p>}
       {historical && <p>Historical or inactive series · view only. New series use the current server year.</p>}
@@ -89,7 +89,7 @@ export default function QmsNumberingControls({ amoCode, value, onChange, disable
         <div className="qms-settings__field"><span>Reference period</span><output aria-label="Reference period">{snapshot?.server_period} · server UTC</output><small>Automatic; historical periods cannot be reset.</small></div>
         <label className="qms-settings__field"><span>Last issued number</span><input aria-label="Last issued number" aria-invalid={!Number.isInteger(last) || last < 0 || last > 999999999} type="number" min={0} max={999999999} step={1} value={Number.isNaN(last) ? "" : last} onChange={event => { setLast(event.target.valueAsNumber); setConfirmed(false); }} /><small>Next number: {Number.isInteger(last) && last >= 0 && last <= 999999999 ? last + 1 : "Enter a whole number from 0 to 999999999"}</small></label>
       </div><label className="qms-settings__field"><span>Reason for series change</span><input value={reason} minLength={10} maxLength={500} onChange={event => setReason(event.target.value)} /><small>10–500 characters. Recorded in tenant activity history.</small></label>
-      <label className="qms-settings__toggle"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>I confirm {family}/{unit}/{formatReferenceDate(serverDate, String(effective.date_format))} will issue {last + 1} next.</span></label><button type="button" disabled={!resetValid || busy} onClick={() => void reset()}>{busy ? "Updating series…" : "Apply series change"}</button></fieldset>}</>}
+      <label className="qms-settings__toggle"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>I confirm {family}/{unit}/{formatReferenceDate(serverDate, String(effective.date_format))} will issue {last + 1} next.</span></label><SettingsSaveButton type="button" busy={busy} disabled={!resetValid || busy} onClick={() => void reset()}>{busy ? "Updating series..." : "Apply series change"}</SettingsSaveButton></fieldset>}</>}
     </section>
   </>;
 }
