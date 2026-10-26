@@ -375,7 +375,7 @@ def conclude_effectiveness(
         QualityEffectivenessPlan.amo_id == ctx.amo_id,
         QualityEffectivenessPlan.case_id == case.id,
         QualityEffectivenessPlan.id == plan_id,
-    ).with_for_update().first()
+    ).with_for_update(of=QualityEffectivenessPlan).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Effectiveness plan not found.")
     if plan.status == "CONCLUDED":
