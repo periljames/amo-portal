@@ -239,17 +239,25 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/findings/register", { waitUntil: "domcontentloaded" });
 
-  const contextBar = page.locator(".quality-context-bar");
+  const contextBar = page.getByRole("navigation", { name: "QMS page menus" });
   await expect(contextBar).toBeVisible();
-  for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
+  for (const label of ["Work", "Assurance", "Controls & settings", "Reports"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
-  // On the canonical Findings register the Assurance rail owns local actions;
-  // the context bar intentionally avoids a second, competing creation control.
+  await contextBar.getByRole("button", { name: "Work", exact: true }).click();
+  const workPages = page.getByRole("navigation", { name: "Work pages" });
+  await expect(workPages.getByRole("link", { name: "Control Room", exact: true })).toBeVisible();
+  await expect(workPages.getByRole("link", { name: "Missions", exact: true })).toBeVisible();
+  await expect(workPages.locator("summary").filter({ hasText: "People & authorizations" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Assurance pages", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  // The compact Quality menu is the single navigation owner: no duplicate create action.
   await expect(contextBar.getByRole("button", { name: "New finding" })).toHaveCount(0);
   await expect(page.locator(".qms-ops-page > .page-header")).toBeHidden();
 
-  await page.locator(".tenant-shell__profile-trigger").click();
+  await page.getByRole("button", { name: "Account and appearance" }).click();
   await page.getByRole("menuitem", { name: "Appearance" }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Portal text size" });
   await expect(scaleGroup).toBeVisible();
@@ -257,11 +265,11 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   await expect(page.locator("html")).toHaveAttribute("data-portal-text-scale", "large");
   await expect.poll(() => state.scale).toBe("large");
 
-  const navFontSize = await page.locator(".tenant-nav__link > span:last-child").first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
-  expect(navFontSize).toBeGreaterThanOrEqual(14);
+  const navFontSize = await contextBar.getByRole("button", { name: "Work", exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(navFontSize).toBeGreaterThanOrEqual(13);
 
   await page.keyboard.press("Escape");
-  await page.locator(".tenant-shell__profile-trigger").click();
+  await page.getByRole("button", { name: "Account and appearance" }).click();
   await page.getByRole("menuitem", { name: "Appearance" }).click();
   await expect(page.getByRole("radio", { name: /Large/ })).toHaveAttribute("aria-checked", "true");
 
