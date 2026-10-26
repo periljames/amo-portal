@@ -245,9 +245,9 @@ test("QUALITY_OFFICER can work the CAR control loop and prepare authorization ca
         home_role: "AUDITOR", department: "Quality", workforce_status: "Active",
         authorizations: [], open_cases: 0,
       }],
-      total: 1,
+      total: 1, limit: 100, offset: 0, has_more: false,
     });
-    if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+    if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0, limit: 100, offset: 0, has_more: false });
     if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
     if (path.endsWith("/quality/people/authorization-control/authorizations")) return json(route, { items: [] });
     if (path.endsWith("/quality/people/rules")) return json(route, { items: [{
