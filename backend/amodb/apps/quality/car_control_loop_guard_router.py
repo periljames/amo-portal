@@ -383,40 +383,13 @@ def _close_control_loop_guarded(
     profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     milestones = _milestones(db, amo_id=ctx.amo_id, car_id=car_id)
     _validated_closure_evidence_ref(payload, milestones)
-    # New structured RCA/actions supplement (never replace) established
-    # Quality approval, implementation, evidence and effectiveness gates.
-    from .car_rca_models import QualityCarRcaAction, QualityCarRcaDocument
-    doc = db.query(QualityCarRcaDocument).filter(
-        QualityCarRcaDocument.amo_id == ctx.amo_id,
-        QualityCarRcaDocument.car_id == car_id,
-    ).first()
-    if doc is not None and doc.submitted_revision is not None:
-        actions = db.query(QualityCarRcaAction).filter(
-            QualityCarRcaAction.amo_id == ctx.amo_id,
-            QualityCarRcaAction.car_id == car_id,
-        ).all()
-        if not any(action.kind == "CORRECTIVE" and action.state == "VERIFIED" for action in actions):
-            raise HTTPException(status_code=409, detail="At least one causal corrective action must be independently verified before closure. Cancelled actions do not satisfy the gate.")
-        pending = [action.sequence_no for action in actions if action.state not in {"VERIFIED", "CANCELLED"}]
-        if pending:
-            raise HTTPException(
-                status_code=409,
-                detail={"message": "Implementation must be independently verified before CAR closure.",
-                        "pending_action_numbers": pending},
-            )
-        if profile.effectiveness_required:
-            from .assurance_case_models import QualityEffectivenessPlan
-            latest = db.query(QualityEffectivenessPlan).filter(
-                QualityEffectivenessPlan.amo_id == ctx.amo_id,
-                QualityEffectivenessPlan.source_type == "CAR",
-                QualityEffectivenessPlan.source_id == str(car_id),
-                QualityEffectivenessPlan.status != "CANCELLED",
-            ).order_by(QualityEffectivenessPlan.created_at.desc()).first()
-            if latest is None or latest.status != "CONCLUDED" or latest.conclusion != "EFFECTIVE":
-                raise HTTPException(
-                    status_code=409,
-                    detail="A concluded, independently verified EFFECTIVE assurance plan is required before this structured CAR can close.",
-                )
+    # This gate is also checked at the shared CLOSED transition boundary, so
+    # a legacy update endpoint cannot silently skip independent verification.
+    from .car_closure_guards import ensure_structured_car_ready_for_closure
+    ensure_structured_car_ready_for_closure(
+        db, amo_id=ctx.amo_id, car_id=car_id,
+        effectiveness_required=profile.effectiveness_required,
+    )
     return _close_control_loop_base(str(car_id), payload, ctx, db)
 
 
