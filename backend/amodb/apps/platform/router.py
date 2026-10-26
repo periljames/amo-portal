@@ -279,12 +279,24 @@ def tenant_activation_checklist(
         ]),
     ).all()
     active_entitlements = account_services.resolve_entitlements(db, amo_id=tenant_id)
-    licensed_modules = [
-        item.module_code for item in enabled_modules
-        if item.module_code in active_entitlements and (
-            active_entitlements[item.module_code].is_unlimited
-            or int(active_entitlements[item.module_code].limit or 0) > 0
-        )
+    def _module_grant_ready(item) -> bool:
+        entitlement = active_entitlements.get(item.module_code)
+        if entitlement is None:
+            return False
+        current = datetime.now(timezone.utc)
+        start = getattr(item, "effective_from", None)
+        end = getattr(item, "effective_to", None)
+        if start is not None and (start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start) > current:
+            return False
+        if end is not None and (end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end) <= current:
+            return False
+        return bool(entitlement.is_unlimited or int(getattr(entitlement, "limit", 0) or 0) > 0)
+
+    # One entitled module cannot mask other unlicensed, expired or future-dated
+    # ENABLED grants. Report exactly which modules block paid activation.
+    licensed_modules = [item.module_code for item in enabled_modules if _module_grant_ready(item)]
+    incomplete_module_grants = [
+        item.module_code for item in enabled_modules if not _module_grant_ready(item)
     ]
     checks = [
         {"key": "organization", "label": "Tenant organization created", "passed": bool(tenant.id)},
@@ -293,7 +305,8 @@ def tenant_activation_checklist(
         {"key": "tenant_active", "label": "Organization is not suspended", "passed": bool(tenant.is_active)},
         {"key": "subscription", "label": "Effective commercial subscription permits access", "passed": bool(licensed.has_access)},
         {"key": "modules", "label": "At least one module is enabled", "passed": bool(enabled_modules)},
-        {"key": "module_entitlements", "label": "Enabled modules have effective paid license entitlements", "passed": bool(licensed_modules)},
+        {"key": "module_entitlements", "label": "Every enabled module has a currently effective paid license entitlement",
+         "passed": bool(enabled_modules) and not incomplete_module_grants},
         {"key": "storage", "label": "Tenant byte quota explicitly allocated and reconciled",
          "passed": quota["quota_bytes"] > 0 and quota["integrity_state"] == "OK"},
         {"key": "shared_storage", "label": "Shared object storage verified reachable",
@@ -302,6 +315,8 @@ def tenant_activation_checklist(
     return {
         "tenant_id": tenant_id, "ready": all(row["passed"] for row in checks),
         "checks": checks, "storage": quota,
+        "licensed_modules": licensed_modules,
+        "unready_modules": incomplete_module_grants,
     }
 
 

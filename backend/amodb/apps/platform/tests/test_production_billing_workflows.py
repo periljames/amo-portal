@@ -143,3 +143,48 @@ def test_activation_readiness_does_not_confuse_s3_configuration_with_live_storag
 
     monkeypatch.setattr(storage, "health_check", lambda: {"ok": True})
     assert router.tenant_activation_checklist("tenant-1", db=db, user=user)["ready"] is True
+
+
+def test_activation_rejects_unlicensed_and_expired_module_grants(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from amodb import storage
+    from amodb.apps.accounts import services as account_services
+    from amodb.apps.platform import storage_quota_service
+    from amodb.apps.quality import tenant_security
+
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(id="tenant-1", is_active=True)
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
+        SimpleNamespace(is_active=True, must_change_password=False)
+    )
+    now = datetime.now(timezone.utc)
+    enabled = [
+        SimpleNamespace(module_code="quality", effective_from=None, effective_to=None),
+        SimpleNamespace(module_code="training", effective_from=None, effective_to=None),
+    ]
+    db.query.return_value.filter.return_value.all.return_value = enabled
+    monkeypatch.setattr(tenant_security, "set_postgres_tenant_context", lambda *a, **kw: None)
+    monkeypatch.setattr(account_services, "get_billing_access_status",
+                        lambda *a, **kw: SimpleNamespace(has_access=True))
+    monkeypatch.setattr(account_services, "resolve_entitlements",
+                        lambda *a, **kw: {"quality": SimpleNamespace(is_unlimited=True)})
+    monkeypatch.setattr(storage_quota_service, "read_quota",
+                        lambda *a, **kw: {"quota_bytes": 5_000_000_000_000, "integrity_state": "OK"})
+    monkeypatch.setattr(storage, "shared_storage_enabled", lambda: True)
+    monkeypatch.setattr(storage, "health_check", lambda: {"ok": True})
+    user = SimpleNamespace(id="superuser-1")
+
+    result = router.tenant_activation_checklist("tenant-1", db=db, user=user)
+    assert not result["ready"]
+    assert result["unready_modules"] == ["training"]
+    assert next(c for c in result["checks"] if c["key"] == "module_entitlements")["passed"] is False
+
+    enabled[1].effective_to = now - timedelta(seconds=1)
+    monkeypatch.setattr(account_services, "resolve_entitlements",
+                        lambda *a, **kw: {
+                            "quality": SimpleNamespace(is_unlimited=True),
+                            "training": SimpleNamespace(is_unlimited=True),
+                        })
+    result = router.tenant_activation_checklist("tenant-1", db=db, user=user)
+    assert result["unready_modules"] == ["training"]
+    assert not result["ready"]
