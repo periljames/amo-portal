@@ -66,3 +66,46 @@ def test_platform_console_includes_operator_billing_and_owner_endpoints():
         ("/platform/billing/invoices/{invoice_id}/mark-paid", "POST"),
     ]:
         assert entry in paths
+
+
+@pytest.mark.parametrize("modules,reason,expected", [
+    ([{"module_code": "quality", "status": "ENABLED"}], "", "audited reason"),
+    ([], "Governed activation", "at least one"),
+    ([{"module_code": "not-installed", "status": "ENABLED"}], "Governed activation", "Unknown platform module"),
+    ([{"module_code": "quality", "status": "PERMANENT"}], "Governed activation", "Invalid module state"),
+    ([{"module_code": "quality", "status": "ENABLED"},
+      {"module_code": "quality", "status": "TRIAL"}], "Governed activation", "Duplicate module"),
+])
+def test_platform_module_changes_reject_invalid_batches_before_writing(modules, reason, expected):
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(id="tenant-1")
+    with pytest.raises(ValueError, match=expected):
+        services.update_entitlements(
+            db, tenant_id="tenant-1", actor_id="platform-operator",
+            payload={"modules": modules, "reason": reason},
+        )
+    db.add.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_valid_platform_module_change_keeps_enum_and_reason(monkeypatch):
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(id="tenant-1")
+    db.get_bind.return_value.dialect.name = "sqlite"
+    row = SimpleNamespace(status=None, plan_code=None)
+    db.query.return_value.filter.return_value.first.return_value = row
+    logged = []
+    monkeypatch.setattr(services, "audit", lambda *args, **kwargs: logged.append(kwargs))
+    monkeypatch.setattr(services, "get_tenant_detail",
+                        lambda db, tenant_id: {"id": tenant_id})
+    result = services.update_entitlements(
+        db, tenant_id="tenant-1", actor_id="platform-operator",
+        payload={"modules": [{"module_code": "quality", "status": "ENABLED", "plan_code": "enterprise"}],
+                 "reason": "Approved subscription fulfillment"},
+    )
+    from amodb.apps.accounts.models import ModuleSubscriptionStatus
+    assert row.status == ModuleSubscriptionStatus.ENABLED
+    assert row.plan_code == "enterprise"
+    assert logged[0]["reason"] == "Approved subscription fulfillment"
+    db.commit.assert_called_once()
+    assert result["id"] == "tenant-1"
