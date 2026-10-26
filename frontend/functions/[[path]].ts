@@ -54,12 +54,28 @@ export async function onRequest(context: PagesContext): Promise<Response> {
     status: 503, headers: { "Cache-Control": "no-store" },
   });
   const expectedOrigin = url.origin;
-  const receivedOrigin = request.headers.get("origin");
-  if (!["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase()) &&
-      receivedOrigin && receivedOrigin !== expectedOrigin) {
-    return new Response("Cross-origin state-changing request rejected", {
-      status: 403, headers: { "Cache-Control": "no-store" },
-    });
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) {
+    const receivedOrigin = request.headers.get("origin");
+    const referringPage = request.headers.get("referer");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    let matchingReferer = false;
+    if (referringPage) {
+      try { matchingReferer = new URL(referringPage).origin === expectedOrigin; }
+      catch { matchingReferer = false; }
+    }
+    // Reject cross-site browser requests even if the Origin header is absent.
+    // For cookie-authenticated mutations, require affirmative same-origin
+    // provenance instead of treating a missing Origin as implicitly trusted.
+    const crossSite = fetchSite !== null && !["same-origin", "none"].includes(fetchSite);
+    const validOrigin = receivedOrigin === expectedOrigin;
+    const conflictingOrigin = receivedOrigin !== null && !validOrigin;
+    const missingCookieProvenance = request.headers.has("cookie") &&
+      !(validOrigin || matchingReferer || fetchSite === "same-origin");
+    if (conflictingOrigin || crossSite || missingCookieProvenance) {
+      return new Response("Cross-origin state-changing request rejected", {
+        status: 403, headers: { "Cache-Control": "no-store" },
+      });
+    }
   }
   const headers = new Headers(request.headers);
   headers.delete("host");
