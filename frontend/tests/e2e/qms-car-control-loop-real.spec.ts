@@ -63,8 +63,16 @@ async function authenticatedRequest(
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    let responseBody: unknown = null;
-    try { responseBody = await response.json(); } catch { responseBody = await response.text(); }
+    // A Fetch response body can only be consumed once. Preserve plain-text
+    // server errors instead of replacing the original HTTP failure with a
+    // second "body stream already read" exception.
+    const rawBody = await response.text();
+    let responseBody: unknown = rawBody;
+    if (rawBody) {
+      try { responseBody = JSON.parse(rawBody); } catch { /* Keep the diagnostic text. */ }
+    } else {
+      responseBody = null;
+    }
     return { status: response.status, body: responseBody };
   }, { requestMethod: method, requestPath: path, body: payload });
 }
