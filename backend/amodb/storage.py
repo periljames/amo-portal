@@ -309,6 +309,9 @@ def delete(uri: str) -> None:
         return
     if uri.startswith("s3://"):
         bucket, key = _parse_s3(uri)
+        prefix = object_prefix()
+        if bucket != bucket_name() or (prefix and not key.startswith(prefix + "/")):
+            raise ValueError("Refusing deletion outside the configured S3 namespace")
         _client().delete_object(Bucket=bucket, Key=key)
         cached = cache_root() / f"{hashlib.sha256(uri.encode()).hexdigest()}{Path(key).suffix[:16]}"
         cached.unlink(missing_ok=True)
