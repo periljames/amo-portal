@@ -66,8 +66,12 @@ def ensure_structured_car_ready_for_closure(
             },
         )
 
-    # Once a structured RCA has been submitted, a reviewer must conclude
-    # effectiveness regardless of a mutable legacy control-loop preference.
+    # Preserve the explicitly governed effectiveness-required policy. Quality
+    # may formally configure whether this control applies; do not silently
+    # convert the optional control into an unconditional gate.
+    if not effectiveness_required:
+        return
+
     from .assurance_case_models import QualityEffectivenessPlan
     latest = db.query(QualityEffectivenessPlan).filter(
         QualityEffectivenessPlan.amo_id == amo_id,
