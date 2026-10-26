@@ -214,7 +214,7 @@ test("two authenticated Quality browsers receive the same committed live-audit c
     // on both browsers and expand its verification inputs before checking SSE.
     for (const page of [pageA, pageB]) {
       await expect(page.getByRole("table", { name: "Checklist assessment table" })).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: "Details for question 1" }).click();
+      await page.getByRole("button", { name: "Details for question 1", exact: true }).click();
       await page.locator("details.qms-live-audit-focus__compliance > summary").click();
       await expect(page.getByLabel("Applicability")).toBeVisible({ timeout: 30_000 });
     }
@@ -306,8 +306,8 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await auditeePage.getByRole("button", { name: "Record closing response" }).click();
     await expect(auditeePage.getByRole("status")).toContainText("Closing-meeting response recorded against the exact draft revision and SHA-256", { timeout: 30_000 });
 
-    await internalPage.getByRole("region", { name: "Audit closing meeting" }).getByRole("button", { name: "Refresh" }).click();
-    await expect(internalPage.getByText(/ACKNOWLEDGED/i)).toBeVisible({ timeout: 30_000 });
+    await internalPage.getByLabel("Audit closing meeting").getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(internalPage.getByText("ACKNOWLEDGED", { exact: true })).toBeVisible({ timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Submit acknowledged draft for review" }).click();
     await expect(internalPage.getByRole("status")).toContainText("SUBMIT recorded", { timeout: 30_000 });
     await internalPage.getByRole("button", { name: "Approve exact report revision" }).click();
@@ -380,7 +380,11 @@ test("same-day closing performs exact-SHA auditee acknowledgement, real WebAuthn
     await internalPage.getByRole("button", { name: "Place legal hold" }).click();
     await expect(internalPage.getByRole("status")).toContainText("Legal hold placed", { timeout: 30_000 });
     await expect(internalPage.getByText("CASE-QMS-LIVE-992", { exact: true })).toBeVisible();
-    await internalPage.getByRole("button", { name: "Release" }).click();
+    await internalPage.getByRole("button", { name: "Release", exact: true }).click();
+    const releaseForm = internalPage.getByRole("group", { name: "Release legal hold CASE-QMS-LIVE-992" });
+    await releaseForm.getByLabel("Release reason").fill("Legal review confirmed the governed record may return to standard retention controls.");
+    await releaseForm.getByLabel("Authority / governing basis for release").fill("Approved release by authorized Quality management following records preservation review.");
+    await releaseForm.getByRole("button", { name: "Confirm hold release" }).click();
     await expect(internalPage.getByRole("status")).toContainText("Legal hold released with an append-only release event", { timeout: 30_000 });
     await expect(internalPage.getByText("No active legal holds.")).toBeVisible();
 
