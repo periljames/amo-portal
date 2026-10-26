@@ -32,6 +32,52 @@ async function prepare(page: Page): Promise<void> {
     }));
   }, { storedToken: token });
 
+  // Main now owns the default CAR report route: a server-backed preview
+  // with controlled downloads. The detailed interactive analysis is a
+  // separate, explicitly linked view at ?analysis=1.
+  await page.route("**/quality/reports/preview?**", async (route) => {
+    const request = new URL(route.request().url());
+    expect(request.searchParams.get("kind")).toBe("car-performance");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        kind: "car-performance",
+        title: "CAR performance",
+        tenant: "tenant-a",
+        generated_at: "2026-08-12T08:00:00Z",
+        start: "2026-07-01",
+        end: "2026-08-12",
+        population: "Three synthetic CAR records from the controlled reporting period.",
+        columns: ["CAR", "Status", "Due", "Closed"],
+        rows: [
+          ["QMS-CAR-001", "CLOSED", "2026-08-05", "2026-08-04"],
+          ["QMS-CAR-002", "CLOSED", "2026-07-31", "2026-08-08"],
+          ["QMS-CAR-003", "IN_PROGRESS", "2026-08-10", ""],
+        ],
+        summary: [
+          { label: "total_cars", value: 3 },
+          { label: "closed", value: 2 },
+          { label: "open", value: 1 },
+        ],
+        total: 3,
+      }),
+    });
+  });
+  await page.route("**/quality/reports/output?**", async (route) => {
+    const request = new URL(route.request().url());
+    expect(request.searchParams.get("kind")).toBe("car-performance");
+    expect(request.searchParams.get("start")).toBe("2026-07-01");
+    expect(request.searchParams.get("end")).toBe("2026-08-12");
+    expect(request.searchParams.get("output")).toBe("csv");
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv",
+      headers: { "Content-Disposition": 'attachment; filename="qms-car-performance.csv"' },
+      body: "CAR,Status,Due,Closed\\nQMS-CAR-001,CLOSED,2026-08-05,2026-08-04\\nQMS-CAR-002,CLOSED,2026-07-31,2026-08-08\\nQMS-CAR-003,IN_PROGRESS,2026-08-10,\\n",
+    });
+  });
+
   await page.route("**/quality/cars/register/paged**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -166,6 +212,30 @@ test("CAR performance report calculates QMS closure KPI and exposes management o
   await prepare(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/maintenance/tenant-a/quality/reports/car-performance", { waitUntil: "domcontentloaded" });
+
+  // Verify the new canonical, source-backed report entry before opening
+  // the existing charting workspace. This does not waive the old KPI,
+  // chart-type and department drill-down assertions below.
+  await expect(page.getByRole("heading", { name: "CAR performance", exact: true })).toBeVisible();
+  const preview = page.getByRole("region", { name: "Report preview" });
+  await expect(preview).toBeVisible();
+  await expect(preview.getByText("3 records")).toBeVisible();
+  await expect(preview.getByRole("row", { name: /QMS-CAR-001/ })).toBeVisible();
+  await expect(preview.getByRole("row", { name: /QMS-CAR-002/ })).toBeVisible();
+  await expect(preview.getByRole("row", { name: /QMS-CAR-003/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download CSV" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Download printable report" })).toBeEnabled();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Download CSV" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("qms-car-performance.csv");
+  expect(await download.failure()).toBeNull();
+
+  const analysis = preview.getByRole("link", { name: "Open detailed CAR charts and analysis" });
+  await expect(analysis).toHaveAttribute("href", /\\/quality\\/reports\\/car-performance\\?analysis=1$/);
+  await analysis.click();
+  await expect(page).toHaveURL(/\\/quality\\/reports\\/car-performance\\?analysis=1$/);
 
   await expect(page.getByRole("heading", { name: "Workload", exact: true })).toBeVisible();
   await expect(page.getByLabel("Analysis metric")).toBeVisible();
