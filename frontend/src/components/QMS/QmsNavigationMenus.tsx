@@ -4,7 +4,6 @@ import { Link, useLocation } from "react-router-dom";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import { QMS_ROUTE_REGISTRY, qmsBasePath, qmsModulePath } from "../../pages/qms/routes/qmsRouteRegistry";
 import { qmsPeopleWorkspacePath, qmsWorkspaceEntryPath } from "../../pages/qms/routes/qmsWorkspaceRegistry";
-import { qmsViewLabel } from "../../pages/qms/qmsWorkspaceCopy";
 
 const groups = [
   { id: "work", label: "Work", sections: ["command"] },
@@ -13,18 +12,16 @@ const groups = [
   { id: "reports", label: "Reports", sections: ["reporting"] },
 ] as const;
 
-const visibleControl = (element: HTMLElement) => element.getClientRects().length > 0 && !element.closest(".qms-page-menu__module:not([open]) > div");
+const visibleControl = (element: HTMLElement) => element.getClientRects().length > 0;
 
 function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   const location = useLocation();
   const root = useRef<HTMLElement>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const base = qmsBasePath(amoCode);
   const moduleActive = (segment: string) => location.pathname === `${base}/${segment}` || location.pathname.startsWith(`${base}/${segment}/`);
   const openGroup = (id: string) => {
     setOpen(id);
-    setExpandedModule(QMS_ROUTE_REGISTRY.find(module => moduleActive(module.segment))?.id || null);
   };
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(null); };
@@ -34,9 +31,6 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   }, []);
   const current = (path: string) => `${location.pathname}${location.search}` === path;
   const link = (path: string, label: string) => <Link key={path} to={path} data-preload-route={path} aria-current={current(path) ? "page" : undefined} onClick={() => setOpen(null)}>{label}</Link>;
-  const submenu = (id: string, label: string, children: React.ReactNode, active = false) => <details key={id} className="qms-page-menu__module" open={expandedModule === id}>
-    <summary data-active={active || undefined} onClick={event => { event.preventDefault(); setExpandedModule(expandedModule === id ? null : id); }}>{label}</summary><div>{children}</div>
-  </details>;
   const panelKeys = (event: React.KeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const targets = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("a[href], summary")).filter(visibleControl);
@@ -50,7 +44,7 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   return <nav ref={root} className="qms-menu-bar quality-context-bar" aria-label="QMS page menus" onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(null); }}>
     <Link className="qms-menu-bar__home" to={base} onClick={() => setOpen(null)}>QMS</Link>
     {groups.map(group => {
-      const modules = QMS_ROUTE_REGISTRY.filter(module => (group.sections as readonly string[]).includes(module.section) && module.id !== "aerodoc" && hasQmsRolePermission(module.permission));
+      const modules = QMS_ROUTE_REGISTRY.filter(module => (group.sections as readonly string[]).includes(module.section) && !["documents", "aerodoc", "mail-identity"].includes(module.id) && hasQmsRolePermission(module.permission));
       if (!modules.length && group.id !== "work") return null;
       const active = modules.some(module => moduleActive(module.segment));
       return <div className="qms-page-menu" key={group.id}>
@@ -70,12 +64,10 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
           {group.id === "work" && <>
             {link(base, "Control Room")}
             {hasQmsRolePermission("qms.change.view") && link(qmsWorkspaceEntryPath(amoCode, "missions"), "Missions")}
-            {hasQmsRolePermission("qms.people.view") && submenu("people", "People & authorizations", (["overview", "people", "cases", "reviews", "administration"] as const).map(tab => link(qmsPeopleWorkspacePath(amoCode, { tab }), qmsViewLabel(tab))))}
+            {hasQmsRolePermission("qms.people.view") && link(qmsPeopleWorkspacePath(amoCode), "People & authorizations")}
           </>}
           {modules.map(module => <div className="qms-page-menu__destination" key={module.id}>
-            {module.validViews.length > 1
-              ? submenu(module.id, module.navigationLabel, module.validViews.map(view => link(qmsModulePath(amoCode, module.id, view), qmsViewLabel(view))), moduleActive(module.segment))
-              : link(qmsModulePath(amoCode, module.id, module.defaultView), module.navigationLabel)}
+            {link(qmsModulePath(amoCode, module.id, module.defaultView), module.navigationLabel)}
           </div>)}
         </nav>}
       </div>;
