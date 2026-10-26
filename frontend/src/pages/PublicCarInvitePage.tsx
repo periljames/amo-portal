@@ -1377,7 +1377,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       <span>Due date</span>
                                       <input className="car-invite-input" type="date" value={entry.form.due_date} disabled={locked || invite.deadline_change_requires_review} onChange={(event) => updateFormField(entry.token, "due_date", event.target.value)} />
                                     </label>
-                                    <CarRcaActions token={entry.token} actions={entry.rcaActions} disabled={locked || !entry.rcaLoaded}
+                                    <CarRcaActions token={entry.token} actions={entry.rcaActions} attachments={entry.attachments.map(file => ({ id: file.id, filename: file.filename }))} disabled={locked || !entry.rcaLoaded}
                                       canProgress={!locked && invite.root_cause_status === "ACCEPTED" && invite.capa_status === "ACCEPTED"}
                                       causeIds={entry.rca.investigations.flatMap(method => method.nodes.filter(node => node.entry_type === "CAUSAL_CONCLUSION").map(node => ({ id: node.id, statement: node.statement })))}
                                       onChanged={async () => {
