@@ -565,7 +565,7 @@ def _normalized_upload_mime(file: UploadFile) -> str:
     return (file.content_type or "").split(";", 1)[0].strip().lower()
 
 
-def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
+def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str) -> tuple[str, str, str, int]:
     original_name = _sanitize_attachment_filename(file.filename or "attachment.bin")
     ext = Path(original_name).suffix.lower()
     mime = _normalized_upload_mime(file)
@@ -597,7 +597,12 @@ def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, st
         target_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Attachment is empty.")
 
-    return target_path, original_name, digest.hexdigest(), total
+    from .car_rca_storage import store_car_file
+    try:
+        object_uri = store_car_file(target_path, amo_id=amo_id, car_id=car_id, content_type=mime)
+    finally:
+        target_path.unlink(missing_ok=True)
+    return object_uri, original_name, digest.hexdigest(), total
 
 
 def _store_finding_attachment(finding_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
@@ -7121,7 +7126,7 @@ def upload_car_invite_attachment(
     assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
 
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
@@ -7199,10 +7204,10 @@ def delete_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     remaining_attachment = (
         db.query(models.CARAttachment.id)
@@ -7243,9 +7248,8 @@ def download_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(
         path=file_path,
         filename=attachment.filename,
@@ -7361,7 +7365,7 @@ def upload_car_attachment(
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="Closed or cancelled CAR evidence is read-only.")
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
         car_id=car.id,
@@ -7411,9 +7415,8 @@ def download_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(path=file_path, filename=attachment.filename, media_type=attachment.content_type or "application/octet-stream")
 
 
@@ -7431,10 +7434,10 @@ def delete_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     audit_services.log_event(
         db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="qms_car_attachment", entity_id=str(attachment_id), action="deleted", metadata=_audit_metadata(request)
