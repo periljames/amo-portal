@@ -109,3 +109,37 @@ def test_valid_platform_module_change_keeps_enum_and_reason(monkeypatch):
     assert logged[0]["reason"] == "Approved subscription fulfillment"
     db.commit.assert_called_once()
     assert result["id"] == "tenant-1"
+
+
+def test_activation_readiness_does_not_confuse_s3_configuration_with_live_storage(monkeypatch):
+    from amodb import storage
+    from amodb.apps.accounts import services as account_services
+    from amodb.apps.platform import storage_quota_service
+    from amodb.apps.quality import tenant_security
+
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(id="tenant-1", is_active=True)
+    owner = SimpleNamespace(is_active=True, must_change_password=False)
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = owner
+    db.query.return_value.filter.return_value.all.return_value = [
+        SimpleNamespace(module_code="quality"),
+    ]
+    monkeypatch.setattr(tenant_security, "set_postgres_tenant_context", lambda *a, **kw: None)
+    monkeypatch.setattr(account_services, "get_billing_access_status",
+                        lambda *a, **kw: SimpleNamespace(has_access=True))
+    monkeypatch.setattr(account_services, "resolve_entitlements",
+                        lambda *a, **kw: {"quality": SimpleNamespace(is_unlimited=True)})
+    monkeypatch.setattr(storage_quota_service, "read_quota",
+                        lambda *a, **kw: {"quota_bytes": 5_000_000_000_000, "integrity_state": "OK"})
+    monkeypatch.setattr(storage, "shared_storage_enabled", lambda: True)
+    monkeypatch.setattr(storage, "health_check", lambda: {"ok": False})
+
+    user = SimpleNamespace(id="superuser-1")
+    status = router.tenant_activation_checklist("tenant-1", db=db, user=user)
+    assert status["ready"] is False
+    by_key = {item["key"]: item["passed"] for item in status["checks"]}
+    assert by_key["shared_storage"] is False
+    assert by_key["storage"] is True
+
+    monkeypatch.setattr(storage, "health_check", lambda: {"ok": True})
+    assert router.tenant_activation_checklist("tenant-1", db=db, user=user)["ready"] is True
