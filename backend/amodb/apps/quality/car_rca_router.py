@@ -446,7 +446,7 @@ def _save(db: Session, car, payload: CarRcaSave, *, actor, actor_ref):
             detail={"message": "A newer draft was saved elsewhere; reload before overwriting.",
                     "server_revision": doc.revision}
         )
-    if doc.draft == data:
+    if doc.draft == data and doc.revision > 0:
         return _public_projection(db, car)
     doc.revision += 1
     doc.draft = data
