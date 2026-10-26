@@ -187,6 +187,26 @@ def test_physical_audit_refuses_partial_scan_and_unbounded_checksum_reads(storag
                                       max_objects=101, verify_checksums=True)
 
 
+def test_physical_audit_never_reports_partial_inventory_as_complete(storage_db, monkeypatch):
+    monkeypatch.setenv("AMO_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("AMO_STORAGE_S3_BUCKET", "audit-bucket")
+    monkeypatch.setenv("AMO_STORAGE_S3_PREFIX", "amo-portal")
+    quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100,
+                   actor_id=None, reason="Approved allocation")
+    for number in range(2):
+        key = f"evidence/tenant-1/{number}.pdf"
+        reservation = quota.reserve(storage_db, tenant_id="tenant-1",
+                                    object_key=key, size_bytes=10,
+                                    idempotency_key=f"file-{number}")
+        quota.finalize(storage_db, tenant_id="tenant-1",
+                       reservation_id=reservation.id,
+                       storage_uri=f"s3://audit-bucket/amo-portal/{key}",
+                       checksum_sha256=hashlib.sha256(str(number).encode()).hexdigest())
+    storage_db.commit()
+    with pytest.raises(ValueError, match="incomplete"):
+        quota.audit_retained_objects(storage_db, tenant_id="tenant-1", max_objects=1)
+
+
 def test_allocation_cannot_shrink_below_active_usage(storage_db):
     quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100, actor_id=None, reason="Contract")
     quota.reserve(storage_db, tenant_id="tenant-1", object_key="a.pdf",
