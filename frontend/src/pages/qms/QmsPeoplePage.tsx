@@ -699,7 +699,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     <section className={`qms-authz qms-people qms-surface-root${!selfServiceOnly && effectiveTab === "people" && selectedPersonKey ? " qms-authz--person-open" : ""}${effectiveTab === "cases" && selectedCaseId ? " qms-authz--case-open" : ""}`} aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
-          <h1 className="qms-authz-page-heading">People & authorization</h1>
+          <h1 className="qms-authz-page-heading">Authorization governance</h1>
           <p className="qms-authz-page-subtitle">Authorization governance: controlled nominations, competence evidence, independent decisions and periodic reviews.</p>
 
         </div>
