@@ -125,18 +125,18 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const [dependencyDrafts, setDependencyDrafts] = useState<Record<string, DependencyDraft>>({});
 
   const responsesQuery = useQuery({
-    queryKey: ["qms-car-control-responses", carId],
+    queryKey: ["qms-car-control-responses", amoCode, carId],
     queryFn: () => qmsListCarResponses(carId, false, amoCode),
     staleTime: 0,
     refetchOnMount: "always",
   });
   const attachmentsQuery = useQuery({
-    queryKey: ["qms-car-control-attachments", carId],
+    queryKey: ["qms-car-control-attachments", amoCode, carId],
     queryFn: () => qmsListCarAttachments(carId),
     staleTime: 10_000,
   });
   const inviteQuery = useQuery({
-    queryKey: ["qms-car-control-source", carId],
+    queryKey: ["qms-car-control-source", amoCode, carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
     staleTime: 0,
     refetchOnMount: "always",
@@ -189,7 +189,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   };
 
   const refreshAttachments = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms-car-control-attachments", carId] });
+    await queryClient.invalidateQueries({ queryKey: ["qms-car-control-attachments", amoCode, carId] });
   };
 
   const handleUpload = async (files: FileList | null) => {
