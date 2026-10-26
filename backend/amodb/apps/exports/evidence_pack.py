@@ -255,8 +255,9 @@ def _build_car_pack(
 
     pdf_path: Optional[Path] = None
     try:
-        invite_url = quality_service.build_car_invite_link(car)
-        pdf_path = quality_service.generate_car_form_pdf(car, invite_url)
+        # A downloaded evidence package is not a public invitation. Never
+        # embed a reusable guest bearer token in the archived CAR PDF or QR.
+        pdf_path = quality_service.generate_car_form_pdf(car, "", archive_copy=True)
     except Exception as exc:
         omitted.append({"path": "car.pdf", "reason": f"pdf_generation_failed: {exc}"})
 
