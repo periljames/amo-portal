@@ -72,7 +72,7 @@ test("People authorization cases keep preparation and final decision in the gove
       },
       attention: [],
     });
-    if (path.endsWith("/quality/people/authorization-control/people")) return json(route, { items: [], total: 0 });
+    if (path.endsWith("/quality/people/authorization-control/people")) return json(route, { items: [], total: 0, limit: 100, offset: 0, has_more: false });
     if (path.endsWith("/quality/people/authorization-control/cases") && route.request().method() === "GET") return json(route, {
       items: [{
         id: "auth-case-1", person: "Amina Wanjiku", home_role: "QUALITY_INSPECTOR", department: "Quality",
@@ -80,7 +80,7 @@ test("People authorization cases keep preparation and final decision in the gove
         nomination_date: localDateKey(), nominator: "Quality Officer", recommendation: "Promote based on verified competence.",
         updated_at: new Date().toISOString(), next_action: "Decision required",
       }],
-      total: 1,
+      total: 1, limit: 100, offset: 0, has_more: false,
     });
     if (path.endsWith("/quality/people/authorization-control/cases/auth-case-1") && route.request().method() === "GET") return json(route, {
       case: {
