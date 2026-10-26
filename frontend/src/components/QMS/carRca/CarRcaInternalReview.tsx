@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import CarRcaWorkbench from "./CarRcaWorkbench";
-import { emptyCarRca, getCarRcaInternal, reviewCarRcaAction, addCarRcaInternalAction, type CarRcaProjection, type CarRcaAction, type CarRcaActionCreate } from "../../../services/qmsCarRca";
+import { getCarRcaInternal, reviewCarRcaAction, addCarRcaInternalAction, type CarRcaProjection, type CarRcaAction, type CarRcaActionCreate } from "../../../services/qmsCarRca";
 import "./car-rca.css";
 import CarRcaParetoSource from "./CarRcaParetoSource";
 import { hasQmsRolePermission } from "../../../app/routeGuards";
