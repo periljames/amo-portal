@@ -264,7 +264,7 @@ def _parse_s3(uri: str) -> tuple[str, str]:
     return parsed.netloc, parsed.path.lstrip("/")
 
 
-def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
+def materialize(uri: str, *, expected_sha256: str | None = None, force_download: bool = False) -> Path:
     if not str(uri or "").startswith("s3://"):
         path = Path(uri).resolve()
         root = local_root()
@@ -283,7 +283,7 @@ def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
     suffix = Path(key).suffix[:16]
     digest = hashlib.sha256(uri.encode()).hexdigest()
     target = root / f"{digest}{suffix}"
-    if target.is_file():
+    if target.is_file() and not force_download:
         if not expected_sha256 or _sha256(target) == expected_sha256:
             try:
                 os.utime(target, None)
