@@ -698,34 +698,10 @@ def _derive_car_unit_code(db: Session, amo_id: Optional[str]) -> str:
 def _next_car_number(db: Session, program: CARProgram, amo_id: Optional[str] = None) -> str:
     if not amo_id:
         raise ValueError("amo_id is required for CAR numbering")
-    today = date.today()
-    family = "CAR" if program == CARProgram.QUALITY else "RCAR"
-    unit_code = _derive_car_unit_code(db, amo_id)
-    ref_year = today.year % 100
-    counter = (
-        db.query(models.QMSAuditReferenceCounter)
-        .filter(
-            models.QMSAuditReferenceCounter.amo_id == amo_id,
-            models.QMSAuditReferenceCounter.reference_family == family,
-            models.QMSAuditReferenceCounter.unit_code == unit_code,
-            models.QMSAuditReferenceCounter.ref_year == ref_year,
-        )
-        .with_for_update(nowait=False)
-        .first()
-    )
-    if not counter:
-        counter = models.QMSAuditReferenceCounter(
-            amo_id=amo_id,
-            reference_family=family,
-            unit_code=unit_code,
-            ref_year=ref_year,
-            last_value=0,
-        )
-        db.add(counter)
-        db.flush()
-    counter.last_value += 1
-    counter.updated_at = datetime.now(timezone.utc)
-    return f"{family}/{unit_code}/{ref_year:02d}/{counter.last_value:03d}"
+    from .numbering import read_rules, reserve_reference
+    rules = read_rules(db, amo_id)
+    family = rules.get("car_prefix", "CAR") if program == CARProgram.QUALITY else rules.get("reliability_car_prefix", "RCAR")
+    return reserve_reference(db, amo_id=amo_id, family=family, unit=_derive_car_unit_code(db, amo_id), digits=rules.get("sequence_digits", 3), date_format=rules.get("date_format", "YY"))
 
 
 def create_car(

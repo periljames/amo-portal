@@ -14,7 +14,7 @@ type ReplyChoice = "QUALITY_ROLES" | "CUSTOM";
 
 const initialReason = "QMS mailing identity configuration approved by Quality management";
 
-export default function QmsMailIdentityPage(): React.ReactElement {
+export default function QmsMailIdentityPage({ embedded = false }: { embedded?: boolean } = {}): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const [settings, setSettings] = useState<QmsMailIdentity | null>(null);
   const [draft, setDraft] = useState<QmsMailIdentityUpdate>({
@@ -103,12 +103,12 @@ export default function QmsMailIdentityPage(): React.ReactElement {
     }
   };
 
-  return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <main className="qms-mail" aria-labelledby="qms-mail-title">
+  const Container = embedded ? "section" : "main";
+  const content = (
+      <Container className={`qms-mail${embedded ? " qms-mail--embedded" : ""}`} aria-labelledby="qms-mail-title">
         <header className="qms-mail__header">
           <div>
-            <h1 id="qms-mail-title">Notification mailing identity</h1>
+            {embedded ? <h2 id="qms-mail-title">Email sender & replies</h2> : <h1 id="qms-mail-title">Notification mailing identity</h1>}
           </div>
           <button type="button" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw size={16} /> Refresh</button>
         </header>
@@ -201,13 +201,13 @@ export default function QmsMailIdentityPage(): React.ReactElement {
                 <section className="qms-mail__card">
                   <h2>Governance</h2>
                   <p>Only Venspera assigns custom sender domains. Tenant Quality management controls its sender name, approved address, and Reply-To. Provider API keys never leave platform administration.</p>
-                  <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/settings`}>Back to QMS settings</Link>
+                  {!embedded && <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/settings`}>Back to QMS settings</Link>}
                 </section>
               </aside>
             </div>
           </>
         )}
-      </main>
-    </DepartmentLayout>
+      </Container>
   );
+  return embedded ? content : <DepartmentLayout amoCode={amoCode} activeDepartment="quality">{content}</DepartmentLayout>;
 }

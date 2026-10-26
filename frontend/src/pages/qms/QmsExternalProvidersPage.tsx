@@ -53,6 +53,7 @@ import { getContext } from "../../services/auth";
 import { Link } from "react-router-dom";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 import ProviderOversight, { ProviderPortfolio } from "./ProviderOversight";
+import QmsRegisterPage from "./QmsRegisterPage";
 
 const PROVIDER_KINDS: ProviderKind[] = [
   "SUPPLIER",
@@ -551,7 +552,16 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
   );
 }
 
+const providerRecordViews:Record<string,string>={evaluations:"Provider evaluations","supplier-audits":"Provider audits","supplier-findings":"Provider findings"};
 export default function QmsExternalProvidersPage(): React.ReactElement {
+  const {amoCode=""}=useParams<{amoCode:string}>();
+  const location=useLocation();
+  const view=location.pathname.split("/").filter(Boolean).at(-1)||"register";
+  if(providerRecordViews[view]) return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><div className="qms-provider-page qms-surface-root"><header className="qms-provider-page__header"><h1>{providerRecordViews[view]}</h1><Link className="qms-provider-button is-secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers</Link></header><QmsRegisterPage embedded/></div></DepartmentLayout>;
+  return <ProviderWorkspace key={`${amoCode}:${view}`}/>;
+}
+
+function ProviderWorkspace(): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -565,7 +575,8 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const [page, setPage] = useState(0);
   const pageSize = 50;
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const fixedStatus=location.pathname.endsWith("/approved-list")?"APPROVED":location.pathname.endsWith("/expired-approvals")?"EXPIRED":"";
+  const [statusFilter, setStatusFilter] = useState(fixedStatus);
   const [kindFilter, setKindFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const [loading, setLoading] = useState(true);
@@ -626,7 +637,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
     <main className="qms-provider-page qms-surface-root">
       <header className="qms-provider-page__header">
         <div>
-          <h1>External Providers</h1>
+          <h1>{fixedStatus==="APPROVED"?"Approved external providers":fixedStatus==="EXPIRED"?"Expired provider approvals":"External Providers"}</h1>
         </div>
         <div className="qms-provider-page__actions">
           <a className="qms-provider-button is-secondary" href={`/vendor/login?amo=${encodeURIComponent(amoCode)}`} target="_blank" rel="noreferrer">Vendor sign in</a>
@@ -654,7 +665,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
       <section className="qms-provider-register">
         <div className="qms-provider-toolbar">
           <label className="qms-provider-search"><Search size={17} /><input aria-label="Search external providers" placeholder="Search code, legal name or trading name" value={search} onChange={(e) => {setSearch(e.target.value);setPage(0);}} /></label>
-          <select aria-label="Provider status" value={statusFilter} onChange={(e) => {setStatusFilter(e.target.value);setPage(0);}}><option value="">All statuses</option>{PROVIDER_STATUSES.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
+          <select aria-label="Provider status" disabled={Boolean(fixedStatus)} value={statusFilter} onChange={(e) => {setStatusFilter(e.target.value);setPage(0);}}><option value="">All statuses</option>{PROVIDER_STATUSES.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
           <select aria-label="Provider type" value={kindFilter} onChange={(e) => {setKindFilter(e.target.value);setPage(0);}}><option value="">All provider types</option>{PROVIDER_KINDS.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
           <select aria-label="Provider risk" value={riskFilter} onChange={(e) => {setRiskFilter(e.target.value);setPage(0);}}><option value="">All risk levels</option>{PROVIDER_RISKS.map((item) => <option key={item}>{item}</option>)}</select>
         </div>

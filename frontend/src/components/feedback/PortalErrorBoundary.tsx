@@ -12,6 +12,7 @@ type Props = React.PropsWithChildren<{
   title?: string;
   exitHref?: string;
   exitLabel?: string;
+  onExit?: () => void;
 }>;
 
 export default class PortalErrorBoundary extends React.Component<Props, PortalErrorBoundaryState> {
@@ -51,7 +52,7 @@ export default class PortalErrorBoundary extends React.Component<Props, PortalEr
           </div>
           <div className="portal-fatal-error__actions">
             <button type="button" onClick={this.props.inline ? () => this.setState({ error: null }) : this.reload}><RefreshCcw size={16} /> {this.props.inline ? "Try again" : "Reload page"}</button>
-            {this.props.exitHref ? <a href={this.props.exitHref}>{this.props.exitLabel || "Back to audit"}</a> : null}
+            {this.props.onExit ? <button type="button" onClick={this.props.onExit}>{this.props.exitLabel || "Close"}</button> : this.props.exitHref ? <a href={this.props.exitHref}>{this.props.exitLabel || "Back to audit"}</a> : null}
           </div>
         </section>
       </div>

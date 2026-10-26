@@ -283,6 +283,9 @@ class QMSAuditScopeOut(BaseModel):
     created_by_user_id: Optional[str]
     created_at: datetime
     updated_at: datetime
+    reference_date_label: Optional[str] = None
+    sequence_digits: int = 3
+    next_reference: Optional[str] = None
     # Current-year reference counter usage (tenant family + scope unit).
     issued_this_year: int = 0
     next_sequence: int = 1

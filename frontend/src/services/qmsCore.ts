@@ -147,6 +147,9 @@ export interface QMSAuditScopeOut {
   created_by_user_id?: string | null;
   created_at: string;
   updated_at: string;
+  reference_date_label?: string | null;
+  sequence_digits?: number;
+  next_reference?: string | null;
   /** Audits issued this calendar year for the tenant family + scope unit. */
   issued_this_year?: number;
   /** Next sequence that would be reserved for this scope this year. */

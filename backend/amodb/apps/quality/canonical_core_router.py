@@ -24,6 +24,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality.amo_compliance_policy import policy_catalogue, validate_retention_extensions
+from .numbering import DEFAULTS as NUMBERING_DEFAULTS, lock_numbering, read_rules, validate_rules, issued_max, sync_workflow_prefix, server_date
 from amodb.apps.quality.enums import CARStatus, QMSAuditStatus, QMSDocStatus
 from amodb.apps.training import models as training_models
 from amodb.apps.training.integration import training_record_summary
@@ -1121,6 +1122,127 @@ def get_qms_settings(
         "compliance_policy": policy_catalogue(),
     }
 
+def _numbering_context(db, ctx):
+    from .service import _derive_car_unit_code
+    stored = read_rules(db, ctx.amo_id)
+    rules = {**NUMBERING_DEFAULTS, **stored}
+    if "audit_prefix" not in stored:
+        legacy = db.query(quality_models.QualityTenantWorkflowSettings).filter_by(amo_id=ctx.amo_id).first()
+        if legacy:
+            rules["audit_prefix"] = legacy.audit_reference_family
+    scopes = db.query(quality_models.QMSAuditScope).filter_by(amo_id=ctx.amo_id, is_active=True).order_by(quality_models.QMSAuditScope.code).all()
+    today = server_date()
+    return {"rules": rules, "server_date": today.isoformat(), "server_period": str(today.year), "counter_year": today.year % 100,
+            "audit_scopes": [{"code": scope.code, "name": scope.name} for scope in scopes] or [{"code": "MO", "name": "Maintenance organisation"}],
+            "car_unit_code": _derive_car_unit_code(db, ctx.amo_id)}
+
+
+@core_router.get("/settings/numbering")
+def get_numbering_controls(
+    ctx: TenantContext = Depends(require_quality_permission("qms.settings.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    context = _numbering_context(db, ctx)
+    counters = db.query(quality_models.QMSAuditReferenceCounter).filter_by(amo_id=ctx.amo_id).order_by(quality_models.QMSAuditReferenceCounter.ref_year.desc(), quality_models.QMSAuditReferenceCounter.reference_family, quality_models.QMSAuditReferenceCounter.unit_code).all()
+    return {"tenant": {"amo_code": ctx.amo_code}, **context, "series": [{"id": str(c.id), "prefix": c.reference_family, "scope": c.unit_code, "year": c.ref_year, "last_value": c.last_value, "next_value": c.last_value + 1} for c in counters]}
+
+
+def _follow_up_values(row):
+    return {"report_due_days": row.report_due_days if row else 7,
+            "report_reminder_days": json.loads(row.report_reminder_days_json) if row else [7, 3, 1],
+            "car_reminder_percentages": json.loads(row.car_reminder_percentages_json) if row else [75, 50, 25],
+            "final_reminder_days_before_due": row.final_reminder_days_before_due if row else 2,
+            "auto_escalation_enabled": row.auto_escalation_enabled if row else True}
+
+
+@core_router.get("/settings/follow-up")
+def get_follow_up_controls(ctx: TenantContext = Depends(require_quality_permission("qms.settings.view")), db: Session = Depends(get_read_db)):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    row = db.query(quality_models.QualityTenantWorkflowSettings).filter_by(amo_id=ctx.amo_id).first()
+    return {"settings": _follow_up_values(row)}
+
+
+@core_router.patch("/settings/follow-up")
+def update_follow_up_controls(request: Request, payload: dict[str, Any] = Body(default_factory=dict), ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")), db: Session = Depends(get_write_db)):
+    from .schemas import QualityWorkflowSettingsUpdate
+    from pydantic import ValidationError
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    lock_numbering(db, ctx.amo_id)
+    row = db.query(quality_models.QualityTenantWorkflowSettings).filter_by(amo_id=ctx.amo_id).with_for_update().first()
+    before = _follow_up_values(row)
+    if payload.get("expected_settings") != before:
+        raise HTTPException(409, "Follow-up settings changed. Reload before saving; your entries are retained.")
+    changes = {key: value for key, value in payload.items() if key in before and key != "auto_escalation_enabled"}
+    if not changes or any(value is None for value in changes.values()):
+        raise HTTPException(422, "Supply valid follow-up controls.")
+    try:
+        validated = QualityWorkflowSettingsUpdate(**changes).model_dump(exclude_unset=True)
+    except ValidationError:
+        raise HTTPException(422, "Check whole-number limits and supply 1–10 reminder values.")
+    if not row:
+        row = quality_models.QualityTenantWorkflowSettings(amo_id=ctx.amo_id, created_by_user_id=ctx.user_id)
+        db.add(row)
+    for key, value in validated.items():
+        if key in ("report_reminder_days", "car_reminder_percentages"):
+            setattr(row, f"{key}_json", json.dumps(sorted(set(value), reverse=True)))
+        else:
+            setattr(row, key, value)
+    row.updated_by_user_id = ctx.user_id
+    db.flush()
+    _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, action="follow_up_settings_changed", module="settings", entity_type="quality_tenant_workflow_settings", entity_id=str(row.id), new_value={"before": before, "after": _follow_up_values(row)}, request=request)
+    db.commit()
+    return {"settings": _follow_up_values(row)}
+
+
+@core_router.post("/settings/numbering/reset")
+def reset_numbering_series(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    ctx: TenantContext = Depends(require_quality_permission("qms.settings.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    family, scope = payload.get("prefix", ""), payload.get("scope", "")
+    last_value = payload.get("last_value")
+    reason = payload.get("reason", "")
+    if not isinstance(family, str) or not re.fullmatch(r"[A-Z][A-Z0-9]{0,15}", family) or not isinstance(scope, str) or not re.fullmatch(r"[A-Z0-9]{1,16}", scope):
+        raise HTTPException(422, "Choose a valid prefix and scope code.")
+    if any(key in payload for key in ("year", "month", "date", "issued_on", "server_date")):
+        raise HTTPException(422, "Reference dates come from the server clock. Refresh the portal to use automatic dates.")
+    if type(last_value) is not int or not 0 <= last_value <= 999999999:
+        raise HTTPException(422, "Last issued number must be a whole number of zero or more.")
+    if not isinstance(reason, str) or not 10 <= len(reason.strip()) <= 500 or payload.get("confirmed") is not True:
+        raise HTTPException(422, "Confirm the change and provide a reason of 10–500 characters.")
+    lock_numbering(db, ctx.amo_id)
+    context = _numbering_context(db, ctx)
+    year = context["counter_year"]
+    rules = context["rules"]
+    if payload.get("expected_period") != context["server_period"] or payload.get("expected_date_format") != rules["date_format"]:
+        raise HTTPException(409, "The server period or date format changed. Refresh the series and confirm again.")
+    if family not in {rules["audit_prefix"], rules["car_prefix"], rules["reliability_car_prefix"]}:
+        raise HTTPException(422, "Choose a saved, configured prefix. Save reference formats before initialising a new series.")
+    allowed_scopes = {item["code"] for item in context["audit_scopes"]} if family == rules["audit_prefix"] else {context["car_unit_code"]}
+    if scope not in allowed_scopes:
+        raise HTTPException(422, "Choose an active audit scope or the server-assigned CAR unit.")
+    counter = db.query(quality_models.QMSAuditReferenceCounter).filter_by(amo_id=ctx.amo_id, reference_family=family, unit_code=scope, ref_year=year).with_for_update().first()
+    before = counter.last_value if counter else 0
+    if payload.get("expected_last_value") != before:
+        raise HTTPException(409, "This series changed. Refresh the series before trying again.")
+    minimum = issued_max(db, ctx.amo_id, family, scope, year)
+    if last_value < minimum:
+        raise HTTPException(409, f"This series already contains issued references through {minimum}. Choose a new prefix to restart at zero; existing records are preserved.")
+    if not counter:
+        counter = quality_models.QMSAuditReferenceCounter(amo_id=ctx.amo_id, reference_family=family, unit_code=scope, ref_year=year, last_value=last_value)
+        db.add(counter)
+    else:
+        counter.last_value = last_value
+    db.flush()
+    _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, action="numbering_series_changed", module="settings", entity_type="qms_audit_reference_counters", entity_id=str(counter.id), new_value={"prefix": family, "scope": scope, "year": year, "before": before, "last_value": last_value, "reason": reason.strip()}, request=request)
+    db.commit()
+    return {"last_value": last_value, "next_value": last_value + 1}
+
+
 # ---------------------------------------------------------------------------
 # Phase 3/4 canonical QMS route registry
 # ---------------------------------------------------------------------------
@@ -1941,6 +2063,7 @@ def update_qms_settings(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    lock_numbering(db, ctx.amo_id)
     columns = _table_columns(db, "qms_settings")
     current = db.execute(text("SELECT * FROM qms_settings WHERE amo_id = :amo_id AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE"), {"amo_id": ctx.amo_id}).mappings().first()
     allowed = {
@@ -1952,12 +2075,23 @@ def update_qms_settings(
         "risk_matrix",
     }
     changes = {key: payload[key] for key in allowed if key in payload}
+    expected = payload.get("expected_settings")
+    if expected is not None:
+        if not isinstance(expected, dict) or set(expected) != set(changes):
+            raise HTTPException(422, "Expected settings must match the changed groups.")
+        snapshot = _settings_response(current) if current else {}
+        if any(snapshot.get(key, {}) != value for key, value in expected.items()):
+            raise HTTPException(409, "These settings changed while you were editing. Reload before saving; your entries have been retained.")
     if not changes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported settings fields supplied.")
     if any(not isinstance(value, dict) for value in changes.values()):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Each settings group must be an object.")
     if "retention_rules" in changes:
         validate_retention_extensions(changes["retention_rules"])
+    if "numbering_rules" in changes:
+        validate_rules(changes["numbering_rules"])
+        if "audit_prefix" in changes["numbering_rules"]:
+            sync_workflow_prefix(db, ctx.amo_id, changes["numbering_rules"]["audit_prefix"], ctx.user_id)
     # Canonical migrations store configuration in payload; older deployments
     # have dedicated JSON columns. Preserve both layouts and unrelated payload.
     values = {key: _json_value(value) for key, value in changes.items() if key in columns}

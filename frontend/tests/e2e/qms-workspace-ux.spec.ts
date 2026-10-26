@@ -21,6 +21,8 @@ async function prepare(page: Page, admin = false) {
       if (path.endsWith("/deactivate")) active = false;
       return json({ eligible: admin, active, session_id: active ? "fixture-session" : null, expires_at: active ? new Date(Date.now() + 4 * 3600000).toISOString() : null, grant_type: "PERMANENT" });
     }
+    if (path.endsWith("/quality/settings/numbering")) return json({ rules: { audit_prefix: "QAR", car_prefix: "CAR", reliability_car_prefix: "RCAR", finding_prefix: "F", sequence_digits: 3, date_format: "YY" }, series: [], server_date: "2026-10-26", server_period: "2026", counter_year: 26, audit_scopes: [{code:"MO",name:"Maintenance organisation"}], car_unit_code:"MO" });
+    if (path.endsWith("/quality/settings/follow-up")) return json({ settings: { report_due_days: 7, report_reminder_days: [7,3,1], car_reminder_percentages: [75,50,25], final_reminder_days_before_due: 2, auto_escalation_enabled: true } });
     if (path.endsWith("/quality/settings")) {
       if (request.method() === "PATCH") { writes.push(request.postDataJSON()); Object.assign(configuration, request.postDataJSON()); }
       return json({ settings: configuration, compliance_policy: { version: "MOPM-4-00", source: "MOPM Issue 4", retention: [{ code: "MAINTENANCE_RECORDS", label: "Maintenance work packages and releases", event: "release_signed_at", years: 3, days: 0, reference: "MOPM 2.14.1.2; AMO Regulation 34(3)", regulatory_minimum_years: 2 }], contracting: { maximum_supplier_review_days: 365, reference: "MOPM 2.23; 3.13" } } });
@@ -51,7 +53,7 @@ test("settings is a configuration workspace and saves only changed policy groups
   await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Settings saved and recorded in Quality activity history.")).toBeVisible();
-  expect(state.writes).toEqual([{ numbering_rules: { audit_prefix: "QA", sequence_digits: 4 } }]);
+  expect(state.writes).toEqual([{ numbering_rules: { audit_prefix: "QA", car_prefix: "CAR", reliability_car_prefix: "RCAR", finding_prefix: "F", sequence_digits: 4, date_format: "YY" }, expected_settings: { numbering_rules: { audit_prefix: "QAR", sequence_digits: 4 } } }]);
   await page.locator(".tenant-shell__main").evaluate(node => node.scrollTo(0, 0));
   await page.screenshot({ path: "../.artifacts/qms-settings-desktop.png", fullPage: true });
 });
@@ -106,7 +108,7 @@ test("retention settings preserve the MOPM floor and allow a longer tenant perio
   await years.fill("5");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Settings saved and recorded in Quality activity history.")).toBeVisible();
-  expect(state.writes).toEqual([{ retention_rules: { extensions_years: { MAINTENANCE_RECORDS: 5 } } }]);
+  expect(state.writes).toEqual([{ retention_rules: { extensions_years: { MAINTENANCE_RECORDS: 5 } }, expected_settings: { retention_rules: {} } }]);
 });
 
 test("reply addresses use plus and remove controls with inline feedback before submission", async ({ page }) => {

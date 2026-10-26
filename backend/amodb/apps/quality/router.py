@@ -1,5 +1,6 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
+from .numbering import server_date as reference_server_date, read_rules as read_reference_rules, reference_date as format_reference_date
 
 from amodb.utils.download_names import download_name
 
@@ -430,42 +431,13 @@ def _generate_audit_reference(
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
 
+    from .numbering import read_rules, reserve_reference, server_date
+    rules = read_rules(db, amo_id)
     unit_code = _normalize_scope_code(audit_scope_code) or "MO"
-    ref_year = (target_date or date.today()).year % 100
-    for _ in range(5):
-        counter = (
-            db.query(models.QMSAuditReferenceCounter)
-            .filter(
-                models.QMSAuditReferenceCounter.amo_id == amo_id,
-                models.QMSAuditReferenceCounter.reference_family == reference_family,
-                models.QMSAuditReferenceCounter.unit_code == unit_code,
-                models.QMSAuditReferenceCounter.ref_year == ref_year,
-            )
-            .with_for_update()
-            .first()
-        )
-        if counter:
-            counter.last_value += 1
-            ref_sequence = counter.last_value
-            audit_ref = f"{reference_family}/{unit_code}/{ref_year:02d}/{ref_sequence:03d}"
-            return audit_ref, unit_code, ref_year, ref_sequence
-
-        try:
-            with db.begin_nested():
-                db.add(
-                    models.QMSAuditReferenceCounter(
-                        amo_id=amo_id,
-                        reference_family=reference_family,
-                        unit_code=unit_code,
-                        ref_year=ref_year,
-                        last_value=0,
-                    )
-                )
-                db.flush()
-        except IntegrityError:
-            continue
-
-    raise HTTPException(status_code=409, detail="Unable to reserve an audit reference. Please retry.")
+    issued_on = server_date()
+    ref_year = issued_on.year % 100
+    reference = reserve_reference(db, amo_id=amo_id, family=reference_family, unit=unit_code, issued_on=issued_on, digits=rules.get("sequence_digits", 3), date_format=rules.get("date_format", "YY"))
+    return reference, unit_code, ref_year, int(reference.rsplit("/", 1)[1])
 
 
 def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
@@ -782,6 +754,10 @@ def _audit_reference_family_for_amo(
     amo_id: str,
     actor_user_id: Optional[str] = None,
 ) -> str:
+    from .numbering import read_rules
+    override = read_rules(db, amo_id).get("audit_prefix")
+    if override:
+        return _normalize_audit_reference_family(override)
     settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=actor_user_id)
     return _normalize_audit_reference_family(getattr(settings, "audit_reference_family", None))
 
@@ -792,8 +768,16 @@ def _scope_out(
     issued_this_year: int = 0,
     next_sequence: int = 1,
     last_value: int = 0,
+    reference_family: str = "QAR",
+    reference_rules: Optional[dict] = None,
 ) -> QMSAuditScopeOut:
+    rules = reference_rules or {}
+    date_label = format_reference_date(reference_server_date(), rules.get("date_format", "YY"))
+    digits = rules.get("sequence_digits", 3)
     return QMSAuditScopeOut(
+        reference_date_label=date_label,
+        sequence_digits=digits,
+        next_reference=f"{reference_family}/{scope.code}/{date_label}/{max(1, int(next_sequence or 1)):0{digits}d}",
         id=scope.id,
         amo_id=scope.amo_id,
         code=scope.code,
@@ -1897,6 +1881,8 @@ def update_quality_workflow_settings(
     if not _is_quality_admin(current_user):
         raise HTTPException(status_code=403, detail="Only Quality Managers or AMO Admins can update Quality workflow settings")
     amo_id = str(_current_amo_id(current_user))
+    from .numbering import lock_numbering
+    lock_numbering(db, amo_id)
     settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=current_user.id)
     data = payload.model_dump(exclude_unset=True)
     before = _settings_out(settings).model_dump(mode="json")
@@ -1916,6 +1902,8 @@ def update_quality_workflow_settings(
         settings.auto_escalation_enabled = bool(data["auto_escalation_enabled"])
     if "audit_reference_family" in data and data["audit_reference_family"] is not None:
         settings.audit_reference_family = _normalize_audit_reference_family(data["audit_reference_family"])
+        from .numbering import sync_legacy_prefix
+        sync_legacy_prefix(db, amo_id, settings.audit_reference_family, current_user.id)
     settings.updated_by_user_id = current_user.id
     audit_services.log_event(
         db,
@@ -3161,7 +3149,7 @@ def list_audit_scopes(
         query = query.filter(models.QMSAuditScope.is_active == active)
     scopes = query.order_by(models.QMSAuditScope.sort_order.asc(), models.QMSAuditScope.code.asc()).all()
     family = _audit_reference_family_for_amo(db, amo_id=str(amo_id), actor_user_id=current_user.id)
-    ref_year = date.today().year % 100
+    ref_year = reference_server_date().year % 100
     usage = _scope_usage_by_code(
         db,
         amo_id=str(amo_id),
@@ -3169,9 +3157,10 @@ def list_audit_scopes(
         ref_year=ref_year,
         scope_codes=[str(scope.code) for scope in scopes],
     )
+    reference_rules = read_reference_rules(db, str(amo_id))
     return [
         _scope_out(
-            scope,
+            scope, reference_family=family, reference_rules=reference_rules,
             issued_this_year=usage.get(str(scope.code).upper(), (0, 1, 0))[0],
             next_sequence=usage.get(str(scope.code).upper(), (0, 1, 0))[1],
             last_value=usage.get(str(scope.code).upper(), (0, 1, 0))[2],
@@ -3217,10 +3206,10 @@ def create_audit_scope(
         db,
         amo_id=str(amo_id),
         reference_family=family,
-        ref_year=date.today().year % 100,
+        ref_year=reference_server_date().year % 100,
         scope_codes=[str(scope.code)],
     ).get(str(scope.code).upper(), (0, 1, 0))
-    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
+    return _scope_out(scope, reference_family=family, reference_rules=read_reference_rules(db, str(amo_id)), issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 @router.patch("/audits/scopes/{scope_id}", response_model=QMSAuditScopeOut)
@@ -3267,10 +3256,10 @@ def update_audit_scope(
         db,
         amo_id=str(amo_id),
         reference_family=family,
-        ref_year=date.today().year % 100,
+        ref_year=reference_server_date().year % 100,
         scope_codes=[str(scope.code)],
     ).get(str(scope.code).upper(), (0, 1, 0))
-    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
+    return _scope_out(scope, reference_family=family, reference_rules=read_reference_rules(db, str(amo_id)), issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 # -----------------------------
@@ -4920,7 +4909,6 @@ def update_audit(
             setattr(audit, field, changes[field])
             if field == "planned_start":
                 planned_start_changed = True
-                reference_needs_regeneration = True
 
     if prospective_start is not None:
         audit.planned_start_time = prospective_start_time
@@ -5018,24 +5006,19 @@ def update_audit(
 
 
 def _next_audit_finding_ref(db: Session, audit: models.QMSAudit) -> str:
+    from .numbering import lock_numbering, read_rules
+    lock_numbering(db, f"{audit.amo_id}:finding:{audit.id}")
+    rules = read_rules(db, audit.amo_id)
     prefix = (audit.audit_ref or "QAR").strip() or "QAR"
-    max_seq = 0
-    refs = (
-        db.query(models.QMSAuditFinding.finding_ref)
-        .filter(
-            models.QMSAuditFinding.amo_id == audit.amo_id,
-            models.QMSAuditFinding.audit_id == audit.id,
-        )
-        .all()
-    )
-    for (ref,) in refs:
-        match = re.search(r"(?:F|FIND)[-/]?(\d+)$", ref or "", re.IGNORECASE)
-        if match:
-            try:
-                max_seq = max(max_seq, int(match.group(1)))
-            except ValueError:
-                continue
-    return f"{prefix}-F-{max_seq + 1:03d}"[:64]
+    marker = rules.get("finding_prefix", "F")
+    digits = rules.get("sequence_digits", 3)
+    stem = f"{prefix}-{marker}-"
+    refs = db.query(models.QMSAuditFinding.finding_ref).filter(models.QMSAuditFinding.amo_id == audit.amo_id, models.QMSAuditFinding.audit_id == audit.id).all()
+    maximum = max((int(ref[len(stem):]) for (ref,) in refs if ref and ref.startswith(stem) and ref[len(stem):].isdigit()), default=0)
+    reference = f"{stem}{maximum + 1:0{digits}d}"
+    if len(reference) > 64:
+        raise HTTPException(422, "The finding reference exceeds 64 characters. Shorten the configured prefix.")
+    return reference
 
 
 def _car_priority_for_finding_level(level: FindingLevel) -> models.CARPriority:

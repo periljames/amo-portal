@@ -105,6 +105,12 @@ a.qms-settings__card:hover { border-color:var(--accent-primary,#2454c6); }
 .qms-page-menu > button[aria-expanded="true"] > svg { transform:rotate(180deg); }
 .qms-page-menu__panel { transform-origin: top left; animation:qms-menu-appear 110ms ease-out; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .qms-page-menu__panel :is(a,summary):focus-visible { outline:2px solid var(--accent-primary,#2454c6);outline-offset:-2px; }
+.tenant-shell__apps-button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:inherit;border-radius:8px;min-height:40px;padding:8px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.tenant-shell__apps-button:hover{background:var(--tenant-nav-hover)}
+.tenant-shell__nav-tools>.tenant-shell__apps-button{width:100%;margin-bottom:8px;border:1px solid var(--surface-border);justify-content:flex-start}
+.portal-apps-loading{position:fixed;inset:0;z-index:1600;display:flex;align-items:center;justify-content:center;gap:16px;background:#071929;color:#f0f7ff}
+.portal-apps-boundary>.portal-fatal-error{position:fixed;inset:0;z-index:1600;display:grid;place-items:center;background:var(--surface-elevated);padding:24px}
+@media(max-width:650px){.tenant-shell__topbar .tenant-shell__apps-button{padding:8px 4px}.tenant-shell__topbar .tenant-shell__apps-button span{display:none}}
 .tenant-nav__branch-chevron { margin-left:auto;flex:0 0 auto;transition:transform 120ms ease; }
 .tenant-nav__branch-chevron.is-open { transform:rotate(90deg); }
 .tenant-shell[data-workspace-module="quality"] .tenant-nav__row:has(> .tenant-nav__link[aria-expanded]) { grid-template-columns:minmax(0,1fr); }
