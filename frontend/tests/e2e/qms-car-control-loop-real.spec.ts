@@ -228,6 +228,14 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       expect(attemptedClose.status, `PATCH ${legacyPath}: ${JSON.stringify(attemptedClose.body)}`).toBe(409);
       expect(JSON.stringify(attemptedClose.body)).toMatch(/control-loop\/close|governed CAR/i);
     }
+    for (const forbiddenEdit of [
+      { due_date: futureDate(80) },
+      { target_closure_date: futureDate(80) },
+      { closed_at: new Date().toISOString() },
+    ]) {
+      const response = await authenticatedRequest(internalPage, "PATCH", carEndpoint, forbiddenEdit);
+      expect(response.status, JSON.stringify(response.body)).toBe(409);
+    }
     const stillActive = await authenticatedRequest(internalPage, "GET", `${carEndpoint}/control-loop`);
     expect(stillActive.status, JSON.stringify(stillActive.body)).toBe(200);
     expect((stillActive.body as { car: { status: string } }).car.status).not.toBe("CLOSED");
