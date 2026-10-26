@@ -98,7 +98,11 @@ function escapeHtml(value: unknown): string {
 function csvCell(value: unknown): string {
   // Prevent spreadsheet formula execution from responder-entered CAR text.
   const raw = String(value ?? "");
-  const safe = /^[\s\u0000-\u001f]*[=+@-]/.test(raw) ? "'" + raw : raw;
+  let prefixEnd = 0;
+  while (prefixEnd < raw.length && (/\s/.test(raw[prefixEnd]) || raw.charCodeAt(prefixEnd) < 32 || raw.charCodeAt(prefixEnd) === 127)) {
+    prefixEnd += 1;
+  }
+  const safe = ["=", "+", "@", "-"].includes(raw[prefixEnd] || "") ? "'" + raw : raw;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
