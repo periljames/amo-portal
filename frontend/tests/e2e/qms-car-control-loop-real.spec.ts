@@ -50,7 +50,7 @@ function structuredEditor(page: Page, label: string) {
 }
 
 async function authenticatedRequest(
-  page: Page, method: "GET" | "POST" | "PATCH", path: string, payload?: unknown,
+  page: Page, method: "GET" | "POST" | "PATCH" | "PUT", path: string, payload?: unknown,
 ): Promise<{ status: number; body: unknown }> {
   return page.evaluate(async ({ requestMethod, requestPath, body }) => {
     const token = window.localStorage.getItem("amo_portal_token");
@@ -195,7 +195,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
   const publicFailures: string[] = [];
   const internalFailures: string[] = [];
   const publicContext = await browser.newContext();
-  const internalContext = await browser.newContext();
+  const internalContext = await browser.newContext({ timezoneId: "Africa/Nairobi" });
 
   try {
     const publicPage = await publicContext.newPage();
@@ -213,6 +213,54 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByLabel("Controlled final due date").fill(futureDate(28));
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
     await expect(internalPage.getByRole("status").filter({ hasText: "Staged CAR control initialized" })).toContainText("Staged CAR control initialized", { timeout: 30_000 });
+
+    const carEndpoint = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}`;
+    // Both public legacy and tenant-prefixed PATCH aliases must reject an
+    // attempted CLOSED transition before independent implementation review.
+    for (const legacyPath of [
+      `/quality/cars/${data.car_loop_id}`,
+      carEndpoint,
+    ]) {
+      const attemptedClose = await authenticatedRequest(internalPage, "PATCH", legacyPath, {
+        status: "CLOSED",
+        evidence_ref: "CAR-NEGATIVE:unverified-action",
+      });
+      expect(attemptedClose.status, `PATCH ${legacyPath}: ${JSON.stringify(attemptedClose.body)}`).toBe(409);
+      expect(JSON.stringify(attemptedClose.body)).toMatch(/control-loop\\/close|governed CAR/i);
+    }
+    const stillActive = await authenticatedRequest(internalPage, "GET", `${carEndpoint}/control-loop`);
+    expect(stillActive.status, JSON.stringify(stillActive.body)).toBe(200);
+    expect((stillActive.body as { car: { status: string } }).car.status).not.toBe("CLOSED");
+
+    // A non-UTC Quality browser must display the local wall time and preserve
+    // the EXACT original expiry instant when Save expiry is clicked unchanged.
+    const futureExpiry = new Date(Date.now() + 45 * 86_400_000);
+    futureExpiry.setUTCHours(12, 34, 0, 0);
+    const expiresAt = futureExpiry.toISOString();
+    const initialAccess = await authenticatedRequest(internalPage, "PUT", `${carEndpoint}/invite-access`, {
+      expires_at: expiresAt,
+      revoke: false,
+      reason: "Restrict invited respondent access after the governed follow-up period.",
+    });
+    expect(initialAccess.status, JSON.stringify(initialAccess.body)).toBe(200);
+    await internalPage.reload({ waitUntil: "domcontentloaded" });
+    const invitationSecurity = internalPage.getByRole("region", { name: "CAR invitation security" });
+    const expiryInput = invitationSecurity.getByLabel("Optional expiry (local date and time)");
+    await expect(expiryInput).toBeVisible({ timeout: 30_000 });
+    const localExpiry = await internalPage.evaluate(iso => {
+      const instant = new Date(iso);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}T${pad(instant.getHours())}:${pad(instant.getMinutes())}`;
+    }, expiresAt);
+    await expect(expiryInput).toHaveValue(localExpiry);
+    await invitationSecurity.getByLabel("Mandatory controlled change reason").fill(
+      "Reviewed the invitation expiry; retain the approved access deadline without altering it.",
+    );
+    await invitationSecurity.getByRole("button", { name: "Save expiry" }).click();
+    await expect(invitationSecurity.getByRole("status")).toContainText("controlled invitation expiry has been updated", { timeout: 30_000 });
+    const savedAccess = await authenticatedRequest(internalPage, "GET", `${carEndpoint}/invite-access`);
+    expect(savedAccess.status, JSON.stringify(savedAccess.body)).toBe(200);
+    expect(new Date((savedAccess.body as { expires_at: string }).expires_at).toISOString()).toBe(expiresAt);
 
     const rejected = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
       root_cause_status: "REJECTED",
