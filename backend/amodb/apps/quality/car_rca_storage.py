@@ -5,6 +5,7 @@ handles durable objects and never exposes a public bucket URL.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from uuid import UUID
 
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from amodb import storage
 from .car_rca_models import QualityCarRcaAction, QualityCarRcaDocument
 
+logger = logging.getLogger(__name__)
+
 
 def store_car_file(path: Path, *, amo_id: str, car_id: UUID, content_type: str | None) -> str:
     # A separate directory for each tenant prevents cross-tenant object-key
@@ -22,6 +25,9 @@ def store_car_file(path: Path, *, amo_id: str, car_id: UUID, content_type: str |
     try:
         obj = storage.put_file(path, key=key, content_type=content_type)
     except Exception as exc:
+        # Keep the public error generic, but retain the actual storage failure
+        # server-side (for example: an unwritable volume or invalid S3 setup).
+        logger.exception("CAR evidence upload failed for tenant %s, CAR %s", amo_id, car_id)
         raise HTTPException(
             status_code=503,
             detail="CAR evidence storage is unavailable. The attachment was not recorded.",
