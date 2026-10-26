@@ -87,11 +87,57 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     .getByRole("button", { name: /Root cause$/i });
   await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
   await rootCauseStep.click();
-  await expect(structuredEditor(page, "Root cause analysis")).toBeVisible({ timeout: 30_000 });
-  await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  // Newly issued CARs must use the evidence-linked RCA workbench. Legacy
+  // free-text fields exist only for CARs issued before the controlled rollout.
+  const investigation = page.getByRole("region", { name: "Root cause investigation" });
+  await expect(investigation.getByRole("heading", { name: "Root cause workbench" })).toBeVisible({ timeout: 30_000 });
+  await investigation.getByLabel("Problem statement from this CAR").fill(
+    `The CAR process failed to verify ownership and independent effectiveness evidence ${suffix}.`,
+  );
+  await investigation.getByLabel("Evidence classification").selectOption("FACT");
+  await investigation.getByLabel("Why did the preceding condition occur?").fill(
+    `The sampled CAR register omitted an effectiveness check ${suffix}.`,
+  );
+  await investigation.getByLabel("Evidence references (one record per line)").fill(`CAR-SAMPLE:${suffix}:register-observation`);
+  await investigation.getByRole("button", { name: "Add cause / analysis entry" }).click();
+  const causalStatement = `Missing effectiveness checkpoint and evidence-index ownership control ${suffix}`;
+  await investigation.getByLabel("Caused by / preceding question").selectOption({
+    label: `The sampled CAR register omitted an effectiveness check ${suffix}.`,
+  });
+  await investigation.getByLabel("Evidence classification").selectOption("CAUSAL_CONCLUSION");
+  await investigation.getByLabel("Why did the preceding condition occur?").fill(causalStatement);
+  await investigation.getByLabel("Evidence references (one record per line)").fill(`CAR-SAMPLE:${suffix}:governance-control-review`);
+  await investigation.getByLabel("Evidence interpretation / why this cause is supported").fill(
+    "Compared the controlled procedure, CAR register and the Quality review record.",
+  );
+  await investigation.getByRole("button", { name: "Add cause / analysis entry" }).click();
+  await investigation.getByRole("checkbox", { name: new RegExp(causalStatement) }).check();
+  await investigation.getByLabel("Final root cause explanation").fill(
+    `The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`,
+  );
+  await investigation.getByLabel("Evidence supporting the consolidated conclusion (one per line)").fill(
+    `CAR-SAMPLE:${suffix}:governance-control-review`,
+  );
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
+  await expect(structuredEditor(page, "Corrective action plan")).toBeVisible({ timeout: 30_000 });
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
+  const actionSection = page.getByRole("region", { name: "Individual corrective actions" });
+  await expect(actionSection).toBeVisible();
+  const revisionButton = actionSection.getByRole("button", { name: "Revise proposed action" }).first();
+  if (await revisionButton.isVisible().catch(() => false)) await revisionButton.click();
+  const actionName = `Implement a governed effectiveness checkpoint and assign the evidence-index owner ${suffix}`;
+  await actionSection.getByLabel("What specifically changes?").fill(actionName);
+  await actionSection.getByLabel("Responsible person").fill("Responsible Maintenance Manager");
+  await actionSection.getByLabel("Target date").fill(futureDate(14));
+  await actionSection.getByLabel("Supporting evidence references (one per line)").fill(
+    `CAR-PROCEDURE:${suffix}:implementation-plan`,
+  );
+  await actionSection.getByRole("checkbox", { name: new RegExp(causalStatement) }).check();
+  await actionSection.getByRole("button", {
+    name: (await revisionButton.isVisible().catch(() => false)) ? "Save revised action" : "Add corrective action",
+  }).click();
+  await expect(actionSection.getByRole("status")).toContainText(/Corrective action recorded|Proposed action revision retained/, { timeout: 30_000 });
   // The issued CAR can lock its authoritative deadlines. Public respondents must
   // use the controlled deadline-change request rather than silently rewriting them.
   for (const [label, offset] of [["Target closure date", 28], ["Due date", 21]] as const) {
