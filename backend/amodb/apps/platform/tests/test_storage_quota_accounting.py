@@ -144,6 +144,49 @@ def test_reconciliation_detects_drift_and_denies_further_writes(storage_db):
     assert quota.reconcile(storage_db, tenant_id="tenant-1")["drift"]
 
 
+def test_physical_storage_audit_detects_missing_bytes_and_keeps_tenant_frozen(storage_db, monkeypatch):
+    from amodb import storage
+
+    monkeypatch.setenv("AMO_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("AMO_STORAGE_S3_BUCKET", "audit-bucket")
+    monkeypatch.setenv("AMO_STORAGE_S3_PREFIX", "amo-portal")
+    quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100,
+                   actor_id=None, reason="Approved storage")
+    reservation = quota.reserve(storage_db, tenant_id="tenant-1",
+                                object_key="evidence/tenant-1/report.pdf",
+                                size_bytes=9, idempotency_key="audit-upload")
+    quota.finalize(storage_db, tenant_id="tenant-1", reservation_id=reservation.id,
+                   storage_uri="s3://audit-bucket/amo-portal/evidence/tenant-1/report.pdf",
+                   checksum_sha256=hashlib.sha256(b"source").hexdigest())
+    storage_db.commit()
+
+    monkeypatch.setattr(storage, "retained_object_size", lambda _: 8)
+    failed = quota.audit_retained_objects(storage_db, tenant_id="tenant-1")
+    assert failed["checked_objects"] == 1
+    assert failed["physically_verified"] is False
+    assert failed["integrity_state"] == "REMOTE_DRIFT"
+    assert len(failed["failures"]) == 1
+    assert quota.reconcile(storage_db, tenant_id="tenant-1")["integrity_state"] == "REMOTE_DRIFT"
+    with pytest.raises(ValueError, match="reconciliation required"):
+        quota.reserve(storage_db, tenant_id="tenant-1", object_key="evidence/tenant-1/next.pdf",
+                      size_bytes=1, idempotency_key="next-upload")
+
+    monkeypatch.setattr(storage, "retained_object_size", lambda _: 9)
+    passed = quota.audit_retained_objects(storage_db, tenant_id="tenant-1")
+    assert passed["physically_verified"] is True
+    assert passed["integrity_state"] == "OK"
+    assert passed["used_bytes"] == 9
+
+
+def test_physical_audit_refuses_partial_scan_and_unbounded_checksum_reads(storage_db, monkeypatch):
+    monkeypatch.setenv("AMO_STORAGE_BACKEND", "s3")
+    with pytest.raises(ValueError, match="between 1 and 1000"):
+        quota.audit_retained_objects(storage_db, tenant_id="tenant-1", max_objects=0)
+    with pytest.raises(ValueError, match="limited to 100"):
+        quota.audit_retained_objects(storage_db, tenant_id="tenant-1",
+                                      max_objects=101, verify_checksums=True)
+
+
 def test_allocation_cannot_shrink_below_active_usage(storage_db):
     quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100, actor_id=None, reason="Contract")
     quota.reserve(storage_db, tenant_id="tenant-1", object_key="a.pdf",
