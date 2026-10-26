@@ -356,7 +356,19 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   await expect(preview.getByText("Engineering", { exact: true })).toBeVisible();
 
   await page.goto("/maintenance/tenant-a/quality/cars?carId=rel-car-7", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("REL-CAR-007", { exact: true })).toBeVisible({ timeout: 30_000 });
+  try {
+    await expect(page.getByRole("heading", { name: "REL-CAR-007", exact: true })).toBeVisible({ timeout: 15_000 });
+  } catch (error) {
+    console.error("CAR direct-record navigation diagnostic", {
+      url: page.url(),
+      carRegisterUrls: state.carRegisterUrls,
+      runtimeErrors,
+      consoleErrors,
+      failedRequests,
+      body: (await page.locator("body").innerText().catch(() => "<unavailable>")).slice(0, 6000),
+    });
+    throw error;
+  }
   await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("car_id=rel-car-7");
   expect(state.carRegisterUrls.at(-1)).not.toContain("program=QUALITY");
   expect(runtimeErrors).toEqual([]);
