@@ -87,6 +87,17 @@ def _full_key(key: str) -> str:
     return f"{prefix}/{clean}" if prefix else clean
 
 
+def expected_s3_uri(key: str) -> str:
+    """Canonical physical URI for an immutable key in this deployment.
+
+    Never trust a caller-supplied bucket or object prefix when assigning a
+    tenant's quota receipt: another tenant's object must not be referenced.
+    """
+    if not bucket_name():
+        raise ValueError("S3 bucket is not configured")
+    return f"s3://{bucket_name()}/{_full_key(key)}"
+
+
 def _client():
     global _CLIENT
     with _CLIENT_LOCK:
