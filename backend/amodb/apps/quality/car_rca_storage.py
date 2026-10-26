@@ -66,24 +66,28 @@ def retained_car_attachment(db: Session, car_id: UUID, attachment_id: UUID, *, a
     ref = f"CAR-ATTACHMENT:{attachment_id}"
     docs = db.query(QualityCarRcaDocument.submitted_snapshot).filter(
         QualityCarRcaDocument.car_id == car_id,
+        QualityCarRcaDocument.amo_id == amo_id,
         QualityCarRcaDocument.submitted_snapshot.is_not(None),
     ).all()
     if any(ref in str(item[0]) for item in docs):
         return True
     actions = db.query(QualityCarRcaAction.evidence_references).filter(
         QualityCarRcaAction.car_id == car_id,
+        QualityCarRcaAction.amo_id == amo_id,
     ).all()
     if any(ref in (item[0] or []) for item in actions):
         return True
     # Future implementation revisions remain in the immutable action ledger.
     from .car_rca_models import QualityCarRcaActionEvent, QualityCarRcaRevision
     for row in db.query(QualityCarRcaActionEvent.snapshot).filter(
-        QualityCarRcaActionEvent.car_id == car_id
+        QualityCarRcaActionEvent.car_id == car_id,
+        QualityCarRcaActionEvent.amo_id == amo_id
     ).all():
         if ref in str(row[0]):
             return True
     for row in db.query(QualityCarRcaRevision.snapshot).filter(
-        QualityCarRcaRevision.car_id == car_id
+        QualityCarRcaRevision.car_id == car_id,
+        QualityCarRcaRevision.amo_id == amo_id
     ).all():
         if ref in str(row[0]):
             return True
