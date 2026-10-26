@@ -59,8 +59,10 @@ def car_attachment_path(uri: str, *, car_id: UUID, expected_sha256: str | None =
     raise HTTPException(status_code=404, detail="CAR evidence file reference is outside controlled storage.")
 
 
-def retained_car_attachment(db: Session, car_id: UUID, attachment_id: UUID) -> bool:
+def retained_car_attachment(db: Session, car_id: UUID, attachment_id: UUID, *, amo_id: str) -> bool:
     """Do not destroy evidence referenced by submitted investigations or actions."""
+    from .tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id="00000000-0000-0000-0000-000000000000")
     ref = f"CAR-ATTACHMENT:{attachment_id}"
     docs = db.query(QualityCarRcaDocument.submitted_snapshot).filter(
         QualityCarRcaDocument.car_id == car_id,
