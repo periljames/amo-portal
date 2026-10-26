@@ -137,7 +137,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByLabel("Accountable lead owner").selectOption(data.realtime_user_b_id);
     await internalPage.getByLabel("Controlled final due date").fill(futureDate(28));
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Staged CAR control initialized", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Staged CAR control initialized" })).toContainText("Staged CAR control initialized", { timeout: 30_000 });
 
     const rejected = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
       root_cause_status: "REJECTED",
