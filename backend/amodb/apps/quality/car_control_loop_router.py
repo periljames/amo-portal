@@ -734,6 +734,7 @@ def _close_control_loop(
             car=car,
             target_status=target,
             evidence_ref=evidence_ref if target in {"PENDING_VERIFICATION", "CLOSED"} else None,
+            controlled_closure=(target == "CLOSED"),
         )
     car.evidence_ref = evidence_ref
     # Preserve the canonical accepted-close side effects used by the existing
