@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { CarRcaDocument, CarRcaInvestigation, CarRcaMethod, CarRcaNode, CauseEntryType, CarRcaEffectivenessProposal } from "../../../services/qmsCarRca";
 
 const METHOD_GUIDE: Array<{ id: CarRcaMethod; title: string; description: string }> = [
@@ -101,7 +101,7 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
 
   const current = value.investigations.find(item => item.method === selected);
   const nodes = current?.nodes ?? [];
-  const ordered = useMemo(() => paths(nodes), [nodes]);
+  const ordered = paths(nodes);
   const updateMethod = (next: CarRcaInvestigation) => {
     onChange({
       ...value,
