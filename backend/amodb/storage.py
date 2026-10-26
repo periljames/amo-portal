@@ -322,6 +322,18 @@ def delete(uri: str) -> None:
     path.unlink(missing_ok=True)
 
 
+def retained_object_size(uri: str) -> int:
+    """Read the actual size of a retained object in the configured S3 bucket."""
+    bucket, key = _parse_s3(uri)
+    prefix = object_prefix()
+    if bucket != bucket_name() or (prefix and not key.startswith(prefix + "/")):
+        raise ValueError("Retained object is outside the configured S3 namespace")
+    head = _client().head_object(Bucket=bucket, Key=key)
+    if "ContentLength" not in head:
+        raise IOError("S3 HEAD response did not include the retained byte count")
+    return int(head["ContentLength"])
+
+
 def exists(uri: str) -> bool:
     if not uri:
         return False
