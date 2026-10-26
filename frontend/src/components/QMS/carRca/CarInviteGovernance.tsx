@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   getCarInviteAccessControl, updateCarInviteAccessControl, rotateCarInviteAccess,
   type CarInviteAccessControl,
@@ -17,10 +17,10 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newUrl, setNewUrl] = useState("");
-  const showControl = (row: CarInviteAccessControl) => {
+  const showControl = useCallback((row: CarInviteAccessControl) => {
     setControl(row);
     setExpiry(formatInviteExpiryLocal(row.expires_at));
-  };
+  }, []);
   useEffect(() => {
     let mounted = true;
     setError(null); setControl(null); setNewUrl("");
@@ -29,7 +29,7 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
       showControl(row);
     }).catch(e => { if (mounted) setError(e instanceof Error ? e.message : "Invitation controls unavailable"); });
     return () => { mounted = false; };
-  }, [amoCode, carId]);
+  }, [amoCode, carId, showControl]);
   const apply = async (revoke: boolean) => {
     if (!canManage || busy || reason.trim().length < 8 || (revoke && !confirmRevoke)) return;
     setBusy(true); setError(null); setMessage(null); setNewUrl("");
