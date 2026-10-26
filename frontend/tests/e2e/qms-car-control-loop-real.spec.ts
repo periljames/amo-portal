@@ -81,12 +81,24 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     await containmentEditor.fill(`The sampled local CAR index was isolated and reconciled to the governed register ${suffix}.`);
     await page.getByRole("button", { name: "Save containment and continue" }).click();
   }
+  // The public CAR form is a governed stepper, not a long form: a prior
+  // saved draft may leave a different completed step selected on reload.
+  const rootCauseStep = page.getByRole("complementary", { name: "Corrective action response progress" })
+    .getByRole("button", { name: /Root cause$/i });
+  await expect(rootCauseStep).toBeEnabled({ timeout: 30_000 });
+  await rootCauseStep.click();
+  await expect(structuredEditor(page, "Root cause analysis")).toBeVisible({ timeout: 30_000 });
   await structuredEditor(page, "Root cause analysis").fill(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
-  await page.getByLabel("Target closure date").fill(futureDate(28));
-  await page.getByLabel("Due date").fill(futureDate(21));
+  // The issued CAR can lock its authoritative deadlines. Public respondents must
+  // use the controlled deadline-change request rather than silently rewriting them.
+  for (const [label, offset] of [["Target closure date", 28], ["Due date", 21]] as const) {
+    const field = page.getByLabel(label, { exact: true });
+    if (await field.isEnabled()) await field.fill(futureDate(offset));
+    else await expect(field).toBeDisabled();
+  }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
