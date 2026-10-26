@@ -115,5 +115,29 @@ def render_submitted_rca_pdf(linked: dict, *, car_number: str) -> bytes | None:
         line("Measure", plan.get("effectiveness_measure"))
 
     line("Appendices", "Machine-readable revisions, event history and Pareto snapshots are in this evidence ZIP.")
+
+    # Visual pages come from the identical submitted source snapshot, never
+    # reconstructed hypotheses or fabricated Quality-verified categories.
+    from .car_rca_export_charts import render_fishbone, render_pareto
+    for method in investigation.get("investigations") or []:
+        if isinstance(method, dict) and method.get("method") == "ISHIKAWA":
+            render_fishbone(pdf, method)
+
+    saved_pareto = linked.get("rca_pareto_snapshots") or []
+    if saved_pareto:
+        latest = saved_pareto[-1]
+        render_pareto(
+            pdf, latest.get("categories") or [],
+            source_label="Authoritative QMS findings snapshot; source filters and record IDs retained in ZIP.",
+        )
+    else:
+        for method in investigation.get("investigations") or []:
+            if not isinstance(method, dict) or method.get("method") != "PARETO":
+                continue
+            context = method.get("context") or {}
+            render_pareto(
+                pdf, context.get("frequencies") or [],
+                source_label="Respondent-entered frequency observations; not verified against QMS source records.",
+            )
     pdf.save()
     return output.getvalue()
