@@ -242,6 +242,9 @@ test.describe("Document Control daily operating model", () => {
     for (const checkpoint of READER_PAGE_CHECKPOINTS) {
       const started = Date.now();
       await pageInput.fill(String(checkpoint));
+      // Scrolling/rendering a 2,000-page PDF must never erase an unfinished
+      // human page-number edit before the Enter key commits it.
+      await expect(pageInput).toHaveValue(String(checkpoint));
       await pageInput.press("Enter");
       await expect(page.locator(`.pdfv3-page[data-page-number="${checkpoint}"].is-ready`)).toBeVisible({ timeout: MAX_READER_JUMP_MS });
       const elapsedMs = Date.now() - started;
