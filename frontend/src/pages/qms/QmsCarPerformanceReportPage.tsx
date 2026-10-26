@@ -140,6 +140,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
   const context = getContext();
   const navigate = useNavigate();
   const amoCode = params.amoCode || context.amoSlug || context.amoCode || "UNKNOWN";
+  const canExportReports = hasQmsRolePermission("qms.reports.export");
   const canViewReports = hasQmsRolePermission("qms.reports.view");
 
   const [scope, setScope] = useState<ReportScope>("ALL");
@@ -371,6 +372,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
   }, [department, issuedFrom, issuedTo, priority, scope, search]);
 
   const exportCsv = () => {
+    if (!canExportReports) return;
     setOutputError(null);
     const header = [
       "CAR Reference", "Title", "Audit", "Finding", "Department", "Owner", "Priority", "Status",
@@ -408,6 +410,7 @@ const QmsCarPerformanceReportPage: React.FC = () => {
   };
 
   const printReport = () => {
+    if (!canExportReports) return;
     setOutputError(null);
     const popup = window.open("", "_blank", "width=1200,height=850");
     if (!popup) {
@@ -462,8 +465,9 @@ const QmsCarPerformanceReportPage: React.FC = () => {
     <div className="qms-car-perf-actions">
       <button className="btn" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register`)}>Findings</button>
       <button className="btn" type="button" onClick={refreshAnalysis} disabled={reportQuery.isFetching || findingsQuery.isFetching}>Refresh</button>
-      <button className="btn" type="button" onClick={exportCsv} disabled={!carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Export CSV</button>
-      <button className="btn btn--primary" type="button" onClick={printReport} disabled={!carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Print report</button>
+      <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/reports/car-performance`)}>Back to reports</button>
+      <button className="btn" type="button" onClick={exportCsv} disabled={!canExportReports || !carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Export CSV</button>
+      <button className="btn btn--primary" type="button" onClick={printReport} disabled={!canExportReports || !carsReady || Boolean(partialLoadError) || Boolean(issuedFrom && issuedTo && issuedFrom > issuedTo)}>Print report</button>
     </div>
   );
 

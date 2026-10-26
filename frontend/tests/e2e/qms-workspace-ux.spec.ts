@@ -1,10 +1,6 @@
-import { expect, test, type Page, type Locator } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { QMS_ROUTE_REGISTRY } from "../../src/pages/qms/routes/qmsRouteRegistry";
 import { mockQualityShell } from "./helpers/mockQualityShell";
-
-async function expandModule(summary: Locator) {
-  if (!await summary.evaluate(element => element.parentElement?.hasAttribute("open"))) await summary.click();
-}
 
 async function prepare(page: Page, admin = false) {
   await mockQualityShell(page);
@@ -47,8 +43,8 @@ test("settings is a configuration workspace and saves only changed policy groups
   await expect(page.locator(".qms-settings-page h1")).toHaveText("Settings");
   await expect(page.getByRole("grid")).toHaveCount(0);
   await page.getByRole("button", { name: "Controls & settings", exact: true }).click();
-  await expandModule(page.locator(".qms-page-menu__panel summary").filter({ hasText: /^Settings$/ }));
-  await page.getByRole("navigation", { name: "QMS controls and settings" }).getByRole("link", { name: "Numbering", exact: true }).click();
+  await page.getByRole("navigation", { name: "QMS controls and settings" }).getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Numbering", exact: true }).click();
   await page.getByLabel("Audit Prefix").fill("QA");
   await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -83,8 +79,7 @@ test("switching registers never shows the previous page's rows under the new tit
   await expect(page.getByText("Only the process register owns this row", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Assurance", exact: true }).click();
   const panel = page.locator(".qms-page-menu__panel");
-  await panel.locator("summary").filter({ hasText: /^Risk & Opportunities$/ }).click();
-  await panel.getByRole("link", { name: "Register", exact: true }).click();
+  await panel.getByRole("link", { name: "Risk & Opportunities", exact: true }).click();
   try {
     await expect(page.getByRole("heading", { name: "Risk and Opportunities", exact: true })).toBeVisible();
     await expect(page.getByText("Only the process register owns this row", { exact: true })).toHaveCount(0);
@@ -171,11 +166,12 @@ test("controls remain reachable at narrow widths without covering the page", asy
   await page.goto("/maintenance/tenant-a/quality/settings/general");
   await page.getByText("Controls & settings", { exact: true }).click();
   const controls = page.getByRole("navigation", { name: "QMS controls and settings" });
-  await expect(controls.locator("summary").filter({ hasText: /^External Providers$/ })).toBeVisible();
-  await expect(controls.locator("summary").filter({ hasText: /^Settings$/ })).toHaveCount(1);
+  await expect(controls.getByRole("link", { name: "External Providers", exact: true })).toBeVisible();
+  await expect(controls.getByRole("link", { name: "Settings", exact: true })).toHaveCount(1);
   await expect(controls.getByText("Settings pages", { exact: true })).toHaveCount(0);
-  await expandModule(controls.locator("summary").filter({ hasText: /^Settings$/ }));
-  await controls.getByRole("link", { name: "General", exact: true }).click();
+  await controls.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Controls & settings", exact: true }).click();
+  await controls.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(controls).not.toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(await page.locator(".tenant-shell__main").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
@@ -191,8 +187,7 @@ test("one compact menu owns page navigation and the drawer has readable width", 
   await expect(page.locator(".quality-context-bar__tabs,.quality-context-bar__subtabs,.qa-workspace-rail,.qms-register-views")).toHaveCount(0);
   await bar.getByRole("button", { name: "Assurance", exact: true }).click();
   const assurance = page.getByRole("navigation", { name: "Assurance pages", exact: true });
-  await assurance.locator("summary").filter({ hasText: /^Audits$/ }).click();
-  await expect(assurance.getByRole("link", { name: "Checklists", exact: true })).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/checklists");
+  await expect(assurance.getByRole("link", { name: "Audits", exact: true })).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/dashboard");
   await page.keyboard.press("Escape");
   await expect(assurance).toHaveCount(0);
   await expect(bar.getByRole("button", { name: "Assurance", exact: true })).toBeFocused();
@@ -245,7 +240,7 @@ test("reviews every shared QMS register view for rendering and navigation errors
   await prepare(page);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  const modules = QMS_ROUTE_REGISTRY.filter(module => module.componentType === "canonical" && !["calendar", "findings", "change-control"].includes(module.id));
+  const modules = QMS_ROUTE_REGISTRY.filter(module => module.componentType === "canonical" && !["calendar", "findings", "change-control", "documents", "reports"].includes(module.id));
   await page.goto("/maintenance/tenant-a/quality/settings/general", { waitUntil: "domcontentloaded" });
   const menuLabels = { command: "Work", assurance: "Assurance", control: "Controls & settings", administration: "Controls & settings", reporting: "Reports" };
   let reviewed = 0;
@@ -253,8 +248,8 @@ test("reviews every shared QMS register view for rendering and navigation errors
     const target = `/maintenance/tenant-a/quality/${module.segment}/${view}`;
     await page.getByRole("navigation", { name: "QMS page menus" }).getByRole("button", { name: menuLabels[module.section], exact: true }).click();
     const panel = page.locator(".qms-page-menu__panel");
-    if (module.validViews.length > 1) await expandModule(panel.locator("summary").filter({ hasText: new RegExp(`^${module.navigationLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }));
-    await panel.locator(`a[href="${target}"]`).first().click();
+    await panel.getByRole("link", { name: module.navigationLabel, exact: true }).click();
+    await page.getByRole("navigation", { name: `${module.navigationLabel} views`, exact: true }).locator(`a[href="${target}"]`).click();
     await expect(page).toHaveURL(new RegExp(`${target}$`));
     await expect(page.locator(".qms-register-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Quality route not found" })).toHaveCount(0);

@@ -1,3 +1,5 @@
+import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
+import "./qms-reports.css";
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -557,7 +559,7 @@ export default function QmsExternalProvidersPage(): React.ReactElement {
   const {amoCode=""}=useParams<{amoCode:string}>();
   const location=useLocation();
   const view=location.pathname.split("/").filter(Boolean).at(-1)||"register";
-  if(providerRecordViews[view]) return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><div className="qms-provider-page qms-surface-root"><header className="qms-provider-page__header"><h1>{providerRecordViews[view]}</h1><Link className="qms-provider-button is-secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers</Link></header><QmsRegisterPage embedded/></div></DepartmentLayout>;
+  if(providerRecordViews[view]) return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><div className="qms-provider-page qms-surface-root"><QmsSectionTabs amoCode={amoCode} /><header className="qms-provider-page__header"><h1>{providerRecordViews[view]}</h1><Link className="qms-provider-button is-secondary" to={`/maintenance/${encodeURIComponent(amoCode)}/quality/suppliers/register`}>External Providers</Link></header><QmsRegisterPage embedded/></div></DepartmentLayout>;
   return <ProviderWorkspace key={`${amoCode}:${view}`}/>;
 }
 
@@ -634,7 +636,7 @@ function ProviderWorkspace(): React.ReactElement {
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-    <main className="qms-provider-page qms-surface-root">
+    <main className="qms-provider-page qms-surface-root"><QmsSectionTabs amoCode={amoCode} />
       <header className="qms-provider-page__header">
         <div>
           <h1>{fixedStatus==="APPROVED"?"Approved external providers":fixedStatus==="EXPIRED"?"Expired provider approvals":"External Providers"}</h1>

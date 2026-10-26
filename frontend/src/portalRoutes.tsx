@@ -23,7 +23,6 @@ import { canViewFeature, getFirstAccessibleModuleRoute, type ModuleFeature } fro
 import { getOperationalAccessUser } from "./utils/departmentAccess";
 import { hasQmsRolePermission, hasTrainingRolePermission, isPlatformSuperuser } from "./app/routeGuards";
 import { reportPortalError } from "./services/portalError";
-import { readCachedAdminProfileState } from "./services/adminProfileMode";
 
 const CHUNK_RECOVERY_PREFIX = "amoportal:route-chunk-recovery:";
 const CHUNK_RECOVERY_WINDOW_MS = 60_000;
@@ -189,9 +188,6 @@ const TrainingPage = lazyDefault(() => import("./pages/MyTrainingPage"));
 const TrainingCompetencePage = lazyDefault(() => import("./pages/training/TrainingOperatingSystemPage"));
 const QmsCanonicalPage = lazyDefault(() => import("./pages/qms/QmsCanonicalPage"));
 const QMSTrainingUserPage = lazyDefault(() => import("./pages/QMSTrainingUserPage"));
-const AeroDocAuditModePage = lazyDefault(() => import("./pages/AeroDocAuditModePage"));
-const AeroDocComplianceHealthPage = lazyDefault(() => import("./pages/AeroDocComplianceHealthPage"));
-const AeroDocHangarDashboardPage = lazyDefault(() => import("./pages/AeroDocHangarDashboardPage"));
 const QualityCarsPage = lazyDefault(() => import("./pages/QualityCarsPage"));
 const PublicCarInvitePage = lazyDefault(() => import("./pages/PublicCarInvitePage"));
 const SubscriptionManagementPage = lazyDefault(() => import("./pages/SubscriptionManagementPage"));
@@ -854,9 +850,6 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/evidence-vault/immutable-archive" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/evidence-vault/:evidenceId" element={<RequireAuth><RequireQmsPermission permission="qms.evidence.view"><QualityEvidenceViewerPage /></RequireQmsPermission></RequireAuth>} />
 
-      <Route path="/maintenance/:amoCode/quality/aerodoc/hangar" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocHangarDashboardPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
-      <Route path="/maintenance/:amoCode/quality/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/settings/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsSettingsPage /></RequireQmsPermission></RequireAuth>} />

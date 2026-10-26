@@ -61,7 +61,7 @@ describe("QMS sidebar navigation", () => {
     const grouped = new Set(QMS_NAVIGATION_GROUPS.flatMap((group) => [...group.moduleIds]));
     const expected = QMS_ROUTE_REGISTRY
       .map((module) => module.id)
-      .filter((moduleId) => !dedicated.has(moduleId));
+      .filter((moduleId) => !dedicated.has(moduleId) && !["documents", "aerodoc", "mail-identity"].includes(moduleId));
 
     expect([...grouped].sort()).toEqual(expected.sort());
     expect(QMS_NAVIGATION_GROUPS.map((group) => group.id)).toEqual([

@@ -102,8 +102,8 @@ export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
   {
     id: "controls",
     label: "System controls",
-    description: "Processes, documents, competence and operational controls",
-    moduleIds: ["system", "documents", "suppliers", "provider-access", "equipment-calibration", "external-interface"],
+    description: "Processes, competence and operational controls",
+    moduleIds: ["system", "suppliers", "provider-access", "equipment-calibration", "external-interface"],
   },
   {
     id: "review",
@@ -115,7 +115,7 @@ export const QMS_NAVIGATION_GROUPS: readonly QmsNavigationGroup[] = [
     id: "administration",
     label: "Administration",
     description: "Quality configuration and enabled specialist tools",
-    moduleIds: ["settings", "mail-identity", "aerodoc"],
+    moduleIds: ["settings"],
   },
 ] as const;
 
