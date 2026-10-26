@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { formatInviteExpiryLocal, parseInviteExpiryLocal } from "./carInviteExpiry";
 
 const initialTimezone = process.env.TZ;
-afterEach(() => { process.env.TZ = initialTimezone; });
+afterEach(() => {
+  if (initialTimezone === undefined) delete process.env.TZ;
+  else process.env.TZ = initialTimezone;
+});
 
 describe("CAR invitation expiry local-time controls", () => {
   it("roundtrips unchanged expiry in Nairobi without shortening bearer access", () => {
@@ -10,7 +13,7 @@ describe("CAR invitation expiry local-time controls", () => {
     const original = "2026-11-01T12:00:00Z";
     const displayed = formatInviteExpiryLocal(original);
     expect(displayed).toBe("2026-11-01T15:00");
-    expect(parseInviteExpiryLocal(displayed, original)).toBe(original);
+    expect(parseInviteExpiryLocal(displayed, original)).toBe(new Date(original).toISOString());
   });
 
   it("roundtrips unchanged expiry in a negative UTC offset", () => {
@@ -27,8 +30,8 @@ describe("CAR invitation expiry local-time controls", () => {
     const secondOccurrence = "2026-11-01T06:30:00Z";
     expect(formatInviteExpiryLocal(firstOccurrence)).toBe("2026-11-01T01:30");
     expect(formatInviteExpiryLocal(secondOccurrence)).toBe("2026-11-01T01:30");
-    expect(parseInviteExpiryLocal("2026-11-01T01:30", firstOccurrence)).toBe(firstOccurrence);
-    expect(parseInviteExpiryLocal("2026-11-01T01:30", secondOccurrence)).toBe(secondOccurrence);
+    expect(parseInviteExpiryLocal("2026-11-01T01:30", firstOccurrence)).toBe(new Date(firstOccurrence).toISOString());
+    expect(parseInviteExpiryLocal("2026-11-01T01:30", secondOccurrence)).toBe(new Date(secondOccurrence).toISOString());
   });
 
   it("saves an actual changed local deadline and rejects non-existent DST time", () => {
