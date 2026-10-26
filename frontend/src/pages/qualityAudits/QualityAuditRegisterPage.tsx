@@ -354,9 +354,9 @@ const QualityAuditRegisterPage: React.FC = () => {
             <div className="qa-register-grid-page__tools">
               {hasQmsRolePermission("qms.reports.view") && (
                 <button type="button" className="qa-register-grid-page__analysis-link"
-                  title="Open source-backed findings and CAR analysis"
+                  title="Open source-backed findings and CAR analysis" aria-label="Analysis"
                   onClick={() => navigate(qmsBasePath(amoCode) + "/reports/car-performance")}>
-                  <BarChart3 size={16} aria-hidden /> Analysis
+                  <BarChart3 size={16} aria-hidden /><span>Analysis</span>
                 </button>
               )}
               <details
