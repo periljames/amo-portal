@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import queue
 import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
@@ -288,7 +287,7 @@ async def _event_generator(
 ) -> AsyncGenerator[str, None]:
     for chunk in bootstrap:
         yield chunk
-    q = broker.subscribe()
+    q = broker.subscribe_async()
     try:
         effective_amo_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", ""))
         last_durable_sweep = time.monotonic()
@@ -312,11 +311,11 @@ async def _event_generator(
             until_sweep = max(0.05, DURABLE_SWEEP_SECONDS - (now - last_durable_sweep))
             wait_seconds = min(until_sweep, 1.0)
             try:
-                event = await asyncio.to_thread(q.get, True, wait_seconds)
+                event = await asyncio.wait_for(q.get(), timeout=wait_seconds)
                 if _event_matches_tenant(event, effective_amo_id) and event.id not in delivered_ids:
                     delivered_ids.add(event.id)
                     yield format_sse(event.to_json(), event=event.type, event_id=event.id)
-            except queue.Empty:
+            except asyncio.TimeoutError:
                 pass
 
             now = time.monotonic()
@@ -342,12 +341,14 @@ async def _event_generator(
                 yield keepalive_message()
                 last_keepalive = now
     finally:
-        broker.unsubscribe(q)
+        broker.unsubscribe_async(q)
 
 
 @router.get("/events")
 async def stream_events(request: Request) -> StreamingResponse:
-    user, bootstrap, durable_cursor, delivered_ids = _prepare_stream_bootstrap(request)
+    # Authentication and durable replay perform blocking SQL. They must not
+    # block every API route on the server's event loop while a device reconnects.
+    user, bootstrap, durable_cursor, delivered_ids = await asyncio.to_thread(_prepare_stream_bootstrap, request)
     return StreamingResponse(
         _event_generator(request, user, bootstrap, durable_cursor, delivered_ids),
         media_type="text/event-stream",
