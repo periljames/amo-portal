@@ -7,7 +7,6 @@ import {
   Activity,
   AlertTriangle,
   Archive,
-  ArrowRight,
   BarChart3,
   BookOpen,
   CalendarDays,
