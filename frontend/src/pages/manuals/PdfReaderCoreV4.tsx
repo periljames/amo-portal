@@ -1406,7 +1406,7 @@ export default function PdfReaderCoreV4({
                 setPageInput(String(currentPageRef.current));
                 event.currentTarget.blur();
               }
-            }
+            }}
           />
           <span>of {pageCount || "—"}</span>
         </div>
