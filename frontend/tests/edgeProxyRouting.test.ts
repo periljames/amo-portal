@@ -30,6 +30,31 @@ describe("Venspera production same-origin edge", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("requires same-origin provenance for cookie-bearing mutations with missing Origin", async () => {
+    const fetcher = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    const url = "https://app.venspera.com/auth/change-password";
+    const absent = await onRequest({
+      request: new Request(url, { method: "POST", headers: { cookie: "refresh=abc" } }), env,
+    });
+    expect(absent.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    const crossSite = await onRequest({
+      request: new Request(url, { method: "POST",
+        headers: { cookie: "refresh=abc", "sec-fetch-site": "cross-site" } }), env,
+    });
+    expect(crossSite.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    const sameOrigin = await onRequest({
+      request: new Request(url, { method: "POST",
+        headers: { cookie: "refresh=abc", referer: "https://app.venspera.com/platform/profile" } }), env,
+    });
+    expect(sameOrigin.status).toBe(200);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("refuses absent or insecure upstreams", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
