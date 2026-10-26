@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 20
     env:
       APP_ENV: test
+      DATABASE_URL: sqlite+pysqlite:///:memory:
       ALLOW_SQLITE_FOR_TESTS: "1"
       SECRET_KEY: s3-multinode-ci-secret
       PYTHONPATH: backend
