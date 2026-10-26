@@ -516,10 +516,10 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
           <span className={`badge ${control.health.state === "HEALTHY" || control.health.state === "CLOSED" ? "badge--success" : control.health.state === "CRITICAL" || control.health.state === "OVERDUE" ? "badge--danger" : "badge--warning"}`}>{humanize(control.health.state)} · {control.health.risk_score}/100</span>
         </div>
         <div className="stats-grid">
-          <div><span className="muted">Action</span><strong>{control.health.next_action}</strong></div>
-          <div><span className="muted">Owner</span><strong>{nextOwner}</strong></div>
-          <div><span className="muted">Due</span><strong>{formatDate(nextDue)}</strong></div>
-          <div><span className="muted">Stage</span><strong>{nextMilestone?.title || "Final closure"}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Action</span><strong>{control.health.next_action}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Owner</span><strong>{nextOwner}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Due</span><strong>{formatDate(nextDue)}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Stage</span><strong>{nextMilestone?.title || "Final closure"}</strong></div>
         </div>
       </section>
 
@@ -528,7 +528,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted"><InlineLoading label={"Loading response history…"}/></p> : null}
         {latestResponse || inviteQuery.data ? (
           <div className="stack">
-            <div className="stats-grid"><div><span className="muted">Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted">Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted">RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted">CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
+            <div className="stats-grid"><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
             <div><strong>Immediate / containment action</strong><p>{latestResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
             <div><strong>Root cause analysis</strong><p>{latestResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
             <div><strong>Corrective action</strong><p>{latestResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
