@@ -1337,7 +1337,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       onSave={() => void saveRca(entry.token, true)}
                                       saveState={entry.rcaSaving ? "Saving…" : entry.rcaError ? "Save failed — retry" : JSON.stringify({ form: entry.form, investigation: entry.rca }) === entry.rcaSavedSignature ? "Saved" : "Unsaved changes"}
                                     />
-                                    {invite.root_cause_review_note && <p className="car-invite-notice">Quality review: {invite.root_cause_review_note}</p>
+                                    {invite.root_cause_review_note && <p className="car-invite-notice">Quality review: {invite.root_cause_review_note}</p>}
                                     <div className="car-invite-stage__actions">
                                       <button type="button" className="car-invite-btn" disabled={locked} onClick={() => setActiveStep(entry.token, "containment")}>Back</button>
                                       <button type="button" className="car-invite-btn car-invite-btn--primary" disabled={locked} onClick={() => advanceStep(entry, "analysis")}>Save root cause and continue</button>
