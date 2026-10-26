@@ -216,10 +216,12 @@ def test_allocation_cannot_shrink_below_active_usage(storage_db):
                        actor_id=None, reason="Downgrade")
 
 
-def test_finalized_upload_replay_returns_receipt_without_rewriting_object(storage_db):
+def test_finalized_upload_replay_returns_receipt_without_rewriting_object(storage_db, monkeypatch):
     from amodb.apps.platform import storage_quota_upload
     from fastapi import HTTPException
+    from amodb import storage
 
+    monkeypatch.setattr(storage, "retained_object_size", lambda uri: 5)
     quota.allocate(storage_db, tenant_id="tenant-1", quota_bytes=100,
                    actor_id=None, reason="Contract")
     reservation = quota.reserve(storage_db, tenant_id="tenant-1",
@@ -240,6 +242,21 @@ def test_finalized_upload_replay_returns_receipt_without_rewriting_object(storag
     )
     assert retained.uri == "s3://test/uploads/immutable.pdf"
     assert retained.size_bytes == 5
+    assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 5
+
+    # The database receipt cannot hide lost or corrupted remote objects.
+    monkeypatch.setattr(storage, "retained_object_size", lambda uri: 4)
+    with pytest.raises(HTTPException) as byte_error:
+        storage_quota_upload._finalized_replay(storage_db, same_operation, digest=digest)
+    assert byte_error.value.status_code == 409
+
+    def missing_object(uri):
+        raise FileNotFoundError("Simulated lost S3 object")
+
+    monkeypatch.setattr(storage, "retained_object_size", missing_object)
+    with pytest.raises(HTTPException) as unavailable:
+        storage_quota_upload._finalized_replay(storage_db, same_operation, digest=digest)
+    assert unavailable.value.status_code == 503
     assert quota.read_quota(storage_db, "tenant-1")["used_bytes"] == 5
 
     # A retry with the same operation id but different bytes is not allowed
