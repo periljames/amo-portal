@@ -31,6 +31,7 @@ from amodb.apps.audit import models as audit_models  # noqa: E402
 from amodb.apps.tasks import models as task_models  # noqa: E402
 from amodb.apps.quality import models as quality_models  # noqa: E402
 from amodb.apps.quality import car_rca_models as quality_car_rca_models  # noqa: E402
+from amodb.apps.quality import assurance_case_models as quality_assurance_models  # noqa: E402
 from amodb.apps.quality import people_models as quality_people_models  # noqa: E402
 from amodb.apps.quality import people_authorization_models as quality_people_authorization_models  # noqa: E402
 from amodb.apps.notifications import models as notification_models  # noqa: E402
@@ -106,6 +107,8 @@ def db_session():
             quality_car_rca_models.QualityCarRcaRollout.__table__,
             quality_car_rca_models.QualityCarResponseRetainedRevision.__table__,
             quality_car_rca_models.QualityCarInviteAccessControl.__table__,
+            quality_assurance_models.QualityAssuranceCase.__table__,
+            quality_assurance_models.QualityEffectivenessPlan.__table__,
             quality_models.QMSNotification.__table__,
             quality_models.QualityTenantWorkflowSettings.__table__,
             quality_people_models.QualityPrivilegeRule.__table__,
