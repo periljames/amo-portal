@@ -125,7 +125,7 @@ def migrate_one(db: Session, *, source: Source, tenant_id: str, row, apply: bool
     )
     # Read independently via the public adapter before changing legal references.
     try:
-        remote_copy = shared_storage.materialize(persisted.uri)
+        remote_copy = shared_storage.materialize(persisted.uri, expected_sha256=digest, force_download=True)
         remote_size, remote_hash = digest_file(remote_copy)
         if remote_size != size or remote_hash != digest:
             raise IOError("Restored object checksum failed; original reference remains unchanged")
@@ -148,16 +148,21 @@ def main() -> int:
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--backup-reference", default="", help="Identifier of independently verified source backup evidence")
+    parser.add_argument("--require-complete", action="store_true", help="Fail when any source still needs migration")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", args.tenant_id):
         parser.error("Valid tenant UUID/ID required")
     if not 1 <= args.limit <= 10000:
         parser.error("--limit must be between 1 and 10000")
+    if args.apply and len(args.backup_reference.strip()) < 8:
+        parser.error("--apply requires --backup-reference identifying a verified backup")
     if args.apply and not shared_storage.shared_storage_enabled():
         parser.error("Shared S3 storage must be configured before applying a backfill")
     failures = 0
     inspected = 0
     migrated = 0
+    remaining_by_source = {}
     with WriteSessionLocal() as db:
         if args.apply:
             account = storage_quota_service.read_quota(db, args.tenant_id)
@@ -182,10 +187,27 @@ def main() -> int:
                     result = {"kind": source.kind, "record_id": str(row.id),
                               "status": "FAILED", "reason": type(exc).__name__}
                 print(json.dumps(result, sort_keys=True))
+        for source in SOURCES:
+            # Count all source records, not only those inside --limit. This
+            # prevents a partial batch from being mistaken for full recovery.
+            model = source.model
+            column = getattr(model, source.column)
+            query = db.query(model).filter(column.isnot(None), ~column.like("s3://%"))
+            if source.kind == "manuals-originals":
+                query = query.join(manuals_models.Manual, model.manual_id == manuals_models.Manual.id).join(
+                    manuals_models.Tenant, manuals_models.Manual.tenant_id == manuals_models.Tenant.id,
+                ).filter(manuals_models.Tenant.amo_id == args.tenant_id)
+            else:
+                query = query.filter(getattr(model, source.tenant_column) == args.tenant_id)
+            remaining_by_source[source.kind] = query.count()
+        outstanding = sum(remaining_by_source.values())
         print(json.dumps({"tenant_id": args.tenant_id, "inspected": inspected,
                           "migrated": migrated, "blocked_or_failed": failures,
-                          "dry_run": not args.apply}))
-    return 1 if failures else 0
+                          "remaining_local_references": outstanding,
+                          "remaining_by_source": remaining_by_source,
+                          "backup_reference_declared": bool(args.backup_reference.strip()),
+                          "dry_run": not args.apply}, sort_keys=True))
+    return 1 if failures or (args.require_complete and outstanding) else 0
 
 
 if __name__ == "__main__":
