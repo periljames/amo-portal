@@ -161,7 +161,18 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const transitionMutation = useMutation({
     mutationFn: ({ revision, action }: { revision: AuditReportRevision; action: "SUBMIT" | "RETURN" | "APPROVE" | "ISSUE" | "CANCEL" }) => transitionAuditReport(amoCode, auditId, revision.id, action, `${action.replaceAll("_", " ")} performed in the governed audit closing workflow.`),
-    onSuccess: async (_, variables) => { setLocalError(null); setNotice(`${variables.action.replaceAll("_", " ")} recorded against the governed report revision.`); await invalidateClosing(); },
+    onSuccess: async (updatedRevision, variables) => {
+      // The transition response is the authoritative state. Update the exact
+      // revision before refetching so the next approval/signature gate cannot
+      // briefly operate on a stale, previously reviewed snapshot.
+      queryClient.setQueryData<{ items: AuditReportRevision[] }>(
+        ["qms-audit-report-revisions", amoCode, auditId],
+        (current) => ({ items: [updatedRevision, ...(current?.items || []).filter((item) => item.id !== updatedRevision.id)] }),
+      );
+      setLocalError(null);
+      setNotice(`${variables.action.replaceAll("_", " ")} recorded against the governed report revision.`);
+      await invalidateClosing();
+    },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Report lifecycle transition failed."),
   });
   const executionCloseMutation = useMutation({

@@ -241,9 +241,12 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
 
   const contextBar = page.locator(".quality-context-bar");
   await expect(contextBar).toBeVisible();
-  for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
+  for (const label of ["Work", "Assurance", "Controls & settings", "Reports"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
+  await contextBar.getByRole("button", { name: "Work", exact: true }).click();
+  await expect(contextBar.getByRole("link", { name: "Control Room", exact: true })).toBeVisible();
+  await expect(contextBar.getByText("People & authorizations", { exact: true })).toBeVisible();
   // On the canonical Findings register the Assurance rail owns local actions;
   // the context bar intentionally avoids a second, competing creation control.
   await expect(contextBar.getByRole("button", { name: "New finding" })).toHaveCount(0);
