@@ -200,6 +200,20 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
   try {
     const publicPage = await publicContext.newPage();
     watchServerFailures(publicPage, publicFailures);
+
+    const initialGuest = await publicPage.request.get(
+      `/quality/cars/invite/${encodeURIComponent(data.car_loop_invite_token)}`,
+    );
+    expect(initialGuest.status()).toBe(200);
+    expect(initialGuest.headers()["cache-control"]).toContain("no-store");
+    const guestBody = await initialGuest.json() as { related_cars: unknown[] };
+    expect(guestBody.related_cars, "A bearer capability must not enumerate sibling CAR invitations").toEqual([]);
+    const alteredToken = `${data.car_loop_invite_token}x`;
+    const invalidGuest = await publicPage.request.get(
+      `/quality/cars/invite/${encodeURIComponent(alteredToken)}`,
+    );
+    expect(invalidGuest.status()).toBe(404);
+
     await submitResponsibleManagerResponse(publicPage, data, "initial");
 
     const internalPage = await internalContext.newPage();
@@ -451,6 +465,25 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await publicPage.reload({ waitUntil: "domcontentloaded" });
     await expect(publicPage.getByText("Closed", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(publicPage.getByText(/This CAR is closed/i)).toBeVisible();
+
+    // This is an isolated CI-created CAR. Revoke its bearer token after
+    // asserting closure to demonstrate that valid former links fail closed.
+    const revokedAccess = await authenticatedRequest(internalPage, "PUT", `${apiCarPath}/invite-access`, {
+      revoke: true,
+      reason: "End the synthetic review access after independently verified closeout.",
+    });
+    expect(revokedAccess.status, JSON.stringify(revokedAccess.body)).toBe(200);
+    const rejectedAfterRevocation = await publicPage.request.get(
+      `/quality/cars/invite/${encodeURIComponent(data.car_loop_invite_token)}`,
+    );
+    expect(rejectedAfterRevocation.status()).toBe(410);
+    const rejectedDraft = await publicPage.request.get(
+      `/quality/cars/invite/${encodeURIComponent(data.car_loop_invite_token)}/draft`,
+    );
+    expect(rejectedDraft.status()).toBe(410);
+    const stillClosed = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/control-loop`);
+    expect(stillClosed.status).toBe(200);
+    expect((stillClosed.body as { car: { status: string } }).car.status).toBe("CLOSED");
 
     expect(publicFailures).toEqual([]);
     expect(internalFailures).toEqual([]);
