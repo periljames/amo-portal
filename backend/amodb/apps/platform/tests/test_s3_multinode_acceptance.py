@@ -50,6 +50,10 @@ def test_real_s3_two_node_upload_restore_integrity_and_delete(monkeypatch, tmp_p
     # Tampering with the backing object must never serve corrupted content.
     key = stored.uri.split(f"s3://{bucket}/", 1)[1]
     client.put_object(Bucket=bucket, Key=key, Body=b"tampered")
+    # A cached valid copy must never mask corrupted remote bytes during a
+    # physical recovery/retention audit on the same node.
+    with pytest.raises(IOError, match="checksum"):
+        storage.materialize(stored.uri, expected_sha256=checksum, force_download=True)
     monkeypatch.setenv("AMO_STORAGE_CACHE_DIR", str(tmp_path / "node-c"))
     with pytest.raises(IOError, match="checksum"):
         storage.materialize(stored.uri, expected_sha256=checksum)
