@@ -9,6 +9,7 @@ import {
   Eye,
   ClipboardCheck,
   ClipboardList,
+  BarChart3,
   ExternalLink,
   Filter,
   Info,
@@ -30,7 +31,7 @@ import {
   type QualityWorkflowSettingsOut,
 } from "../../services/qms";
 import { auditNavigationHref } from "./auditNavigation";
-import { qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
+import { qmsBasePath, qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
 import { parseQmsRegisterFilters, withQmsQuery, buildPreservedQmsQuery } from "../qms/routes/qmsQueryState";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
@@ -351,6 +352,13 @@ const QualityAuditRegisterPage: React.FC = () => {
             </form>
 
             <div className="qa-register-grid-page__tools">
+              {hasQmsRolePermission("qms.reports.view") && (
+                <button type="button" className="qa-register-grid-page__analysis-link"
+                  title="Open source-backed findings and CAR analysis"
+                  onClick={() => navigate(qmsBasePath(amoCode) + "/reports/car-performance")}>
+                  <BarChart3 size={16} aria-hidden /> Analysis
+                </button>
+              )}
               <details
                 ref={infoRef}
                 className="qa-register-grid-page__popover"
