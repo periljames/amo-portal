@@ -236,12 +236,12 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await expect(responsePanel.getByText(/Responsible Maintenance Manager/)).toBeVisible({ timeout: 30_000 });
     await expect(responsePanel.getByText(/effectiveness checkpoint and evidence-index ownership control rework/)).toBeVisible({ timeout: 30_000 });
 
-    await internalPage.getByLabel("Requested new date").fill(futureDate(35));
-    await internalPage.getByLabel("Reason").fill("Implementation evidence requires an additional controlled observation cycle before effectiveness can be confirmed.");
-    await internalPage.getByLabel("Impact statement").fill("Quality will retain weekly oversight; no unsafe condition is being accepted during the controlled extension.");
-    await internalPage.getByRole("button", { name: "Request deadline change" }).click();
-    await expect(internalPage.getByRole("status").filter({ hasText: "Deadline change submitted" })).toContainText("Deadline change submitted", { timeout: 30_000 });
     const deadlineSection = internalPage.getByRole("heading", { name: "Controlled deadline changes" }).locator("xpath=ancestor::section[1]");
+    await deadlineSection.getByLabel("Requested new date", { exact: true }).fill(futureDate(35));
+    await deadlineSection.getByLabel("Reason", { exact: true }).fill("Implementation evidence requires an additional controlled observation cycle before effectiveness can be confirmed.");
+    await deadlineSection.getByLabel("Impact statement", { exact: true }).fill("Quality will retain weekly oversight; no unsafe condition is being accepted during the controlled extension.");
+    await deadlineSection.getByRole("button", { name: "Request deadline change" }).click();
+    await expect(internalPage.getByRole("status").filter({ hasText: "Deadline change submitted" })).toContainText("Deadline change submitted", { timeout: 30_000 });
     await deadlineSection.getByPlaceholder("Decision note").fill("Approved because the added observation cycle strengthens effectiveness evidence while weekly Quality oversight controls the risk.");
     await deadlineSection.getByRole("button", { name: "Approve" }).click();
     await expect(internalPage.getByRole("status").filter({ hasText: "Deadline change approved" })).toContainText("Deadline change approved", { timeout: 30_000 });
