@@ -312,7 +312,7 @@ def audit_retained_objects(db: Session, *, tenant_id: str, actor_id: str | None 
             if obj.storage_uri != expected_uri:
                 raise ValueError("Object location differs from configured bucket or immutable key")
             if verify_checksums:
-                retained = storage.materialize(obj.storage_uri, expected_sha256=obj.checksum_sha256)
+                retained = storage.materialize(obj.storage_uri, expected_sha256=obj.checksum_sha256, force_download=True)
                 actual_size = retained.stat().st_size
             else:
                 actual_size = storage.retained_object_size(obj.storage_uri)
