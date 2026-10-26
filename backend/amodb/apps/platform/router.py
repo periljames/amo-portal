@@ -265,6 +265,13 @@ def tenant_activation_checklist(
     ).order_by(account_models.User.created_at).first()
     licensed = account_services.get_billing_access_status(db, amo_id=tenant_id)
     quota = storage_quota_service.read_quota(db, tenant_id)
+    # Configuration alone cannot establish that storage is reachable: exercise
+    # the same S3 round-trip used by runtime health checks before claiming the
+    # tenant is ready for paid production activation.
+    try:
+        shared_storage_health = shared_storage.health_check() if shared_storage.shared_storage_enabled() else {"ok": False}
+    except Exception:
+        shared_storage_health = {"ok": False}
     enabled_modules = db.query(account_models.ModuleSubscription).filter(
         account_models.ModuleSubscription.amo_id == tenant_id,
         account_models.ModuleSubscription.status.in_([
@@ -282,13 +289,15 @@ def tenant_activation_checklist(
     checks = [
         {"key": "organization", "label": "Tenant organization created", "passed": bool(tenant.id)},
         {"key": "owner", "label": "Initial tenant administrator account assigned", "passed": owner is not None},
-        {"key": "owner_setup", "label": "Administrator completed password setup", "passed": bool(owner and not owner.must_change_password)},
+        {"key": "owner_setup", "label": "Active administrator completed password setup", "passed": bool(owner and owner.is_active and not owner.must_change_password)},
         {"key": "tenant_active", "label": "Organization is not suspended", "passed": bool(tenant.is_active)},
         {"key": "subscription", "label": "Effective commercial subscription permits access", "passed": bool(licensed.has_access)},
         {"key": "modules", "label": "At least one module is enabled", "passed": bool(enabled_modules)},
         {"key": "module_entitlements", "label": "Enabled modules have effective paid license entitlements", "passed": bool(licensed_modules)},
-        {"key": "storage", "label": "Tenant byte quota explicitly allocated", "passed": quota["quota_bytes"] > 0},
-        {"key": "shared_storage", "label": "Shared object storage configured", "passed": shared_storage.shared_storage_enabled()},
+        {"key": "storage", "label": "Tenant byte quota explicitly allocated and reconciled",
+         "passed": quota["quota_bytes"] > 0 and quota["integrity_state"] == "OK"},
+        {"key": "shared_storage", "label": "Shared object storage verified reachable",
+         "passed": bool(shared_storage_health.get("ok"))},
     ]
     return {
         "tenant_id": tenant_id, "ready": all(row["passed"] for row in checks),
