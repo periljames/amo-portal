@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text, bindparam
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from amodb.apps.audit import services as audit_services
 from amodb.apps.accounts import models as account_models
 from amodb.apps.procurement import service as procurement_service
@@ -53,7 +55,7 @@ def _tenant(db: Session, amo_code: str, user):
 
 
 def _require(user, allowed: set[str]):
-    if _role(user) not in allowed:
+    if not is_tenant_admin(user) and _role(user) not in allowed:
         raise HTTPException(403, "This decision requires the appointed department authority")
 
 
@@ -116,7 +118,7 @@ def _policy(db, amo, category):
 class PolicyWrite(BaseModel):
     questionnaire: list[dict[str, Any]] = Field(default_factory=list, max_length=80)
     required_checks: list[str] = Field(default_factory=lambda: list(BASE_CHECKS), min_length=1, max_length=50)
-    surveillance_days: int | None = Field(default=None,ge=30,le=3650)
+    surveillance_days: int = Field(default=365,ge=30,le=365)
     evaluation_template_id: str | None = Field(default=None,max_length=36)
     initial_audit_required: bool = False
     authority_required: bool = False
@@ -136,7 +138,7 @@ def policies(amo_code:str, db:Session=Depends(get_db),
         authority_required,safety_assessment_required,manual_references_json,updated_at
         FROM quality_provider_qualification_policies WHERE amo_id=:amo
         ORDER BY category""",amo=amo),
-        "default_annual_audit":False}
+        "default_annual_audit":True, "maximum_surveillance_days":365, "policy_reference":"MOPM 3.13"}
 
 
 @router.put("/policies/{category}")
@@ -640,7 +642,7 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
             actor_user_id=str(user.id))
     else:new_status="RETURNED"
     policy=row["policy_snapshot_json"]
-    interval=policy.get("surveillance_days")
+    interval=min(int(policy.get("surveillance_days") or 365),365)
     due=(date.today()+timedelta(days=int(interval))) if interval and new_status in {
         "APPROVED","CONDITIONALLY_APPROVED"} else None
     db.execute(text("""UPDATE quality_provider_qualification_cases
@@ -651,7 +653,7 @@ def decide(amo_code:str,case_id:str,payload:FinalDecision,db:Session=Depends(get
          "due":due,"amo":amo,"id":case_id})
     if due:
         db.execute(text("""UPDATE quality_external_provider_profiles
-            SET next_review_due_on=:due,updated_at=NOW()
+            SET last_reviewed_on=CURRENT_DATE,next_review_due_on=:due,updated_at=NOW()
             WHERE amo_id=:amo AND supplier_id=:supplier"""),
             {"due":due,"amo":amo,"supplier":row["supplier_id"]})
     _record(db,amo,row["supplier_id"],user,"QUALIFICATION_"+new_status,

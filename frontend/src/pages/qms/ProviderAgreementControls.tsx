@@ -1,6 +1,7 @@
 import React,{useEffect,useState} from "react";
 import {apiRequest} from "../../services/apiClient";
 import type {ProviderContract} from "../../services/qmsProviders";
+import TextItemList from "../../components/forms/TextItemList";
 
 type DmsRevision={id:string;code:string;title:string;revision_id:string;rev_number:string};
 type SignedFile={id:string;filename:string;sha256:string;status:string;quality_status:string|null};
@@ -17,7 +18,7 @@ export default function ProviderAgreementControls({amoCode,contract,onChanged}:{
   const [error,setError]=useState("");const [notice,setNotice]=useState("");
   const [agreement,setAgreement]=useState<Agreement|null>(null);
   const [dms,setDms]=useState<DmsRevision[]>([]);const [evidence,setEvidence]=useState<SignedFile[]>([]);
-  const [parties,setParties]=useState("");const [sites,setSites]=useState("");
+  const [parties,setParties]=useState<string[]>([]);const [sites,setSites]=useState<string[]>([]);
   const [manualRev,setManualRev]=useState("");const [signedId,setSignedId]=useState("");
   const [authority,setAuthority]=useState("");const [renewal,setRenewal]=useState("");
   const [noticeDays,setNoticeDays]=useState("");
@@ -32,8 +33,8 @@ export default function ProviderAgreementControls({amoCode,contract,onChanged}:{
     ]).then(([a,d,s])=>{
       if(!active)return;
       setAgreement(a);setDms(d.items);setEvidence(s.items);
-      setParties((a.counterparties_json||[]).join("\n"));
-      setSites((a.approved_sites_json||[]).join(", "));
+      setParties(a.counterparties_json||[]);
+      setSites(a.approved_sites_json||[]);
       const matched=d.items.find(x=>x.id===a.controlled_document_id &&
         (x.revision_id===a.controlled_document_revision||x.rev_number===a.controlled_document_revision));
       setManualRev(matched?.revision_id||"");
@@ -49,8 +50,8 @@ export default function ProviderAgreementControls({amoCode,contract,onChanged}:{
     if(!agreement)return;
     const chosen=dms.find(x=>x.revision_id===manualRev);
     if(!chosen){setError("Choose a current published DMS revision.");return;}
-    const counterparties=parties.split("\n").map(x=>x.trim()).filter(Boolean);
-    const approved_sites=sites.split(",").map(x=>x.trim()).filter(Boolean);
+    const counterparties=parties.map(x=>x.trim()).filter(Boolean);
+    const approved_sites=sites.map(x=>x.trim()).filter(Boolean);
     if(counterparties.length<2||!signedId){setError("Two counterparties and a signed evidence submission are required.");return;}
     setBusy(true);setError("");setNotice("");
     try{
@@ -75,10 +76,8 @@ export default function ProviderAgreementControls({amoCode,contract,onChanged}:{
     </button>
     {open&&<form className="qms-provider-form qms-provider-inline-form" onSubmit={e=>void save(e)}>
       {contract.status!=="DRAFT"&&<p>Executed agreement metadata is locked. Use a new amendment or renewal rather than editing the signed revision.</p>}
-      <label className="is-wide">Counterparties (one legal entity per line)
-        <textarea required value={parties} rows={3} onChange={e=>setParties(e.target.value)}/></label>
-      <label>Approved sites (comma separated)
-        <input value={sites} onChange={e=>setSites(e.target.value)}/></label>
+      <div className="is-wide"><TextItemList label="Counterparty legal entities" required value={parties} onChange={setParties} disabled={busy} /></div>
+      <TextItemList label="Approved sites" value={sites} onChange={setSites} disabled={busy} />
       <label className="is-wide">Signed agreement — current published DMS original
         <select required value={manualRev} onChange={e=>setManualRev(e.target.value)}>
           <option value="">Choose controlled revision</option>

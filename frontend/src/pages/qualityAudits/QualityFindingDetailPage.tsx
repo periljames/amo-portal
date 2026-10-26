@@ -39,20 +39,22 @@ const QualityFindingDetailPage: React.FC = () => {
   const car = primaryLinkedCar(linkedCars);
   const unauthorized = detailQuery.error instanceof ApiClientError
     && [401, 403].includes(detailQuery.error.status);
+  const hasRecord = Boolean(finding && audit && !detailQuery.isError && !invalidResponse);
 
   return (
     <QualityAuditsSectionLayout
       title={finding?.finding_ref || "Finding detail"}
       subtitle=""
+      recordDetail={hasRecord}
     >
       <div className="audit-workspace qa-finding-detail">
-        <button
+        {!hasRecord ? <button
           type="button"
           className="qa-finding-detail__back"
           onClick={() => navigate(`/maintenance/${amoCode}/quality/audits/register?tab=findings`)}
         >
           <ArrowLeft size={15} /> Findings
-        </button>
+        </button> : null}
 
         {detailQuery.isLoading ? (
           <div className="audit-panel qa-finding-detail__state"><InlineLoading label={"Loading finding…"}/></div>
@@ -86,7 +88,7 @@ const QualityFindingDetailPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <FindingCaseView finding={finding} car={car} amoCode={amoCode}/>
+            <FindingCaseView finding={finding} car={car} amoCode={amoCode} fullPage/>
           </>
         )}
       </div>

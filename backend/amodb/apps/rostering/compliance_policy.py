@@ -87,7 +87,7 @@ def assignment_is_protected_rest(
 def statutory_rule_is_non_overridable(code: str) -> bool:
     """Return True only for rules governed here as non-waivable hard limits."""
 
-    return str(code or "").upper() in {
+    return str(code or "").upper().startswith("MOPM_DUTY_") or str(code or "").upper() in {
         STATUTORY_TOTAL_HOURS_RULE,
         PROTECTED_REST_RULE,
         PROTECTED_REST_FINDING,
@@ -536,6 +536,8 @@ def install_validation_policy() -> None:
                 actual_by_assignment=actuals,
             )
         )
+        from .mopm_duty_policy import duty_findings
+        specs.extend(duty_findings(version, assignments, actual_by_assignment=actuals))
         return specs
 
     def governed_override_finding(db, *, finding, actor_user_id: str, payload):

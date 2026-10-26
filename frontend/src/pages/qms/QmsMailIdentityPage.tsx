@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { CheckCircle2, CircleAlert, ExternalLink, MailCheck, RefreshCw, Send, ShieldCheck } from "lucide-react";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
+import EmailAddressList from "../../components/forms/EmailAddressList";
+import { validEmailList } from "../../components/forms/emailAddresses";
 import { qmsMailIdentityApi, type QmsMailIdentity, type QmsMailIdentityUpdate, type QmsMailTestResult } from "../../services/qmsMailIdentity";
 import "./qmsMailIdentity.css";
 
@@ -60,6 +62,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
     settings?.can_manage && !loading && !busy && draft.from_name.trim().length >= 2
     && draft.reason.trim().length >= 8 && visibleFrom
     && customApproved && (senderChoice !== "CUSTOM" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.from_email))
+    && (replyChoice !== "CUSTOM" || validEmailList(draft.reply_to.split(/[,;\n]/)))
   );
 
   const save = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -105,9 +108,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
       <main className="qms-mail" aria-labelledby="qms-mail-title">
         <header className="qms-mail__header">
           <div>
-            <p className="qms-mail__eyebrow">Quality Management System / Administration</p>
             <h1 id="qms-mail-title">Notification mailing identity</h1>
-            <p>Set the sender used for audit notices and other tenant QMS notifications. Resend transport and domain approval remain under Venspera.</p>
           </div>
           <button type="button" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw size={16} /> Refresh</button>
         </header>
@@ -134,9 +135,9 @@ export default function QmsMailIdentityPage(): React.ReactElement {
 
             <div className="qms-mail__grid">
               <form className="qms-mail__card" onSubmit={(event) => void save(event)}>
-                <div className="qms-mail__card-heading"><MailCheck size={20} /><div><h2>Sending identity</h2><p>Each tenant uses its own identity without access to Venspera's API credentials.</p></div></div>
+                <div className="qms-mail__card-heading"><MailCheck size={20} /><h2>Sending identity</h2></div>
                 <label className="qms-mail__field"><span>Display name</span>
-                  <input value={draft.from_name} onChange={(e) => setDraft(v => ({ ...v, from_name: e.target.value }))} maxLength={150} disabled={!settings.can_manage || Boolean(busy)} required />
+                  <input value={draft.from_name} onChange={(e) => setDraft(v => ({ ...v, from_name: e.target.value }))} minLength={2} maxLength={150} disabled={!settings.can_manage || Boolean(busy)} required />
                 </label>
                 <fieldset className="qms-mail__field">
                   <legend>Sender address</legend>
@@ -162,11 +163,9 @@ export default function QmsMailIdentityPage(): React.ReactElement {
                     <span>Active Quality Manager and Quality Officers <small>Automatically follows staff changes in this tenant</small></span>
                   </label>
                   <label className="qms-mail__choice"><input type="radio" name="reply" checked={replyChoice === "CUSTOM"} onChange={() => setReplyChoice("CUSTOM")} disabled={!settings.can_manage || Boolean(busy)} />
-                    <span>Specified reply mailbox(es) <small>Use comma or semicolon to separate mailboxes</small></span>
+                    <span>Choose reply addresses <small>Add each mailbox separately</small></span>
                   </label>
-                  {replyChoice === "CUSTOM" && <label className="qms-mail__field"><span>Reply-To destinations</span>
-                    <textarea value={draft.reply_to} onChange={(e) => setDraft(v => ({ ...v, reply_to: e.target.value }))} rows={2} disabled={!settings.can_manage || Boolean(busy)} placeholder="quality@yourdomain.com" required />
-                  </label>}
+                  {replyChoice === "CUSTOM" && <EmailAddressList label="Reply-To destinations" value={draft.reply_to.split(/[,;\n]/)} onChange={addresses => setDraft(v => ({ ...v, reply_to: addresses.join(",") }))} disabled={!settings.can_manage || Boolean(busy)} />}
                 </fieldset>
                 <label className="qms-mail__choice"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft(v => ({ ...v, enabled: e.target.checked }))} disabled={!settings.can_manage || Boolean(busy)} />
                   <span>Enable tenant QMS email sending <small>Uncheck to block outbound tenant email instead of falling back to Venspera's sender.</small></span>

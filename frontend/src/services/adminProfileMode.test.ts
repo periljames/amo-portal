@@ -9,6 +9,7 @@ vi.mock("./apiClient", () => ({
 import { emitSessionEvent } from "./auth";
 import {
   clearAllCachedAdminProfileStates,
+  activateAdminProfile,
   fetchAdminProfileState,
   onAdminProfileChange,
   readCachedAdminProfileState,
@@ -88,6 +89,12 @@ describe("Admin Profile client lifecycle", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each([undefined, "UNTIL_MIDNIGHT", "TWENTY_FOUR_HOURS", "ONE_WEEK"] as const)("sends the selected activation period (%s)", async period => {
+    apiRequestMock.mockResolvedValue({ eligible: true, active: true });
+    await activateAdminProfile("tenant-a", period);
+    expect(apiRequestMock).toHaveBeenCalledWith(expect.stringContaining("/activate"), expect.objectContaining({ method: "POST", body: JSON.stringify({ period: period || "FOUR_HOURS" }) }));
   });
 
   it("publishes an inactive state for the same user when backend expiry is reached", () => {

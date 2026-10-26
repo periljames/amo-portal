@@ -19,6 +19,7 @@ export const qmsPageLoaders = {
   carReport: () => import("../pages/qms/QmsCarPerformanceReportPage"),
   providers: () => import("../pages/qms/QmsExternalProvidersPage"),
   providerAccess: () => import("../pages/externalProvider/ExternalProviderQualityPage"),
+  settings: () => import("../pages/qms/QmsSettingsPage"),
   register: () => import("../pages/qms/QmsRegisterPage"),
   planner: () => import("../pages/qms/planner/QmsPlannerLivePage"),
   setup: () => import("../features/qms/auditSession/AuditSetupWorkspace"),
@@ -51,6 +52,7 @@ export function qmsRouteLoaderKey(path: string): keyof typeof qmsPageLoaders | n
   if (/\/audits\/program(?:\/|$)/i.test(pathname)) return "programme";
   if (/\/suppliers(?:\/|$)/i.test(pathname)) return "providers";
   if (/\/external-accounts(?:\/|$)/i.test(pathname)) return "providerAccess";
+  if (/\/settings(?:\/|$)/i.test(pathname)) return "settings";
   if (/\/reports\/car-performance(?:\/|$)/i.test(pathname)) return "carReport";
   if (/\/evidence-vault(?:\/|$)/i.test(pathname)) return "register";
   if (/\/cars(?:\/|$)/i.test(pathname)) return "cars";

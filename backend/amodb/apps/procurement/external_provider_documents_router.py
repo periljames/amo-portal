@@ -31,6 +31,8 @@ from amodb import storage
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 from amodb.apps.accounts import models as accounts
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+from amodb.apps.quality.amo_compliance_policy import prepare_retention, tenant_retention_extensions, policy_catalogue
 from amodb.apps.procurement import external_auth_core as auth
 from amodb.apps.procurement import external_partner_router as partner
 from amodb.apps.procurement import service as procurement_service
@@ -245,7 +247,7 @@ def _governed_procurement_upload(db,user,kind,item):
 def _staff(db, amo_code, user, manage=False):
     role=str(getattr(user.role,"value",user.role))
     accepted={"QUALITY_MANAGER"} if manage else {"QUALITY_MANAGER","QUALITY_OFFICER","DOCUMENT_CONTROL_OFFICER"}
-    if role not in accepted:
+    if not is_tenant_admin(user) and role not in accepted:
         raise HTTPException(403,"Appointed Quality or Document Control authority required")
     amo=procurement_service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
     auth.context(db,amo,str(user.id))
@@ -270,15 +272,22 @@ class RequirementWrite(BaseModel):
     expected_version: int | None = Field(default=None,ge=1)
 
 
+@staff_documents_router.get("/retention-policy")
+def document_retention_policy(amo_code:str,db:Session=Depends(get_db),
+                             user=Depends(get_current_active_user)):
+    amo = _staff(db, amo_code, user)
+    return {**policy_catalogue(), "extensions": tenant_retention_extensions(db, amo)}
+
+
 @staff_documents_router.get("/permissions")
 def document_permissions(amo_code:str,db:Session=Depends(get_db),
                          user=Depends(get_current_active_user)):
     _staff(db,amo_code,user)
     from amodb.apps.doc_control.workspace_service import is_control_user
     role=str(getattr(user.role,"value",user.role))
-    return {"quality_manager":role=="QUALITY_MANAGER",
-            "quality_reviewer":role in {"QUALITY_MANAGER","QUALITY_OFFICER"},
-            "document_controller":is_control_user(user)}
+    return {"quality_manager":is_tenant_admin(user) or role=="QUALITY_MANAGER",
+            "quality_reviewer":is_tenant_admin(user) or role in {"QUALITY_MANAGER","QUALITY_OFFICER"},
+            "document_controller":is_tenant_admin(user) or is_control_user(user)}
 
 
 @staff_documents_router.get("/requirements")
@@ -994,7 +1003,7 @@ def review(amo_code:str,submission_id:str,payload:Review,db:Session=Depends(get_
     amo=_staff(db,amo_code,user)
     # Quality owns acceptance/rejection and the transition into QMS evidence.
     # Document Control may register a reviewed original but never decide Quality.
-    if str(getattr(user.role,"value",user.role)) not in {"QUALITY_MANAGER","QUALITY_OFFICER"}:
+    if not is_tenant_admin(user) and str(getattr(user.role,"value",user.role)) not in {"QUALITY_MANAGER","QUALITY_OFFICER"}:
         raise HTTPException(403,"Only appointed Quality staff may decide provider evidence intake")
     row=_one(db,"""SELECT s.*,p.supplier_id FROM external_partner_evidence_submissions s
       JOIN external_tenant_providers p ON p.id=s.tenant_provider_id AND p.amo_id=s.amo_id
@@ -1068,6 +1077,7 @@ class DmsRegistration(BaseModel):
     manual_id: str = Field(min_length=8,max_length=36)
     retention_class: str = Field(min_length=1,max_length=64)
     retention_until: datetime | None = None
+    retention_metadata: dict = Field(default_factory=dict)
     reason: str = Field(min_length=8,max_length=2000)
 
 
@@ -1117,7 +1127,7 @@ def register_dms_evidence(amo_code:str,submission_id:str,payload:DmsRegistration
             retained_hash=hashlib.file_digest(checked,"sha256").hexdigest()
         if retained_hash!=row["sha256"]:
             raise HTTPException(409,"Retained DMS original failed checksum verification")
-        until=payload.retention_until
+        until, retention_metadata=prepare_retention(payload.retention_class,payload.retention_metadata,payload.retention_until,extensions=tenant_retention_extensions(db,amo))
         retention_state="DUE" if until and until<=datetime.now(timezone.utc) else "ACTIVE"
         db.add(em.DocumentEvidenceAsset(
             id=asset_id,tenant_id=amo,manual_id=manual.id,revision_id=revision["id"],
@@ -1135,7 +1145,7 @@ def register_dms_evidence(amo_code:str,submission_id:str,payload:DmsRegistration
             source_label=row["filename"],retention_class=payload.retention_class.strip().upper(),
             retention_until=until,status=retention_state,legal_hold=False,
             created_by_user_id=str(user.id),
-            metadata_json={"provider_submission_id":submission_id,
+            metadata_json={**retention_metadata,"provider_submission_id":submission_id,
                            "source_sha256":row["sha256"],"reason":payload.reason}))
         db.flush()
         db.execute(text("""UPDATE external_partner_evidence_submissions

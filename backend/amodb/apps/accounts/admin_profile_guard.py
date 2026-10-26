@@ -84,11 +84,10 @@ def require_active_admin_profile(
         return current_user
     if not tenant_member(current_user):
         raise HTTPException(status_code=403, detail="A tenant identity is required for administration.")
-    if is_tenant_admin(current_user):
-        return current_user
     _auth_session_id(current_user)
     from types import SimpleNamespace
     if not active_admin_profile_session(db, current_user, SimpleNamespace(id=current_user.amo_id)):
         raise HTTPException(status_code=403, detail="Activate Admin profile before using tenant administration APIs.")
-    _mark_request_as_admin_profile(current_user)
+    if not is_standing_admin(current_user):
+        _mark_request_as_admin_profile(current_user)
     return current_user

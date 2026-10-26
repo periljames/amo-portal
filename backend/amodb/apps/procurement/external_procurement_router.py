@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
+
 from amodb.database import get_db
 from amodb.security import get_current_active_user, require_roles
 from . import models, schemas, service, supplier_quality_control
@@ -596,7 +598,7 @@ def history(tenant_slug:str,kind:str,entity_id:str,request:Request,db:Session=De
 
 def _staff(db,amo_code,user):
     from .router import PROCUREMENT_ROLES
-    if user.role not in PROCUREMENT_ROLES:
+    if not is_tenant_admin(user) and user.role not in PROCUREMENT_ROLES:
         raise HTTPException(403,"Appointed Procurement staff required")
     amo=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
     if db.get_bind().dialect.name=="postgresql":
@@ -703,7 +705,7 @@ def staff_decision(amo_code:str,kind:str,entity_id:str,payload:StaffDecision,
 
 def _technical_tenant(db,amo_code,user):
     from .router import TECHNICAL_APPROVAL_ROLES
-    if user.role not in TECHNICAL_APPROVAL_ROLES:
+    if not is_tenant_admin(user) and user.role not in TECHNICAL_APPROVAL_ROLES:
         raise HTTPException(403,"Appointed technical reviewer required")
     amo=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
     if db.get_bind().dialect.name=="postgresql":

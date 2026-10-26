@@ -10,6 +10,7 @@ import { isQmsLiveAuthority } from "./services/qmsCachePolicy";
 import QualityEnhancementsRouteGate from "./components/QMS/QualityEnhancementsRouteGate";
 import PortalAuxiliaryBoundary from "./components/feedback/PortalAuxiliaryBoundary";
 import { ToastProvider } from "./components/feedback/ToastProvider";
+import PortalUpdateNotice from "./components/feedback/PortalUpdateNotice";
 import { OfflineSyncIndicator } from "./components/offline/OfflineSyncIndicator";
 const MessagingHub = React.lazy(() => import("./components/messaging/MessagingHub").then((module) => ({ default: module.MessagingHub })));
 import { RealtimeProvider } from "./components/realtime/RealtimeProvider";
@@ -186,6 +187,7 @@ startPortalOfflineSync();
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ToastProvider>
+      <PortalUpdateNotice />
       <PersistQueryClientProvider
         client={queryClient}
         persistOptions={{

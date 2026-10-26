@@ -1,5 +1,7 @@
 import React,{useCallback,useEffect,useState} from "react";
 import {apiRequest} from "../../services/apiClient";
+import RetentionFields from "../../components/QMS/RetentionFields";
+import {emptyRetentionFacts,type AmoCompliancePolicy} from "../../services/amoCompliancePolicy";
 import {authHeaders} from "../../services/auth";
 import {getApiBaseUrl} from "../../services/config";
 import "./external-provider-portal.css";
@@ -74,20 +76,24 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
   const [canQualityReview,setCanQualityReview]=useState(false);
   const [retentionManual,setRetentionManual]=useState("");
   const [retentionClass,setRetentionClass]=useState("");
+  const [retentionPolicy,setRetentionPolicy]=useState<AmoCompliancePolicy|null>(null);
+  const [retentionFacts,setRetentionFacts]=useState(emptyRetentionFacts);
   const [retentionUntil,setRetentionUntil]=useState("");
   const [retentionReason,setRetentionReason]=useState("");
   const [history,setHistory]=useState<Record<string,{action:string;occurred_at:string;details_json:unknown;actor_user_id:string|null}[]>>({});
   const [historyOpen,setHistoryOpen]=useState("");
   const refresh=useCallback(async()=>{
-    const [policies,queue,docs,permissions]=await Promise.all([
+    const [policies,queue,docs,permissions,catalogue]=await Promise.all([
       apiRequest<{items:Requirement[]}>(`${path}/requirements`,{cacheTtlMs:0}),
       apiRequest<{items:Submission[]}>(`${path}/submissions?limit=25&offset=${offset}`,{cacheTtlMs:0}),
       apiRequest<{items:DmsOption[]}>(`${path}/dms-options?limit=50`,{cacheTtlMs:0}),
       apiRequest<{document_controller:boolean;quality_reviewer:boolean}>(`${path}/permissions`,{cacheTtlMs:0}),
+      apiRequest<AmoCompliancePolicy>(`${path}/retention-policy`,{cacheTtlMs:0}),
     ]);
     setRequirements(policies.items);setSubmissions(queue.items);setDms(docs.items);
     setCanRegisterDms(permissions.document_controller);
     setCanQualityReview(permissions.quality_reviewer);
+    setRetentionPolicy(catalogue);
   },[path,offset]);
   useEffect(()=>{void refresh().catch(e=>setError(errorText(e)));},[refresh]);
   function loadRequirement(r:Requirement){
@@ -161,6 +167,7 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
       await apiRequest(`${path}/submissions/${encodeURIComponent(row.id)}/register-dms`,{
         method:"POST",body:JSON.stringify({manual_id:retentionManual,
           retention_class:retentionClass.trim().toUpperCase(),
+          retention_metadata:{compliance_retention:retentionFacts},
           retention_until:retentionUntil?new Date(retentionUntil+"T23:59:59Z").toISOString():null,
           reason:retentionReason.trim()}),
       });
@@ -233,9 +240,8 @@ export default function ExternalProviderDocumentsReview({amoCode,manager}:{
         <option value="">Choose a published DMS manual</option>
         {dms.map(d=><option key={d.revision_id} value={d.id}>{d.code} · {d.title}</option>)}
       </select></label>
-      <label className="vendor-field">DMS retention class<input required maxLength={64} value={retentionClass}
-        onChange={e=>setRetentionClass(e.target.value)}/></label>
-      <label className="vendor-field">Retain until (leave blank only when policy specifies no end date)<input type="date"
+      <RetentionFields policy={retentionPolicy} primary={retentionClass} onPrimary={setRetentionClass} value={retentionFacts} onChange={setRetentionFacts} disabled={Boolean(busy)} />
+      <label className="vendor-field">Additional retention through (optional)<input type="date"
         value={retentionUntil} onChange={e=>setRetentionUntil(e.target.value)}/></label>
       <label className="vendor-field">Registration reason<textarea minLength={8} rows={2} value={retentionReason}
         onChange={e=>setRetentionReason(e.target.value)}/></label>

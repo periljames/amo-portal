@@ -9,6 +9,7 @@ import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
+import QmsFormFeedback from "./components/forms/QmsFormFeedback";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
 import PublicAuditAccessPage from "./pages/PublicAuditAccessPage";
 import PublicAuditVerificationPage from "./pages/PublicAuditVerificationPage";
@@ -110,6 +111,7 @@ const App: React.FC = () => {
   return (
     <>
       <GlobalLoadingBar />
+      {/^\/maintenance\/[^/]+\/(?:quality|qms)(?:\/|$)/i.test(location.pathname) && <QmsFormFeedback />}
       {!isExternalProviderSurface && <PortalSessionLifecycle />}
       <PortalErrorBoundary><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></PortalErrorBoundary>
     </>

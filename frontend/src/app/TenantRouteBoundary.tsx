@@ -1,5 +1,5 @@
 import { getFirstAccessibleModuleRoute } from "../utils/roleAccess";
-import { isTenantAdmin, userBelongsToTenant } from "../utils/tenantAccess";
+import { userBelongsToTenant } from "../utils/tenantAccess";
 import { userHasQmsRolePermission } from "./routeGuards";
 import React, { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
@@ -120,7 +120,6 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (currentUser.is_superuser || currentUser.role === "SUPERUSER") {
     return <Navigate to="/platform/control" replace state={{ blockedTenantPath: location.pathname }} />;
   }
-  const standingAdmin = isTenantAdmin(currentUser);
 
   const canonicalTenant = canonicalTenantSlug();
   if (!canonicalTenant) return <Navigate to="/login" replace />;
@@ -135,7 +134,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const allowed = normalAllowed;
   const home = getFirstAccessibleModuleRoute(canonicalTenant, currentUser, assigned);
-  if (!standingAdmin && !adminStateResolved) {
+  if (isAdminRoute && !adminStateResolved) {
     return (
       <div className="page-loading" role="status" aria-live="polite">
         <div className="page-loading__card">Confirming Admin profile…</div>
@@ -146,7 +145,7 @@ const TenantRouteBoundary: React.FC<{ children: React.ReactNode }> = ({ children
   if (routeParts.length === 2) return <Navigate to={home} replace />;
 
   if (isAdminRoute) {
-    if (!standingAdmin && (!adminState?.eligible || !adminState.active)) {
+    if (!adminState?.eligible || !adminState.active) {
       return <Navigate to={home} replace state={{ blockedAdminPath: location.pathname }} />;
     }
     return <>{children}</>;

@@ -62,6 +62,13 @@ function depth(item: PortalNavItem): number {
 }
 
 describe("portal route manifest", () => {
+  it.each([false, true])("keeps an AMO administrator inside QMS while using QMS (active=%s)", adminModeActive => {
+    const groups = buildPortalNavigation({ amoCode: "safarilink", user: user({ is_amo_admin: true }), contextDepartment: "quality", activeDepartment: "quality", adminModeActive });
+    const items = flattenPortalNavigation(groups);
+    expect(groups.map(group => group.id)).toEqual(["qms-app"]);
+    expect(items.some(item => item.id === "qms-settings")).toBe(true);
+    expect(items.some(item => item.adminOnly || item.path.includes("/admin/") || item.path.includes("/procurement"))).toBe(false);
+  });
   it("exposes provider access beside the Quality register only to authorized reviewers", () => {
     const navigation = (role: PortalUser["role"]) => flattenPortalNavigation(buildPortalNavigation({
       amoCode: "safarilink", user: user({ role }), contextDepartment: "quality", adminModeActive: false,
@@ -120,7 +127,7 @@ describe("portal route manifest", () => {
     expect(items.every((item) => item.path.startsWith("/maintenance/safarilink"))).toBe(true);
   });
 
-  it("keeps standing AMO administration active without delegated-profile activation", () => {
+  it("keeps administration out of the drawer until Admin View is activated", () => {
     const admin = user({
       role: "AMO_ADMIN",
       is_amo_admin: true,
@@ -139,7 +146,7 @@ describe("portal route manifest", () => {
       adminModeActive: true,
     }));
 
-    expect(normalMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
+    expect(normalMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(false);
     expect(elevatedMode.some((item) => item.id === "admin-users" && item.adminOnly)).toBe(true);
     expect(elevatedMode.some((item) => item.id === "department-planning")).toBe(true);
     expect(elevatedMode.some((item) => item.id === "department-quality")).toBe(true);
@@ -253,6 +260,14 @@ describe("portal route manifest", () => {
     const items = flattenPortalNavigation(buildPortalNavigation({ amoCode: "tenant-a", user: ordinary, contextDepartment: "maintenance", adminModeActive: false }));
     expect(items.some((item) => item.id === "training-competence")).toBe(false);
     expect(items.some((item) => item.id === "my-training")).toBe(true);
+  });
+
+  it("matches query workspaces only on their exact page and selected workspace", async () => {
+    const { isPortalPathActive } = await import("./portalRouteManifest");
+    const missions = { id: "missions", label: "Missions", path: "/maintenance/tenant-a/quality?workspace=missions" };
+    expect(isPortalPathActive("/maintenance/tenant-a/quality/settings/general", missions)).toBe(false);
+    expect(isPortalPathActive("/maintenance/tenant-a/quality", missions, "?workspace=people")).toBe(false);
+    expect(isPortalPathActive("/maintenance/tenant-a/quality", missions, "?workspace=missions")).toBe(true);
   });
 
   it("does not mark Quality Home active when a workspace query is open", async () => {

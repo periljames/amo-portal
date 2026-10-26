@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
+from amodb.apps.quality.amo_compliance_policy import assert_disposition_due, prepare_retention, tenant_retention_extensions, policy_catalogue
 
 from . import domain_models as dm
 from . import evidence_models as em
@@ -27,6 +28,50 @@ from .workspace_service import (
 
 
 router = APIRouter(prefix="/workspace", tags=["Document Control Retention"])
+
+
+@router.get("/t/{tenant_slug}/retention-policy")
+def retention_policy(tenant_slug: str, db: Session = Depends(get_db), current_user: account_models.User = Depends(get_current_active_user)):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    return {**policy_catalogue(), "extensions": tenant_retention_extensions(db, tenant.amo_id)}
+
+
+class RetentionFactsUpdate(BaseModel):
+    retention_class: str = Field(min_length=1, max_length=64)
+    metadata: dict = Field(default_factory=dict)
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+@router.patch("/t/{tenant_slug}/retention/{retention_id}/classification")
+def update_retention_classification(tenant_slug:str, retention_id:str, payload:RetentionFactsUpdate,
+    request:Request, db:Session=Depends(get_db), current_user:account_models.User=Depends(get_current_active_user)):
+    require_control_user(current_user)
+    tenant = resolve_tenant(db, tenant_slug, current_user)
+    row = _row(db, tenant_id=tenant.amo_id, retention_id=retention_id)
+    if row.status == "DISPOSED":
+        raise HTTPException(409, "Disposed evidence is immutable")
+    before = _payload(row)
+    from amodb.apps.quality.amo_compliance_policy import reclassification_metadata
+    combined = reclassification_metadata(row.retention_class, row.metadata_json, payload.metadata)
+    until, metadata = prepare_retention(payload.retention_class, combined,
+        extensions=tenant_retention_extensions(db, tenant.amo_id))
+    # Reclassification or a newly known event must not shorten an existing deadline.
+    from amodb.apps.quality.amo_compliance_policy import _instant
+    if until and row.retention_until:
+        until = max(until, _instant(row.retention_until))
+    row.retention_class = payload.retention_class
+    row.metadata_json = {**dict(row.metadata_json or {}), **metadata}
+    row.retention_until = until
+    row.status = "HOLD" if row.legal_hold else _due_status(until)
+    row.approved_by_user_id = None
+    row.approved_at = None
+    row.approver_user_id = None
+    row.updated_at = utcnow()
+    audit(db, tenant, request, "document.retention.classification_updated", "document_retention_disposition", row.id,
+        {"before":before,"after":_payload(row),"reason":payload.reason})
+    db.commit()
+    return _payload(row)
 
 
 class RetentionCreate(BaseModel):
@@ -101,6 +146,7 @@ def _row(db: Session, *, tenant_id: str, retention_id: str) -> rm.DocumentRetent
             rm.DocumentRetentionDisposition.tenant_id == tenant_id,
             rm.DocumentRetentionDisposition.id == retention_id,
         )
+        .with_for_update()
         .first()
     )
     if not row:
@@ -220,6 +266,7 @@ def create_retention(
                 "retention_id": existing.id,
             },
         )
+    until, metadata = prepare_retention(payload.retention_class, payload.metadata, payload.retention_until, extensions=tenant_retention_extensions(db, tenant.amo_id))
     row = rm.DocumentRetentionDisposition(
         tenant_id=tenant.amo_id,
         manual_id=manual.id,
@@ -228,9 +275,9 @@ def create_retention(
         source_id=source_id,
         source_label=source_label,
         retention_class=payload.retention_class.strip().upper(),
-        retention_until=payload.retention_until,
-        status=_due_status(payload.retention_until),
-        metadata_json=dict(payload.metadata or {}),
+        retention_until=until,
+        status=_due_status(until),
+        metadata_json=metadata,
         created_by_user_id=current_user.id,
     )
     db.add(row)
@@ -289,6 +336,7 @@ def request_disposition(
         raise HTTPException(status_code=409, detail="Disposition is blocked by legal hold")
     if row.status not in {"ACTIVE", "DUE", "REJECTED"}:
         raise HTTPException(status_code=409, detail=f"Disposition cannot be requested from {row.status}")
+    assert_disposition_due(row, extensions=tenant_retention_extensions(db, tenant.amo_id))
     now = utcnow()
     early = False
     if row.retention_until:
@@ -336,6 +384,7 @@ def decide_disposition(
     now = utcnow()
     row.justification = payload.justification.strip()
     if payload.decision == "APPROVE":
+        assert_disposition_due(row, extensions=tenant_retention_extensions(db, tenant.amo_id))
         row.status = "APPROVED"
         row.approved_by_user_id = current_user.id
         row.approved_at = now
@@ -365,6 +414,7 @@ def record_disposition(
         raise HTTPException(status_code=409, detail="Disposition must be independently approved before it can be recorded")
     if row.legal_hold:
         raise HTTPException(status_code=409, detail="Disposition is blocked by legal hold")
+    assert_disposition_due(row, extensions=tenant_retention_extensions(db, tenant.amo_id))
     evidence = validate_evidence_references(
         db,
         tenant_id=tenant.amo_id,

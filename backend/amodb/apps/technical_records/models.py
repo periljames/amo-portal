@@ -32,7 +32,7 @@ class TechnicalRecordSetting(Base):
     amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     utilisation_manual_only = Column(Boolean, nullable=False, default=False)
     ad_sb_use_hours_cycles = Column(Boolean, nullable=False, default=False)
-    record_retention_years = Column(Integer, nullable=False, default=5)
+    record_retention_years = Column(Integer, nullable=False, default=3)
     allow_manual_maintenance_records = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 

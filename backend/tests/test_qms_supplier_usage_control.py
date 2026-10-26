@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -24,7 +25,10 @@ def _provider_db() -> Session:
                 id TEXT PRIMARY KEY,
                 amo_id TEXT NOT NULL,
                 supplier_id INTEGER NOT NULL,
-                contract_required BOOLEAN NOT NULL
+                contract_required BOOLEAN NOT NULL,
+                review_interval_days INTEGER,
+                last_reviewed_on DATE,
+                next_review_due_on DATE
             )
         """))
         connection.execute(text("""
@@ -61,6 +65,8 @@ def _provider_db() -> Session:
                 VALUES ('profile-1', 'amo-1', 7, 1)
             """)
         )
+        connection.execute(text("UPDATE quality_external_provider_profiles SET review_interval_days=365,last_reviewed_on=:reviewed"),
+            {"reviewed":date.today()})
     return Session(engine)
 
 
@@ -85,7 +91,7 @@ def _stub_base_supplier_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         supplier_quality_control.service,
         "assert_supplier_eligible",
-        lambda *args, **kwargs: object(),
+        lambda *args, **kwargs: SimpleNamespace(id=7,approved_at=date.today()),
     )
 
 

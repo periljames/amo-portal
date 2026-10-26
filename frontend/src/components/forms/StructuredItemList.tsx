@@ -1,0 +1,9 @@
+import { Plus, X } from "lucide-react";
+type Row = Record<string, unknown>;
+type Field = { key: string; label: string; options?: string[]; checkbox?: boolean };
+export default function StructuredItemList({ label, value, onChange, fields, create, disabled = false }: { label: string; value: Row[]; onChange: (rows: Row[]) => void; fields: Field[]; create: () => Row; disabled?: boolean }) {
+  return <fieldset className="qms-structured-list"><legend>{label}</legend>{value.map((row, index) => <section key={index}>
+    {fields.map(field => <label key={field.key}><span>{field.label}</span>{field.checkbox ? <input type="checkbox" checked={Boolean(row[field.key])} disabled={disabled} onChange={event => onChange(value.map((item, position) => position === index ? { ...item, [field.key]: event.target.checked } : item))} /> : field.options ? <select aria-label={`${label} ${index + 1} ${field.label}`} value={String(row[field.key] || field.options[0])} disabled={disabled} onChange={event => onChange(value.map((item, position) => position === index ? { ...item, [field.key]: event.target.value } : item))}>{field.options.map(option => <option key={option} value={option}>{option.replaceAll("_", " ")}</option>)}</select> : <input aria-label={`${label} ${index + 1} ${field.label}`} required maxLength={1000} value={String(row[field.key] || "")} disabled={disabled} onChange={event => onChange(value.map((item, position) => position === index ? { ...item, [field.key]: event.target.value } : item))} />}</label>)}
+    <button type="button" aria-label={`Remove ${label.toLowerCase()} ${index + 1}`} disabled={disabled} onClick={() => onChange(value.filter((_, position) => position !== index))}><X size={15} /> Remove</button>
+  </section>)}<button type="button" disabled={disabled || value.length >= 100} onClick={() => onChange([...value, create()])}><Plus size={15} /> Add {label.toLowerCase()}</button></fieldset>;
+}

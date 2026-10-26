@@ -42,6 +42,23 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("confirms a user-requested reload only after refreshing canonical HTML", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("new release", { headers: { "Content-Type": "text/html" } })));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("new release");
+    expect(postMessage).toHaveBeenCalledWith({ ok: true });
+  });
+  it("does not replace saved HTML with a gateway error during an update", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("Bad gateway", { status: 502 })));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("saved release")]]));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(postMessage).toHaveBeenCalledWith({ ok: false });
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("saved release");
+  });
   it("serves content-addressed chunks without re-downloading them on a weak link", async () => {
     const fetch = vi.fn(() => new Promise<Response>(() => {}));
     const { context } = worker(fetch);
@@ -168,6 +185,15 @@ describe("QMS service-worker caching", () => {
     stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("old shell")]]));
     const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })", { ...context, waitUntil }) as Response;
     expect(await response.text()).toBe("current shell");
+  });
+  it("uses the updated root shell rather than an older route warmup when offline", async () => {
+    const { context, stores, waitUntil } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([
+      ["/", new Response("current release")],
+      ["/maintenance/t/quality/settings/general", new Response("previous release")],
+    ]));
+    const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality/settings/general', null, { waitUntil })", { ...context, waitUntil }) as Response;
+    expect(await response.text()).toBe("current release");
   });
   it("returns the cached shell without waiting for a slow network refresh", async () => {
     vi.useFakeTimers();

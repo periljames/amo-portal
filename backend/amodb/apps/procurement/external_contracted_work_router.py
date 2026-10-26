@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,6 +16,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import bindparam, text, inspect
 from sqlalchemy.orm import Session
+
+from amodb.apps.accounts.tenant_authority import is_tenant_admin
 
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -70,7 +73,7 @@ def _role(user):
 
 def _staff(db,amo_code,user):
     amo=service.resolve_tenant_amo_id(db,amo_code=amo_code,current_user=user)
-    if _role(user) not in set(MANAGERS.values())|QUALITY|STORES|{"QUALITY_OFFICER","DOCUMENT_CONTROL_OFFICER"}:
+    if not is_tenant_admin(user) and _role(user) not in set(MANAGERS.values())|QUALITY|STORES|{"QUALITY_OFFICER","DOCUMENT_CONTROL_OFFICER"}:
         raise HTTPException(403,"An appointed maintenance, Quality, Stores or document-control role is required")
     if db.get_bind().dialect.name=="postgresql":
         db.execute(text("SELECT set_config('app.tenant_id',:amo,true)"),{"amo":amo})
@@ -151,6 +154,13 @@ def _technical_requirements(work):
         if not str(work.get(key) or "").strip():errors.append(key)
     if not work.get("inspections_json"):errors.append("required inspection/test criteria")
     req=work["requirements_json"] or {}
+    if req.get("complete_type_certificated_product") is True:
+        raise HTTPException(409, "MOPM 2.23 and AMO Regulation 31(2) exclude contracting a complete type-certificated product.")
+    if req.get("defined_function_only") is not True:
+        errors.append("confirmation that only a defined maintenance function is contracted")
+    for key in ("own_approved_scope_reference", "authority_access_reference"):
+        if not str(req.get(key) or "").strip():
+            errors.append(key)
     if req.get("foreign") and not (req.get("state_of_registry") and req.get("foreign_approval_reference")
         and req.get("operator_requirements") and req.get("release_wording")):
         errors.append("State-of-Registry, operator, foreign approval and release evidence")
@@ -427,6 +437,35 @@ class InspectionDecision(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class MopmVerification(BaseModel):
+    expected_version: int = Field(ge=1)
+    own_approved_scope_reference: str = Field(min_length=6, max_length=1000)
+    authority_access_reference: str = Field(min_length=6, max_length=1000)
+    defined_function_only: Literal[True]
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+@staff_router.put("/{work_id}/mopm-verification")
+def record_mopm_verification(amo_code:str, work_id:str, payload:MopmVerification,
+                             db:Session=Depends(get_db),user=Depends(get_current_active_user)):
+    amo = _staff(db, amo_code, user)
+    work = _work(db, amo, work_id, lock=True)
+    if not is_tenant_admin(user, amo) and _role(user) != MANAGERS[work["work_type"]]:
+        raise HTTPException(403, "Responsible Maintenance Manager verification required")
+    if work["version"] != payload.expected_version or work["status"] in {"CLOSED", "CANCELLED"}:
+        raise HTTPException(409, "Refresh this open work order before recording verification")
+    if (work["requirements_json"] or {}).get("complete_type_certificated_product") is True:
+        raise HTTPException(409, "Complete type-certificated product contracting is excluded by the MOPM")
+    fields = payload.model_dump(exclude={"expected_version", "reason"})
+    requirements = {**dict(work["requirements_json"] or {}), **fields}
+    db.execute(text("""UPDATE external_contracted_work SET requirements_json=CAST(:requirements AS JSON),
+        version=version+1,updated_at=NOW() WHERE amo_id=:amo AND id=:id AND version=:version"""),
+        {"amo":amo,"id":work_id,"version":payload.expected_version,"requirements":json.dumps(requirements)})
+    _event(db,work,"MOPM_SCOPE_ACCESS_VERIFIED",payload.reason,staff=str(user.id),details=fields)
+    db.commit()
+    return {"id":work_id,"version":payload.expected_version+1}
+
+
 class ExpectedWorkDates(BaseModel):
     expected_version: int = Field(ge=1)
     expected_completion_at: str | None = None
@@ -450,7 +489,7 @@ def revise_work_schedule(amo_code:str,work_id:str,payload:ExpectedWorkDates,
     """Only responsible Maintenance Manager may accept an ETA amendment."""
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id,lock=True)
-    if _role(user)!=MANAGERS[work["work_type"]]:
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[work["work_type"]]:
         raise HTTPException(403,"Responsible Maintenance Manager schedule control required")
     prior=_one(db,"""SELECT id,action,actor_user_id FROM external_contracted_work_events
        WHERE amo_id=:amo AND work_id=:work AND idempotency_key=:key""",
@@ -534,7 +573,7 @@ def assignable_grants(amo_code:str,work_id:str,db:Session=Depends(get_db),
                       user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id)
-    if _role(user)!=MANAGERS[work["work_type"]]:
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[work["work_type"]]:
         raise HTTPException(403,"Responsible Maintenance Manager required")
     return {"items":_all(db,"""SELECT g.id,g.role_code,g.capabilities_json,g.object_scope_json,
         i.email FROM external_tenant_grants g
@@ -549,7 +588,7 @@ def assignable_grants(amo_code:str,work_id:str,db:Session=Depends(get_db),
 def create_work(amo_code:str,payload:NewWork,db:Session=Depends(get_db),
                 user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
-    if _role(user)!=MANAGERS[payload.work_type]:
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[payload.work_type]:
         raise HTTPException(403,"The appointed Maintenance Manager for this work type must initiate contracted work")
     coordinator=_one(db,"""SELECT id,CAST(role AS TEXT) AS role FROM users
         WHERE id=:id AND amo_id=:amo AND is_active=TRUE""",
@@ -614,12 +653,12 @@ def staff_detail(amo_code:str,work_id:str,db:Session=Depends(get_db),user=Depend
     allowed=[]
     for action in NEXT.get(work["status"],{}):
         role=_role(user)
-        if action in QUALITY_ACTIONS and role in QUALITY:allowed.append(action)
-        elif action in STORES_ACTIONS and role in STORES:allowed.append(action)
-        elif action in MANAGER_ACTIONS and role==MANAGERS[work["work_type"]]:
+        if action in QUALITY_ACTIONS and (is_tenant_admin(user) or role in QUALITY):allowed.append(action)
+        elif action in STORES_ACTIONS and (is_tenant_admin(user) or role in STORES):allowed.append(action)
+        elif action in MANAGER_ACTIONS and (is_tenant_admin(user) or role==MANAGERS[work["work_type"]]):
             allowed.append(action)
     return {**_details(db,work),"allowed_actions":allowed,
-            "can_review_inspections":_role(user)==MANAGERS[work["work_type"]]}
+            "can_review_inspections":is_tenant_admin(user) or _role(user)==MANAGERS[work["work_type"]]}
 
 
 def _transition(db,work,payload,*,user=None,identity=None):
@@ -647,11 +686,11 @@ def _transition(db,work,payload,*,user=None,identity=None):
         if action not in PROVIDER_ACTIONS:
             raise HTTPException(403,"Contractor cannot authorize technical, Quality or custody decisions")
     elif action in QUALITY_ACTIONS:
-        if role not in QUALITY:raise HTTPException(403,"Appointed Quality Manager decision required")
+        if not is_tenant_admin(user, work["amo_id"]) and role not in QUALITY:raise HTTPException(403,"Appointed Quality Manager decision required")
     elif action in STORES_ACTIONS:
-        if role not in STORES:raise HTTPException(403,"Internal Stores or Quality Inspector receipt required")
+        if not is_tenant_admin(user, work["amo_id"]) and role not in STORES:raise HTTPException(403,"Internal Stores or Quality Inspector receipt required")
     elif action in MANAGER_ACTIONS:
-        if role!=MANAGERS[work["work_type"]]:
+        if not is_tenant_admin(user, work["amo_id"]) and role!=MANAGERS[work["work_type"]]:
             raise HTTPException(403,"Appointed responsible Maintenance Manager decision required")
     else:
         raise HTTPException(403,"Unauthorized transition")
@@ -924,7 +963,7 @@ def decide_additional(amo_code:str,work_id:str,request_id:str,payload:Additional
                       db:Session=Depends(get_db),user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id,lock=True)
-    if _role(user)!=MANAGERS[work["work_type"]]:raise HTTPException(403,"Responsible Maintenance Manager approval required")
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[work["work_type"]]:raise HTTPException(403,"Responsible Maintenance Manager approval required")
     if work["status"]!="ADDITIONAL_WORK_REQUESTED":
         raise HTTPException(409,"Additional work is not awaiting a technical decision")
     variation=_one(db,"""SELECT * FROM external_contracted_additional_work
@@ -972,7 +1011,7 @@ def decide_additional(amo_code:str,work_id:str,request_id:str,payload:Additional
 def register_custody(amo_code:str,work_id:str,payload:CustodyNew,db:Session=Depends(get_db),
                      user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
-    if _role(user) not in STORES:raise HTTPException(403,"Stores custody registration required")
+    if not is_tenant_admin(user) and _role(user) not in STORES:raise HTTPException(403,"Stores custody registration required")
     work=_work(db,amo,work_id,lock=True)
     if work["status"] in {"CLOSED","CANCELLED"}:raise HTTPException(409,"Work is closed")
     item_id=str(uuid4())
@@ -993,7 +1032,7 @@ def update_custody(amo_code:str,work_id:str,item_id:str,payload:CustodyUpdate,
                    db:Session=Depends(get_db),user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id,lock=True)
-    if _role(user) not in STORES:raise HTTPException(403,"Stores custody decision required")
+    if not is_tenant_admin(user) and _role(user) not in STORES:raise HTTPException(403,"Stores custody decision required")
     item=_one(db,"""SELECT state FROM external_contracted_custody
        WHERE amo_id=:amo AND work_id=:work AND id=:id FOR UPDATE""",amo=amo,work=work_id,id=item_id)
     if not item:raise HTTPException(404,"Custody record unavailable")
@@ -1021,7 +1060,7 @@ def review_inspection_criterion(amo_code:str,work_id:str,criterion_index:int,
                                 user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id,lock=True)
-    if _role(user)!=MANAGERS[work["work_type"]]:
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[work["work_type"]]:
         raise HTTPException(403,"The responsible Maintenance Manager must review technical inspection evidence")
     if work["version"]!=payload.expected_version:
         raise HTTPException(409,"Work changed; reload the current inspection evidence")
@@ -1067,7 +1106,7 @@ def review_inspection_criterion(amo_code:str,work_id:str,criterion_index:int,
 def attach_verified_evidence(amo_code:str,work_id:str,payload:LinkEvidence,db:Session=Depends(get_db),
                              user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
-    if _role(user) not in {"DOCUMENT_CONTROL_OFFICER","QUALITY_MANAGER","QUALITY_OFFICER",
+    if not is_tenant_admin(user) and _role(user) not in {"DOCUMENT_CONTROL_OFFICER","QUALITY_MANAGER","QUALITY_OFFICER",
                            *MANAGERS.values()}:
         raise HTTPException(403,"Governed document review role required")
     if payload.category not in EVIDENCE_CATEGORIES:raise HTTPException(422,"Invalid maintenance evidence category")
@@ -1107,7 +1146,7 @@ def assign_partner_member(amo_code:str,work_id:str,grant_id:str,db:Session=Depen
                           user=Depends(get_current_active_user)):
     amo=_staff(db,amo_code,user)
     work=_work(db,amo,work_id,lock=True)
-    if _role(user)!=MANAGERS[work["work_type"]]:
+    if not is_tenant_admin(user) and _role(user)!=MANAGERS[work["work_type"]]:
         raise HTTPException(403,"Responsible Maintenance Manager must assign a contractor representative")
     grant=_one(db,"""SELECT g.id,g.object_scope_json,g.capabilities_json
         FROM external_tenant_grants g JOIN external_tenant_providers p ON p.amo_id=g.amo_id AND p.id=g.tenant_provider_id

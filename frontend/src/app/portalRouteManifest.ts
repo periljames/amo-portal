@@ -8,7 +8,9 @@ import {
   type DepartmentId,
 } from "../utils/departmentAccess";
 import { canViewFeature, type ModuleFeature } from "../utils/roleAccess";
-import { qmsNavigationItems, type QmsModuleRoute } from "../pages/qms/routes/qmsRouteRegistry";
+import { qmsNavigationItems, qmsModulePath, type QmsModuleRoute } from "../pages/qms/routes/qmsRouteRegistry";
+import { qmsPeopleWorkspacePath, qmsWorkspaceEntryPath } from "../pages/qms/routes/qmsWorkspaceRegistry";
+import { qmsViewLabel } from "../pages/qms/qmsWorkspaceCopy";
 import { userHasQmsRolePermission, userHasTrainingRolePermission } from "./routeGuards";
 
 export type PortalNavIcon =
@@ -156,21 +158,27 @@ function featureSections(
   });
 }
 
-function qualitySections(amoCode: string, user: PortalUser | null): PortalNavItem[] {
+function qualitySections(amoCode: string, user: PortalUser | null, includeViews = false): PortalNavItem[] {
   const labels: Record<QmsModuleRoute["section"], string> = {
-    command: "Command",
+    command: "Work",
     assurance: "Assurance",
-    control: "Control",
-    reporting: "Reporting",
-    administration: "Administration",
+    control: "Controls",
+    reporting: "Reports",
+    administration: "Settings & email",
   };
   const groups = new Map<QmsModuleRoute["section"], PortalNavItem[]>();
   for (const route of qmsNavigationItems(amoCode)) {
     if (!userHasQmsRolePermission(user, route.permission)) continue;
     const children = groups.get(route.section) ?? [];
-    children.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path });
+    children.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path,
+      children: includeViews && route.validViews.length > 1 ? route.validViews.map(view => ({ id: `qms-${route.id}-${view}`, label: qmsViewLabel(view), path: qmsModulePath(amoCode, route.id, view), exact: true })) : undefined,
+    });
     groups.set(route.section, children);
   }
+  const work = groups.get("command") ?? [];
+  if (userHasQmsRolePermission(user, "qms.change.view")) work.push({ id: "qms-missions", label: "Missions", path: qmsWorkspaceEntryPath(amoCode, "missions") });
+  if (userHasQmsRolePermission(user, "qms.people.view")) work.push({ id: "qms-people", label: "People & authorizations", path: qmsPeopleWorkspacePath(amoCode), children: includeViews ? (["overview", "people", "cases", "reviews", "administration"] as const).map(tab => ({ id: `qms-people-${tab}`, label: qmsViewLabel(tab), path: qmsPeopleWorkspacePath(amoCode, { tab }), exact: true })) : undefined });
+  if (work.length) groups.set("command", work);
   return Array.from(groups.entries()).map(([section, children]) => ({
     id: `qms-${section}`,
     label: labels[section],
@@ -374,8 +382,14 @@ export function buildPortalNavigation(context: PortalNavigationContext): PortalN
   const { amoCode, user, contextDepartment, adminModeActive = false } = context;
   if (!user || !user.amo_id || !user.is_active || user.is_superuser || user.role === "SUPERUSER") return [];
   if ((user.amo_code || user.amo_slug) && !userBelongsToTenant(user, amoCode)) return [];
-  const standingAdmin = isTenantAdmin(user);
-  const administrationActive = adminModeActive || standingAdmin;
+  const administrationActive = adminModeActive;
+  if (context.activeDepartment === "quality") {
+    const qualityBase = `${tenantBase(amoCode)}/quality`;
+    return [{ id: "qms-app", label: "QMS App", items: [
+      { id: "home", label: "Overview", icon: "quality", path: qualityBase, exact: true },
+      ...qualitySections(amoCode, user, true),
+    ] }];
+  }
   const operationalUser = getOperationalAccessUser(user);
   // Tenant administration includes every tenant workspace.
   const effectiveUser = operationalUser;
@@ -431,6 +445,10 @@ export function isPortalPathActive(
   const current = pathname.replace(/\/$/, "") || "/";
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const workspace = (params.get("workspace") || "").trim().toLowerCase();
+  const targetParams = new URLSearchParams(item.path.split("?")[1] || "");
+  if (targetParams.size) {
+    return current === path && [...targetParams].every(([key, value]) => params.get(key) === value);
+  }
 
   // Query workspaces (People / Missions / Intelligence) share the Quality pathname with
   // Control Room Home — exact Home must not steal aria-current while a workspace is open.

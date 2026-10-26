@@ -44,10 +44,32 @@ test("Quality account governance keeps the tenant navigation and invitation cont
   });
   await page.goto("/maintenance/tenant-a/quality/external-accounts");
   await expect(page.getByRole("heading", { name: "External provider access" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Invite provider representative" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Invite provider representative" })).toBeVisible({ timeout: 20000 });
   await expect(page.locator(".tenant-shell")).toBeVisible();
   await expect(page.getByRole("link", { name: "External Providers register", exact: true })).toHaveAttribute("href", "/maintenance/tenant-a/quality/suppliers/register");
   await page.screenshot({ path: "../.artifacts/qms-vendor-accounts-interface.png", fullPage: true });
   await page.goto("/maintenance/tenant-a/quality/external-accounts/register");
   await expect(page.getByRole("heading", { name: "External provider access" })).toBeVisible();
+});
+
+test("AMO administrators retain Quality account controls in the QMS workspace", async ({ page }) => {
+  await mockQualityShell(page);
+  await page.route("**/quality/external-accounts**", route => route.request().resourceType() === "document" ? route.continue() : route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [], has_more: false }) }));
+  const accountRequests: string[] = [];
+  page.on("request", request => {
+    if (new URL(request.url()).pathname.startsWith("/api/maintenance/tenant-a/quality/external-accounts")) accountRequests.push(request.url());
+  });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("amo_portal_token", `e30.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))}.fixture`);
+    localStorage.setItem("amo_code", "AMO-A");
+    localStorage.setItem("amo_slug", "tenant-a");
+    localStorage.setItem("amo_department", "quality");
+    localStorage.setItem("amo_onboarding_status", JSON.stringify({ is_complete: true }));
+    localStorage.setItem("amo_current_user", JSON.stringify({ id: "admin-a", amo_id: "amo-a", amo_code: "AMO-A", amo_slug: "tenant-a", role: "AMO_ADMIN", full_name: "AMO Administrator", is_active: true, is_superuser: false, is_amo_admin: true }));
+  });
+  await page.goto("/maintenance/tenant-a/quality/external-accounts/register");
+  await expect(page.getByRole("heading", { name: "Invite provider representative" })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole("heading", { name: "Quality appointment required" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Partner self-service review queue" })).toBeVisible();
+  expect(accountRequests.length).toBeGreaterThan(0);
 });

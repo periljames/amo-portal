@@ -8,6 +8,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from . import models, service
+from amodb.apps.quality.provider_review_policy import review_assessment
 
 
 _PROVIDER_PROFILE_TABLE = "quality_external_provider_profiles"
@@ -186,6 +187,7 @@ def assert_supplier_usage_allowed(
         override_reference=override_reference,
         override_reason=override_reason,
     )
+    _assert_provider_review_current(db, amo_id=amo_id, supplier=supplier)
     assert_provider_restrictions_allowed(
         db, amo_id=amo_id, supplier_id=supplier_id, categories=categories,
         site_code=site_code, product_family=product_family,
@@ -199,6 +201,29 @@ def assert_supplier_usage_allowed(
         allow_controlled_override=allow_controlled_override,
     )
     return supplier
+
+
+def _assert_provider_review_current(db: Session, *, amo_id: str, supplier: models.ProcurementSupplier) -> None:
+    """MOPM 3.13 review currency is checked when a supplier is actually used.
+
+    Existing longer profile intervals cannot extend the annual default. An
+    earlier recorded deadline or a shorter risk interval remains controlling.
+    Commercial overrides do not change Quality review currency.
+    """
+    if not inspect(db.connection()).has_table(_PROVIDER_PROFILE_TABLE):
+        raise HTTPException(503, "The Quality review register is unavailable; supplier use cannot be verified.")
+    _set_provider_tenant_context(db, amo_id=amo_id)
+    profile = db.execute(text("""SELECT review_interval_days,last_reviewed_on,next_review_due_on
+        FROM quality_external_provider_profiles
+        WHERE amo_id=:amo AND supplier_id=:supplier LIMIT 1"""),
+        {"amo":str(amo_id),"supplier":supplier.id}).mappings().first()
+    assessment = review_assessment(approved_at=getattr(supplier,"approved_at",None),**dict(profile or {}))
+    if assessment["code"] == "PROVIDER_REVIEW_DATE_UNCONFIRMED":
+        raise HTTPException(409, {"code":"PROVIDER_REVIEW_DATE_UNCONFIRMED",
+            "message":"Quality must confirm a completed qualification or review before this supplier may be used."})
+    if not assessment["current"]:
+        raise HTTPException(409, {"code":"PROVIDER_REVIEW_OVERDUE","review_due_on":assessment["due_on"].isoformat(),
+            "message":"MOPM 3.13 provider review is due. Quality must complete the review before further supplier use."})
 
 
 def assert_quote_award_allowed(db: Session, *, amo_id: str, quote_id: int) -> None:

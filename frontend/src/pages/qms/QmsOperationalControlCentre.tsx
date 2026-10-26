@@ -14,6 +14,7 @@ import {
 import { Link } from "react-router-dom";
 
 import { getCachedUser } from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import { getQmsOperationalDashboard } from "../../services/qmsDashboard";
 import QmsActionQueue from "./components/QmsActionQueue";
 import QmsDiagnosticsDrawer from "./components/QmsDiagnosticsDrawer";
@@ -36,7 +37,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
   const routes = useMemo(() => buildQmsOverviewRoutes(amoCode), [amoCode]);
   const currentUser = getCachedUser();
   const diagnosticsAuthorized = Boolean(
-    currentUser?.role === "QUALITY_MANAGER"
+    isTenantAdmin(currentUser) || currentUser?.role === "QUALITY_MANAGER"
     || currentUser?.role === "QUALITY_OFFICER"
     || currentUser?.role === "QUALITY_INSPECTOR",
   );
@@ -73,7 +74,6 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
         <div>
           <span className="qms-assurance-room__eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Quality assurance</span>
           <h1>Control Room</h1>
-          <p>Current Quality work, exceptions and upcoming obligations.</p>
         </div>
         <div className="qms-assurance-room__header-actions">
           <span className={`qms-assurance-room__source qms-source--${sourceStatus}`}>

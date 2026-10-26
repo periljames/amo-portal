@@ -1211,7 +1211,7 @@ export const TechnicalRecordsSettingsPage: React.FC = () => {
               </label>
               <label className="technical-records-number-field">
                 <span>Record retention (years)</span>
-                <input className="input" type="number" min={1} max={25} disabled={!editable} value={settings.record_retention_years ?? 5} onChange={(e) => setSettings((prev: any) => ({ ...prev, record_retention_years: Number(e.target.value || 5) }))} />
+                <input className="input" type="number" min={3} max={100} disabled={!editable} value={settings.record_retention_years ?? 3} onChange={(e) => setSettings((prev: any) => ({ ...prev, record_retention_years: Number(e.target.value || 3) }))} />
               </label>
             </div>
             {message ? <div className="technical-records-messages"><div>{message}</div></div> : null}

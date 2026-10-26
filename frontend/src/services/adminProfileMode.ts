@@ -267,10 +267,14 @@ export async function fetchAdminProfileState(amoCode: string): Promise<AdminProf
   return cacheState(amoCode, requester, state);
 }
 
-export async function activateAdminProfile(amoCode: string): Promise<AdminProfileState> {
+export type AdminViewPeriod = "FOUR_HOURS" | "UNTIL_MIDNIGHT" | "TWENTY_FOUR_HOURS" | "ONE_WEEK";
+
+export async function activateAdminProfile(amoCode: string, period: AdminViewPeriod = "FOUR_HOURS"): Promise<AdminProfileState> {
   const requester = captureRequester();
   const state = await apiRequest<AdminProfileSessionResponse>(apiPath(amoCode, "activate"), {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ period }),
     timeoutMs: 10_000,
     cacheTtlMs: 0,
   });

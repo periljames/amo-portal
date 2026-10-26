@@ -58,7 +58,6 @@ export default function ExternalPartnerQualityReview({amoCode,manager}:{
   }
   return <section className="vendor-card">
     <h2>Partner self-service review queue</h2>
-    <p>Supplier master changes, certificates and contracts are never approved automatically by receiving a portal request.</p>
     {error&&<p role="alert" className="vendor-error">{error}</p>}
     {notice&&<p role="status" className="vendor-success">{notice}</p>}
     {manager&&<label className="vendor-field"><span>Review rationale for selected decision</span>

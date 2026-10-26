@@ -46,6 +46,10 @@ class RetentionPolicyCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_duration(self):
+        if not self.review_before_disposition or not self.legal_hold_supported:
+            raise ValueError("MOPM retention requires disposition review and preservation holds.")
+        if not self.indefinite and self.duration_days is not None and self.duration_days < 1827:
+            raise ValueError("MOPM 3.3 requires at least five calendar years; use at least 1827 days or indefinite retention.")
         if self.indefinite and self.duration_days is not None:
             raise ValueError("Indefinite retention must not also define duration_days.")
         if not self.indefinite and self.duration_days is None:
@@ -72,6 +76,25 @@ class DispositionExecute(BaseModel):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _mopm_archive_due(db, manifest, amo_id):
+    from .amo_compliance_policy import _anniversary, _instant, tenant_retention_extensions
+    start = _instant(manifest.retention_start_at)
+    if not start or not manifest.retention_due_at:
+        return None
+    years = tenant_retention_extensions(db, amo_id).get("extensions_years", {}).get("QMS_AUDIT_RECORDS", 5)
+    return max(_anniversary(start, years), _instant(manifest.retention_due_at))
+
+
+def _assert_mopm_archive_due(db, *, manifest, policy, amo_id, audit_id):
+    due = _mopm_archive_due(db, manifest, amo_id)
+    if not due or policy.indefinite or policy.disposition_mode == "NO_DISPOSITION":
+        raise HTTPException(409, "Retain this audit archive until its governing retention requirements are confirmed.")
+    if due > _utcnow():
+        raise HTTPException(409, "The MOPM audit retention period has not expired.")
+    if _active_holds(db, amo_id=amo_id, audit_id=audit_id):
+        raise HTTPException(409, "Active preservation hold blocks audit archive disposition.")
 
 
 def _canonical_hash(value: Any) -> str:
@@ -435,8 +458,6 @@ def place_legal_hold(
     _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
     _validate_hold_manifest(db, amo_id=ctx.amo_id, audit_id=audit_id, manifest_id=payload.manifest_id)
     policy = _latest_policy(db, ctx.amo_id)
-    if policy is None or not policy.legal_hold_supported:
-        raise HTTPException(status_code=409, detail="Current retention policy does not enable legal-hold governance.")
     normalized_key = hold_key.strip()[:128]
     if not normalized_key:
         raise HTTPException(status_code=422, detail="Legal hold key is required.")
@@ -510,6 +531,8 @@ def review_disposition(
     ).first()
     if manifest is None:
         raise HTTPException(status_code=404, detail="Archive manifest not found.")
+    if payload.approved:
+        _assert_mopm_archive_due(db, manifest=manifest, policy=policy, amo_id=ctx.amo_id, audit_id=audit_id)
     if db.query(QualityAuditDispositionEvent.id).filter(
         QualityAuditDispositionEvent.amo_id == ctx.amo_id,
         QualityAuditDispositionEvent.manifest_id == manifest.id,
