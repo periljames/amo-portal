@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -406,7 +407,7 @@ const QualityAuditAssuranceDashboardPage: React.FC = () => {
       <Drawer title="Unscheduled programme requirements" isOpen={unscheduledDrawerOpen} onClose={closeDrawer} panelClassName="assurance-unscheduled-drawer">
         <div className="assurance-unscheduled-drawer__body">
           <p>Commit governed programme requirements to the authoritative Planner without losing your place in the Assurance cockpit.</p>
-          {unscheduledQuery.isLoading ? <div className="assurance-cockpit__loading">Loading programme gaps…</div> : null}
+          {unscheduledQuery.isLoading ? <div className="assurance-cockpit__loading"><InlineLoading label={"Loading programme gaps…"}/></div> : null}
           {unscheduledQuery.error ? <div className="assurance-cockpit__error"><AlertTriangle size={17} /><span>Unable to load unscheduled requirements.</span></div> : null}
           <div className="assurance-unscheduled-list">
             {(unscheduledQuery.data?.items || []).map((item) => (

@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
@@ -1133,7 +1134,7 @@ export const PacksPage: React.FC = () => {
         }
       >
         {!data ? (
-          <p className="text-muted">Loading pack metadata…</p>
+          <p className="text-muted"><InlineLoading label={"Loading pack metadata…"}/></p>
         ) : (
           <div className="technical-records-pack-grid">
             <div className="technical-records-pack-card"><strong>Pack type</strong><span>{data.pack_type}</span></div>
@@ -1210,7 +1211,7 @@ export const TechnicalRecordsSettingsPage: React.FC = () => {
               </label>
               <label className="technical-records-number-field">
                 <span>Record retention (years)</span>
-                <input className="input" type="number" min={1} max={25} disabled={!editable} value={settings.record_retention_years ?? 5} onChange={(e) => setSettings((prev: any) => ({ ...prev, record_retention_years: Number(e.target.value || 5) }))} />
+                <input className="input" type="number" min={3} max={100} disabled={!editable} value={settings.record_retention_years ?? 3} onChange={(e) => setSettings((prev: any) => ({ ...prev, record_retention_years: Number(e.target.value || 3) }))} />
               </label>
             </div>
             {message ? <div className="technical-records-messages"><div>{message}</div></div> : null}

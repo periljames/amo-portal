@@ -14,6 +14,9 @@ import {
   listOfflineAuditEvidence,
   onOfflineAuditEvidenceChanged,
   synchronizeOfflineAuditEvidence,
+  retainDownloadedAuditEvidence,
+  retainedAuditEvidenceIds,
+  readRetainedAuditEvidence,
 } from "../../../services/qmsOfflineAuditEvidence";
 import type { ChecklistExecutionGovernanceRow } from "../../../services/qmsChecklistExecutionGovernance";
 import { projectOfflineEvidence, readAuditOfflinePack } from "../../../services/qmsAuditOfflinePack";
@@ -109,6 +112,8 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     refetchInterval: 2_000,
   });
   const artifacts = evidenceQuery.data?.items || [];
+  const retainedQuery = useQuery({ queryKey: ["qms", "retained-audit-evidence", amoCode, auditId],
+    queryFn: () => retainedAuditEvidenceIds(amoCode, auditId), networkMode: "always", staleTime: 1000 });
   const pending = pendingQuery.data || [];
   const evidenceContext = (): AuditEvidenceContext => ({
     location_ref: contextDraft.locationRef.trim() || undefined,
@@ -149,7 +154,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     ].filter(Boolean);
   };
 
-  const refreshPending = () => void pendingQuery.refetch();
+  const refreshPending = () => { void pendingQuery.refetch(); void retainedQuery.refetch(); };
 
   useEffect(() => onOfflineAuditEvidenceChanged(refreshPending), [auditId, item.checklist_item_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -175,7 +180,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   };
 
   // Automatic audit-wide replay runs once per authenticated browser session
-  // via qmsAuditOfflineSync. This component only keeps its queue view fresh.
+  // via portalOfflineSync. This component only keeps its queue view fresh.
   // Avoid a second independent uploader racing the global replay.
 
   const upload = async () => {
@@ -210,6 +215,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
         findingId: item.finding_id || null,
         context: evidenceContext(),
       });
+      await retainDownloadedAuditEvidence(amoCode, auditId, result.artifact, file);
       resetCapture();
       onNotice(`Evidence attached · ${result.artifact.filename} · checklist v${result.committed_version}.`);
       await evidenceQuery.refetch();
@@ -237,7 +243,19 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
 
   const download = async (artifactId: string, filename: string) => {
     setDownloading(artifactId); onError(null);
-    try { saveDownloadedFile(await downloadInternalAuditEvidence(amoCode, auditId, artifactId), filename); }
+    try {
+      const artifact = artifacts.find(candidate => candidate.id === artifactId);
+      if (!artifact) throw new Error("This evidence is no longer listed for the question.");
+      const local = await readRetainedAuditEvidence(amoCode, auditId, artifact).catch(() => null);
+      if (!local && navigator.onLine === false) throw new Error("This file has not been retained on this device. Open it once while connected.");
+      const blob = local || await downloadInternalAuditEvidence(amoCode, auditId, artifactId);
+      if (!local) {
+        const retained = await retainDownloadedAuditEvidence(amoCode, auditId, artifact, blob);
+        if (!retained) onNotice("File opened. This browser could not retain an offline copy.");
+      }
+      saveDownloadedFile(blob, filename);
+      void retainedQuery.refetch();
+    }
     catch (cause) { onError(cause instanceof Error ? cause.message : "Evidence download failed."); }
     finally { setDownloading(null); }
   };
@@ -267,7 +285,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
                       <span>Use in assessment</span>
                     </label>
                   ) : null}
-                  <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (typeof navigator !== "undefined" && navigator.onLine === false)} title={typeof navigator !== "undefined" && navigator.onLine === false ? "Reconnect to open server-retained evidence content." : undefined}><Download size={14} /> {typeof navigator !== "undefined" && navigator.onLine === false ? "Metadata only offline" : downloading === artifact.id ? "Opening…" : "Open"}</button>
+                  <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (navigator.onLine === false && !retainedQuery.data?.includes(artifact.id))} title={retainedQuery.data?.includes(artifact.id) ? "Encrypted copy available offline" : navigator.onLine === false ? "Open this file once while connected to retain a copy." : undefined}><Download size={14} /> {downloading === artifact.id ? "Opening…" : navigator.onLine === false && !retainedQuery.data?.includes(artifact.id) ? "Not saved on device" : "Open"}</button>
                 </div>
               </li>
             );

@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -232,7 +233,7 @@ export function ReliabilityFormulaAdministration({ formulae }: { formulae: Calcu
         <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading || working}>Refresh records</button>
       </div>
 
-      {loading && <div className="reliability-v2__loading" role="status">Loading governed metric records…</div>}
+      {loading && <div className="reliability-v2__loading"><InlineLoading label={"Loading governed metric records…"}/></div>}
       {error && <div className="reliability-v2__error" role="alert">{error}</div>}
       {message && <div className="reliability-formula-admin__message" role="status">{message}</div>}
 

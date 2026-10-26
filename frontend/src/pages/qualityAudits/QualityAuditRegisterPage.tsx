@@ -1,11 +1,12 @@
+import Pagination from "../../components/shared/Pagination";
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ColDef, ICellRendererParams, RowDoubleClickedEvent } from "ag-grid-community";
-import { AgGridReact } from "ag-grid-react";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
+import RecordTable from "../../components/shared/RecordTable";
 import {
-  ChevronLeft,
-  ChevronRight,
+  Eye,
   ClipboardCheck,
   ClipboardList,
   ExternalLink,
@@ -16,8 +17,6 @@ import {
   Settings,
   ShieldAlert,
 } from "lucide-react";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
 
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import { getCachedUser, getContext } from "../../services/auth";
@@ -44,6 +43,7 @@ import {
   type FindingLifecycleView,
 } from "./findingLifecycle";
 import "./quality-audits-list-workspace.css";
+import { caseDate } from "./carCaseModel";
 
 type RegisterPageSize = 25 | 50 | 100;
 
@@ -190,7 +190,6 @@ const QualityAuditRegisterPage: React.FC = () => {
       const target = event.target as Node;
       if (infoRef.current && !infoRef.current.contains(target)) infoRef.current.open = false;
       if (settingsRef.current && !settingsRef.current.contains(target)) settingsRef.current.open = false;
-      if (filterRailRef.current && !filterRailRef.current.contains(target)) setFiltersOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setFiltersOpen(false);
@@ -255,8 +254,8 @@ const QualityAuditRegisterPage: React.FC = () => {
     {
       headerName: "Class",
       flex: 0.75,
-      minWidth: 120,
-      valueGetter: ({ data }) => data ? `${humanize(data.finding.level || data.finding.severity)} · ${humanize(data.finding.finding_type)}` : "",
+      minWidth: 150,
+      valueGetter: ({ data }) => data ? (isObservation(data.finding) ? "Observation" : `${humanize(data.finding.level)} · ${humanize(data.finding.severity)}`) : "",
       cellClass: "qa-register-grid__compact-cell",
     },
     {
@@ -276,8 +275,8 @@ const QualityAuditRegisterPage: React.FC = () => {
       minWidth: 150,
       cellRenderer: ({ data }: ICellRendererParams<RegisterRow>) => data ? (
         <div className="qa-register-grid__stack">
-          <strong>{data.finding.acknowledged_by_name || data.primaryCar?.responsible_personnel || "Unassigned"}</strong>
-          <span>{data.primaryCar?.target_closure_date || data.primaryCar?.due_date || data.finding.target_close_date || "No due date"}</span>
+          <strong>{data.primaryCar?.responsible_personnel || (isObservation(data.finding) ? "Audit team" : "Unassigned")}</strong>
+          <span>{caseDate(data.primaryCar?.target_closure_date || data.primaryCar?.due_date || data.finding.target_close_date)}</span>
         </div>
       ) : null,
     },
@@ -287,8 +286,8 @@ const QualityAuditRegisterPage: React.FC = () => {
       minWidth: 135,
       cellRenderer: ({ data }: ICellRendererParams<RegisterRow>) => data ? (
         <div className="qa-register-grid__stack">
-          <span className={`qa-register-grid__status qa-register-grid__status--${data.lifecycle}`}>{findingLifecycleLabel(data.lifecycle)}</span>
-          <small>{findingNextAction(data.lifecycle, Boolean(data.primaryCar))}</small>
+          <span title={findingNextAction(data.lifecycle, Boolean(data.primaryCar))} className={`qa-register-grid__status qa-register-grid__status--${data.lifecycle}`}>{findingLifecycleLabel(data.lifecycle)}</span>
+
         </div>
       ) : null,
     },
@@ -301,26 +300,18 @@ const QualityAuditRegisterPage: React.FC = () => {
       sortable: false,
       cellRenderer: ({ data }: ICellRendererParams<RegisterRow>) => data ? (
         <div className="qa-register-grid__actions">
-          <button type="button" title="Open finding" aria-label="Open finding" onClick={() => openFinding(data)}><Search size={15} /></button>
-          <button type="button" title={data.primaryCar ? "Open corrective action" : "Continue finding"} aria-label={data.primaryCar ? "Open corrective action" : "Continue finding"} onClick={() => openCorrectiveAction(data)}>
+          <button type="button" title="Open finding" aria-label="Open finding" onClick={() => openFinding(data)}><Eye size={15} /></button>
+          {data.primaryCar || !isObservation(data.finding) ? <button type="button" title={data.primaryCar ? "Open corrective action" : "Continue finding"} aria-label={data.primaryCar ? "Open corrective action" : "Continue finding"} onClick={() => openCorrectiveAction(data)}>
             {data.primaryCar ? <ShieldAlert size={15} /> : <ExternalLink size={15} />}
-          </button>
+          </button> : null}
         </div>
       ) : null,
     },
   ], [amoCode, navigate, openCorrectiveAction, openFinding]);
 
-  const defaultColDef = useMemo<ColDef<RegisterRow>>(() => ({
-    resizable: true,
-    sortable: false,
-    suppressMovable: true,
-    wrapHeaderText: false,
-  }), []);
 
   const total = registerQuery.data?.total || 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const firstVisible = total ? ((page - 1) * pageSize) + 1 : 0;
-  const lastVisible = Math.min(total, page * pageSize);
   useEffect(() => {
     if (registerQuery.data && page > totalPages) patchFilters({ page: totalPages }, true);
   }, [page, totalPages, registerQuery.data, patchFilters]);
@@ -333,7 +324,7 @@ const QualityAuditRegisterPage: React.FC = () => {
 
   return (
     <QualityAuditsSectionLayout
-      title="Findings"
+      title="Findings Register"
       subtitle="Register of findings and linked corrective actions."
     >
       <section className="qa-register-grid-page" aria-label="Findings register">
@@ -485,17 +476,15 @@ const QualityAuditRegisterPage: React.FC = () => {
               aria-hidden={!filtersOpen}
             >
               <div className="qa-register-grid-page__filter-pan-inner">
-                <label>Scope <select value={actorView} onChange={(event) => updateFilter("view", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="global">Global</option><option value="mine">My Work</option></select></label>
-                <label>Year <input type="number" min={2000} max={2200} value={period ?? ""} placeholder="All years" onChange={(event) => updateFilter("period", event.target.value)} tabIndex={filtersOpen ? 0 : -1} /></label>
-                <label>Status <select value={findingStatus} onChange={(event) => updateFilter("status", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
-                <label>Level <select value={level} onChange={(event) => updateFilter("level", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{[1, 2, 3, 4].map((number) => <option key={number} value={`LEVEL_${number}`}>Level {number}</option>)}</select></label>
-                <label>Stage
-                  <select value={stage} onChange={(event) => updateFilter("stage", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
+                <label>Scope<select aria-label="Scope" value={actorView} onChange={(event) => updateFilter("view", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="global">Global</option><option value="mine">My Work</option></select></label>
+                <label>Year<input aria-label="Year" type="number" min={2000} max={2200} value={period ?? ""} placeholder="All years" onChange={(event) => updateFilter("period", event.target.value)} tabIndex={filtersOpen ? 0 : -1} /></label>
+                <label>Status<select aria-label="Status" value={findingStatus} onChange={(event) => updateFilter("status", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+                <label>Level<select aria-label="Level" value={level} onChange={(event) => updateFilter("level", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{[1, 2, 3, 4].map((number) => <option key={number} value={`LEVEL_${number}`}>Level {number}</option>)}</select></label>
+                <label>Stage<select aria-label="Stage" value={stage} onChange={(event) => updateFilter("stage", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
                     {FINDING_LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
-                <label>Due position
-                  <select value={timing} onChange={(event) => updateFilter("timing", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
+                <label>Due position<select aria-label="Due position" value={timing} onChange={(event) => updateFilter("timing", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
                     <option value="">All due dates</option><option value="overdue">Overdue</option><option value="due_soon">Due in 30 days</option>
                   </select>
                 </label>
@@ -505,11 +494,7 @@ const QualityAuditRegisterPage: React.FC = () => {
         </header>
 
         {registerQuery.isLoading ? (
-          <div className="qa-register-grid-page__state" role="status">
-            <RefreshCw className="is-spinning" size={24} aria-hidden />
-            <strong>Loading findings and actions…</strong>
-            <span>Retrieving the tenant-scoped follow-up register.</span>
-          </div>
+          <WorkspaceLoading label="Loading findings" compact />
         ) : registerQuery.isError ? (
           <div className="qa-audits-list__state qa-audits-list__state--error" role="alert">
             <strong>Register unavailable.</strong><span>{registerQuery.error instanceof Error ? registerQuery.error.message : "Try again."}</span>
@@ -517,26 +502,19 @@ const QualityAuditRegisterPage: React.FC = () => {
           </div>
         ) : rows.length ? (
           <>
-            <div className="qa-register-grid-page__grid ag-theme-alpine" aria-busy={registerQuery.isFetching}>
-              <AgGridReact<RegisterRow>
-                rowData={rows}
-                columnDefs={columnDefs}
-                defaultColDef={defaultColDef}
-                getRowId={({ data }) => data.id}
-                rowHeight={58}
-                headerHeight={36}
-                animateRows={false}
-                onRowDoubleClicked={(event: RowDoubleClickedEvent<RegisterRow>) => event.data && openCorrectiveAction(event.data)}
-              />
+            <div className="qa-register-mobile-list" aria-label="Findings">
+              {rows.map(row => <article key={row.id} className="qa-register-mobile-card">
+                <header><button type="button" onClick={() => openFinding(row)}>{row.finding.finding_ref || "Finding"}</button><span className={`qa-register-grid__status qa-register-grid__status--${row.lifecycle}`}>{findingLifecycleLabel(row.lifecycle)}</span></header>
+                <p>{row.finding.description}</p>
+                <dl><div><dt>Audit</dt><dd>{row.audit.audit_ref}</dd></div><div><dt>Classification</dt><dd>{isObservation(row.finding) ? "Observation" : humanize(row.finding.level || row.finding.severity)}</dd></div><div><dt>Owner</dt><dd>{row.primaryCar?.responsible_personnel || (isObservation(row.finding) ? "Audit team" : "Unassigned")}</dd></div><div><dt>Due</dt><dd>{caseDate(row.primaryCar?.target_closure_date || row.primaryCar?.due_date || row.finding.target_close_date)}</dd></div></dl>
+                <footer><button type="button" onClick={() => openFinding(row)}>Open finding</button>{row.primaryCar ? <button type="button" onClick={() => openCorrectiveAction(row)}>{row.primaryCar.car_number}</button> : null}</footer>
+              </article>)}
+            </div>
+            <div className="qa-register-grid-page__grid" style={{ "--finding-row-count": rows.length } as React.CSSProperties} aria-busy={registerQuery.isFetching}>
+              <RecordTable rows={rows} columns={columnDefs} label="Findings" onRowDoubleClick={(data) => openFinding(data)} />
             </div>
 
-            <footer className="qa-register-grid-page__pagination">
-              <span>Showing {firstVisible}–{lastVisible} of {total}</span>
-              <label>Rows per page <select value={pageSize} onChange={(event) => { patchFilters({ pageSize: Number(event.target.value) as RegisterPageSize, page: null }); }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
-              <strong>Page {Math.min(page, totalPages)} of {totalPages}</strong>
-              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1 || registerQuery.isFetching} onClick={() => patchFilters({ page: Math.max(1, page - 1) })}><ChevronLeft size={16} /></button>
-              <button type="button" title="Next page" aria-label="Next page" disabled={!registerQuery.data?.has_more || registerQuery.isFetching} onClick={() => patchFilters({ page: Math.min(totalPages, page + 1) })}><ChevronRight size={16} /></button>
-            </footer>
+            <Pagination label="Findings" page={page} pageSize={pageSize} total={registerQuery.data ? total : undefined} visibleCount={rows.length} busy={registerQuery.isFetching} onPageChange={(value)=>patchFilters({page:value})} onPageSizeChange={(value)=>patchFilters({pageSize:value as RegisterPageSize,page:null})} />
           </>
         ) : (
           <div className="qa-register-grid-page__empty">

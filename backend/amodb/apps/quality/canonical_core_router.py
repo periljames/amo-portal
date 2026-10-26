@@ -23,6 +23,7 @@ from amodb.apps.audit import services as audit_services
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts import services as account_services
 from amodb.apps.quality import models as quality_models
+from amodb.apps.quality.amo_compliance_policy import policy_catalogue, validate_retention_extensions
 from amodb.apps.quality.enums import CARStatus, QMSAuditStatus, QMSDocStatus
 from amodb.apps.training import models as training_models
 from amodb.apps.training.integration import training_record_summary
@@ -680,7 +681,8 @@ def qms_calendar_view(
 
 def _has_column_safe(db: Session, table: str, column: str) -> bool:
     try:
-        return column in _table_columns(db, table)
+        with db.begin_nested():
+            return column in _table_columns(db, table)
     except Exception:
         return False
 
@@ -689,38 +691,41 @@ def _table_exists_safe(db: Session, table: str) -> bool:
     try:
         if not _is_postgres(db):
             return True
-        value = db.execute(
-            text("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables
-                    WHERE table_schema = current_schema() AND table_name = :table
-                )
-            """),
-            {"table": table},
-        ).scalar()
-        return bool(value)
+        with db.begin_nested():
+            value = db.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = current_schema() AND table_name = :table
+                    )
+                """),
+                {"table": table},
+            ).scalar()
+            return bool(value)
     except Exception:
         return False
 
 
 def _tenant_has_module(db: Session, *, amo_id: str, module_key: str) -> bool:
     try:
-        subscription = (
-            db.query(account_models.ModuleSubscription)
-            .filter(
-                account_models.ModuleSubscription.amo_id == amo_id,
-                account_models.ModuleSubscription.module_code == module_key,
+        with db.begin_nested():
+            subscription = (
+                db.query(account_models.ModuleSubscription)
+                .filter(
+                    account_models.ModuleSubscription.amo_id == amo_id,
+                    account_models.ModuleSubscription.module_code == module_key,
+                )
+                .order_by(account_models.ModuleSubscription.updated_at.desc())
+                .first()
             )
-            .order_by(account_models.ModuleSubscription.updated_at.desc())
-            .first()
-        )
         if subscription is not None:
             status_value = getattr(subscription.status, "value", str(subscription.status))
             return status_value in {"ENABLED", "TRIAL"}
     except Exception:
         pass
     try:
-        entitlement = account_services.resolve_entitlements(db, amo_id=amo_id).get(module_key)
+        with db.begin_nested():
+            entitlement = account_services.resolve_entitlements(db, amo_id=amo_id).get(module_key)
         if entitlement is None:
             return False
         return bool(entitlement.is_unlimited or (entitlement.limit is not None and entitlement.limit > 0))
@@ -1083,6 +1088,17 @@ def log_report_export(
     return {"status": "logged", "message": "Report export request was logged. Actual export generation remains with the report service."}
 
 
+_SETTINGS_GROUPS = ("numbering_rules", "workflow_rules", "approval_matrix", "notification_rules", "retention_rules", "risk_matrix")
+
+
+def _settings_response(row) -> dict[str, Any]:
+    embedded = dict(row.get("payload") or {})
+    return {
+        **{key: row.get(key) for key in ("id", "created_at", "updated_at")},
+        **{key: row[key] if key in row else embedded.get(key, {}) for key in _SETTINGS_GROUPS},
+    }
+
+
 @core_router.get("/settings")
 def get_qms_settings(
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.view")),
@@ -1091,18 +1107,18 @@ def get_qms_settings(
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     row = db.execute(
         text("""
-            SELECT id, numbering_rules, workflow_rules, approval_matrix, notification_rules,
-                   retention_rules, risk_matrix, created_at, updated_at
+            SELECT *
             FROM qms_settings
-            WHERE amo_id = :amo_id
-            ORDER BY created_at DESC
+            WHERE amo_id = :amo_id AND deleted_at IS NULL
+            ORDER BY created_at DESC, id DESC
             LIMIT 1
         """),
         {"amo_id": ctx.amo_id},
     ).mappings().first()
     return {
         "tenant": {"amo_code": ctx.amo_code, "amo_id": ctx.amo_id},
-        "settings": dict(row) if row else None,
+        "settings": _settings_response(row) if row else None,
+        "compliance_policy": policy_catalogue(),
     }
 
 # ---------------------------------------------------------------------------
@@ -1925,7 +1941,8 @@ def update_qms_settings(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    current = db.execute(text("SELECT id FROM qms_settings WHERE amo_id = :amo_id ORDER BY created_at DESC LIMIT 1"), {"amo_id": ctx.amo_id}).mappings().first()
+    columns = _table_columns(db, "qms_settings")
+    current = db.execute(text("SELECT * FROM qms_settings WHERE amo_id = :amo_id AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE"), {"amo_id": ctx.amo_id}).mappings().first()
     allowed = {
         "numbering_rules",
         "workflow_rules",
@@ -1934,9 +1951,19 @@ def update_qms_settings(
         "retention_rules",
         "risk_matrix",
     }
-    values = {key: _json_value(payload.get(key, {})) for key in allowed if key in payload}
-    if not values:
+    changes = {key: payload[key] for key in allowed if key in payload}
+    if not changes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported settings fields supplied.")
+    if any(not isinstance(value, dict) for value in changes.values()):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Each settings group must be an object.")
+    if "retention_rules" in changes:
+        validate_retention_extensions(changes["retention_rules"])
+    # Canonical migrations store configuration in payload; older deployments
+    # have dedicated JSON columns. Preserve both layouts and unrelated payload.
+    values = {key: _json_value(value) for key, value in changes.items() if key in columns}
+    embedded = {key: value for key, value in changes.items() if key not in columns}
+    if embedded:
+        values["payload"] = _json_value({**dict((current or {}).get("payload") or {}), **embedded})
     if current:
         sets = ", ".join([f"{key} = CAST(:{key} AS jsonb)" for key in values] + ["updated_at = NOW()", "updated_by = :updated_by"])
         values.update({"id": current["id"], "amo_id": ctx.amo_id, "updated_by": ctx.user_id})
@@ -1949,7 +1976,7 @@ def update_qms_settings(
         row = db.execute(text(f"INSERT INTO qms_settings ({', '.join(insert_cols)}) VALUES ({', '.join(insert_values)}) RETURNING *"), values).mappings().first()
     _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, action="settings_changed", module="settings", entity_type="qms_settings", entity_id=str(row["id"]), new_value=dict(row), request=request)
     db.commit()
-    return {"settings": dict(row)}
+    return {"settings": _settings_response(row)}
 
 
 
@@ -2156,6 +2183,11 @@ def _update_parent_status(
     return dict(row) if row else None
 
 
+def _require_governed_change_write(module: str) -> None:
+    if module == "change-control":
+        raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
+
+
 @core_router.post("/{module}/{record_id}/{action}")
 def qms_workflow_action(
     module: str,
@@ -2167,6 +2199,7 @@ def qms_workflow_action(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     _reject_unknown_audit_operation(f"{module}/{record_id}/{action}")
+    _require_governed_change_write(module)
     action_config = _WORKFLOW_ACTIONS.get((module, action))
     if not action_config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported QMS workflow action.")
@@ -2342,6 +2375,7 @@ def generic_qms_create(
     if not parts:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QMS module is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or config["permission"]))
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
@@ -2366,6 +2400,7 @@ def generic_qms_update(
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or config["permission"]))
     view = _resolve_view(module, parts[1:])
@@ -2394,6 +2429,7 @@ def generic_qms_delete(
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
     module = parts[0]
+    _require_governed_change_write(module)
     config = _module_config(module)
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or "qms.settings.manage"))
     view = _resolve_view(module, parts[1:])

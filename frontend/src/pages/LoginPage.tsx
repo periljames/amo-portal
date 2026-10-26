@@ -20,7 +20,6 @@ import {
   type DepartureProgress,
 } from "../services/loginDepartureWarmup";
 import { rememberLoginHome } from "../services/loginHomeHint";
-import { beginControlRoomPrefetch } from "../services/loginLandingPrefetch";
 import { resolvePostLoginReturnTarget } from "../app/loginRedirect";
 import { flushSync } from "react-dom";
 
@@ -265,20 +264,13 @@ const LoginPage: React.FC = () => {
       if (landing.requiresOnboarding && !redirectedRef.current) {
         redirectedRef.current = true;
       }
-      // Start Control Room data the instant the JWT exists — before chunk fan-out.
-      const controlRoomWarm = beginControlRoomPrefetch({
-        user: auth.user,
-        amoSlug: slugToUse,
-        homePath: landing.path,
-      });
-      await runLoginDepartureWarmup({
+      void runLoginDepartureWarmup({
         user: auth.user,
         amoSlug: slugToUse,
         landingPath: landing.path,
         onProgress: setDeparture,
         takeoffStartedAt,
-      });
-      await controlRoomWarm;
+      }).catch(() => undefined);
 
       rememberLoginHome(slugToUse, landing.path);
       navigate(landing.path, { replace: true });

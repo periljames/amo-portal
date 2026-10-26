@@ -21,6 +21,7 @@ for _helper_name in (
     "_next_audit_finding_ref",
     "_date_to_datetime",
     "_ensure_car_for_finding",
+    "_serialize_finding",
     "task_services",
 ):
     setattr(router, _helper_name, getattr(_router_module, _helper_name))
@@ -206,6 +207,11 @@ _include_once(
 # guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
+# Tenant mail identities are Quality settings, not tenant Resend transports.
+# Include the static API before catch-all route finalization.
+from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402
+_canonical_router.router.include_router(_qms_mail_identity_router.router)
+
 # Promote static APIs ahead of the canonical catch-all. Route-family promotion
 # fails startup if two handlers could match the same path and method.
 from . import excellence_route_order as _excellence_route_order  # noqa: F401,E402
@@ -219,6 +225,15 @@ from . import planner_assignment_guard_route_order as _planner_assignment_guard_
 from . import car_control_loop_route_order as _car_control_loop_route_order  # noqa: F401,E402
 from . import car_operational_route_order as _car_operational_route_order  # noqa: F401,E402
 from . import audit_personnel_route_order as _audit_personnel_route_order  # noqa: F401,E402
+
+# Evidence search reads retained source records; the old metadata table alone is incomplete.
+from . import assurance_evidence_register as _assurance_evidence_register  # noqa: E402
+from .route_ordering import promote_route_family as _promote_evidence_family  # noqa: E402
+_canonical_router.router.include_router(_assurance_evidence_register.router)
+_promote_evidence_family(_canonical_router.router,
+    predicate=lambda item: getattr(item, "endpoint", None) in {
+        _assurance_evidence_register.evidence_files, _assurance_evidence_register.archive_packages,
+    }, label="QMS Evidence Vault")
 
 # Finish composition once every focused read/write adapter is registered.
 # Legacy module actions can otherwise intercept an exact POST such as issuing

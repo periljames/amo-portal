@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 // src/pages/work/WorkOrderDetailPage.tsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -151,7 +152,7 @@ const WorkOrderDetailPage: React.FC = () => {
 
         {error && <div className="card card--error">{error}</div>}
         {notice && <div className="card card--info">{notice}</div>}
-        {loading && <div className="card">Loading work order…</div>}
+        {loading && <div className="card"><InlineLoading label={"Loading work order…"}/></div>}
 
         {workOrder && (
           <section className="page-section">

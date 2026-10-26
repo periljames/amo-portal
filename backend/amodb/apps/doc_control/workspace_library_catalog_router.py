@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
 import json
 import os
 import re
@@ -1455,7 +1457,7 @@ def circulation_receipt(
     return Response(
         content=output.getvalue(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="library-receipt-{event.id}.pdf"'},
+        headers={"Content-Disposition": attachment_header(download_name("library-receipt", holding.barcode, event.event_type, event.created_at.strftime("%Y-%m-%d-%H%M%S"), extension="pdf"))},
     )
 
 

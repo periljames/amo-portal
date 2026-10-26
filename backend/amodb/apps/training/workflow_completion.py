@@ -9,6 +9,7 @@ entities together with the existing TrainingWorkflowInstance, assessment,
 experience, invitation and authorization operating models.
 """
 
+from amodb.utils.download_names import download_name, attachment_header
 import hashlib
 import json
 import random
@@ -782,7 +783,7 @@ def install_training_workflow_completion(router_module) -> None:
             lines.append(f"LOCATION:{esc(event.location)}")
         lines.extend(["END:VEVENT", "END:VCALENDAR", ""])
         content = "\r\n".join(lines)
-        return Response(content=content, media_type="text/calendar; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="training-{event.id}.ics"', "Cache-Control": "private, no-store"})
+        return Response(content=content, media_type="text/calendar; charset=utf-8", headers={"Content-Disposition": attachment_header(download_name("training", event.title or course.course_name, event.starts_on, extension="ics")), "Cache-Control": "private, no-store"})
 
     # -------------------------------------------------------------------
     # Assessment attempt engine (written, practical and oral)

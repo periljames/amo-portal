@@ -1,7 +1,16 @@
+import AuditStageLoading from "./AuditStageLoading";
+import WorkflowDisclosure from "./WorkflowDisclosure";
 import React, { useEffect, useMemo, useState } from "react";
+import ChecklistSourceReview from "./ChecklistSourceReview";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  BookOpen,
+  Compass,
+  CalendarDays,
+  SlidersHorizontal,
+  Sparkles,
+  FileText,
   ArrowRight,
   CheckCircle2,
   ClipboardList,
@@ -269,7 +278,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [checklistSearch, setChecklistSearch] = useState("");
   const [selectedDmsChecklistId, setSelectedDmsChecklistId] = useState<string | null>(null);
   const [checklistDocumentType, setChecklistDocumentType] = useState<"CHECKLIST" | "FORM">("CHECKLIST");
-  const [dmsResponseType, setDmsResponseType] = useState<"" | "COMPLIANCE" | "YES_NO_NA" | "CUSTOM">("");
+  const [dmsResponseType, setDmsResponseType] = useState<"SOURCE" | "COMPLIANCE" | "YES_NO_NA" | "CUSTOM">("SOURCE");
   const [dmsResponseOptions, setDmsResponseOptions] = useState<ChecklistResponseOption[]>([]);
   const [checklistUploadOpen, setChecklistUploadOpen] = useState(false);
   const [checklistReason, setChecklistReason] = useState("Selected for this audit during governed preparation.");
@@ -381,7 +390,9 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const refresh = async () => {
     // Cancel older reads, then reconcile every preparation indicator from the server.
     // Never seed the authoritative preparation/readiness caches from mutation payloads.
-    await queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] });
+    await queryClient.cancelQueries({ predicate: (query) => query.queryKey.includes(auditId) && [
+      "qms-audit-preparation-context", "qms-audit-preparation-readiness", "qms-audit-preparation-revisions", "qms-audit-session",
+    ].some(key => query.queryKey.includes(key)) });
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ["qms-audit-preparation-context", amoCode, auditId],
@@ -408,6 +419,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     await Promise.all([
       queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId] }),
       queryClient.cancelQueries({ queryKey: bindingQueryKey }),
+      queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-readiness", amoCode, auditId] }),
+      queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
     ]);
 
     // Checklist binding authority is the immutable binding table used by the
@@ -546,7 +559,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         setSelectedDmsChecklistId("");
         setChecklistReason("Selected for this audit during governed preparation.");
         setAllowExistingItems(false);
-        setDmsResponseType("");
+        setDmsResponseType("SOURCE");
         setDmsResponseOptions([]);
         setLocalSuccess("The current effective DMS checklist is bound to fieldwork.");
       } catch (error) {
@@ -837,7 +850,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       readinessQuery.isPending);
 
   if (auditQuery.isLoading || auditQuery.isPending || dependentQueriesLoading) {
-    return <div className="qms-occurrence-stage qms-occurrence-stage--loading">Loading preparation workspace…</div>;
+    return <AuditStageLoading label="preparation" />;
   }
 
   if (auditQuery.error || !auditQuery.data) {
@@ -921,8 +934,8 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     <section className="qms-occurrence-stage qms-audit-prepare-stage" aria-label="Pre-audit preparation workspace" id="audit-occurrence-prepare">
       <div className="qms-audit-prepare-stage__toolbar">
         <div className="qms-audit-prepare-stage__intro">
-          <h2 className="qms-audit-prepare-stage__title">Prepare</h2>
-          <p className="qms-audit-prepare-stage__helper">Request evidence, invite participants, and confirm readiness before fieldwork.</p>
+          <h2 className="qms-audit-prepare-stage__title">Prepare for fieldwork</h2>
+          <p className="qms-audit-prepare-stage__helper">Set the checklist, request evidence and give the right people access.</p>
           <div id={AUDIT_PREPARE_TOOLBAR_ID} className="qms-audit-prepare-toolbar" />
           <div className="qms-audit-prepare-stage__status" role="status" aria-label="Preparation readiness">
             <span className={`qms-audit-prepare-stage__readiness-chip${readinessWarning ? " is-warning" : ""}`}>
@@ -961,7 +974,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       ) : null}
       {fieldworkOpen ? (
         <p className="qms-audit-prepare-stage__notice is-info">
-          <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Return the audit through the governed preparation lifecycle before changing checklist scope or questions.
+          <ShieldAlert size={14} aria-hidden /> The issued checklist baseline is locked while fieldwork is active. Checklist changes require a new governed preparation revision.
         </p>
       ) : null}
 
@@ -970,85 +983,16 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <a href="#audit-preparation-checklists">Checklist <span>{checklistBindings}</span></a>
         <a href="#audit-preparation-requests">Evidence requests <span>{requests.length}</span></a>
         <a href="#audit-preparation-participants">Auditee access <span>{participants.length}</span></a>
+        <a href="#audit-preparation-offline" onClick={() => document.getElementById("audit-preparation-offline")?.setAttribute("open", "")}>Offline files</a>
         <a href="#audit-occurrence-activity">Activity</a>
       </nav>
 
-      <section className="qms-audit-prepare__offline-pack" aria-label="Offline fieldwork package">
-        <div className="qms-audit-prepare__offline-pack-copy">
-          <DownloadCloud size={18} aria-hidden />
-          <span>
-            <strong>{offlinePackStatus?.ready ? "Offline package ready" : "Make audit available offline"}</strong>
-            <small>
-              {offlinePackStatus?.ready
-                ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · ${offlinePackStatus.offlineReferences} controlled reference(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
-                : prepRevision?.status === "ISSUED"
-                  ? "Encrypt the issued work package and current fieldwork baseline on this device before unreliable or no-connectivity work."
-                  : "Issue preparation first. Draft preparation is not an offline fieldwork authority."}
-            </small>
-            {offlinePackStatus?.workPackageSha256 ? <small className="qms-audit-prepare__offline-pack-hash">Work package SHA-256 · {offlinePackStatus.workPackageSha256}</small> : null}
-          </span>
-        </div>
-        <div className="qms-audit-prepare__offline-pack-actions">
-          {offlinePackStatus?.ready ? <span className="qms-audit-prepare__offline-pack-device"><HardDrive size={14} aria-hidden /> Stored securely on this device</span> : null}
-          <button
-            type="button"
-            className="is-primary"
-            disabled={!readiness?.fieldwork_ready || prepRevision?.status !== "ISSUED" || offlinePackMutation.isPending}
-            onClick={() => offlinePackMutation.mutate()}
-          >
-            {offlinePackMutation.isPending ? "Preparing…" : offlinePackStatus?.ready ? "Refresh offline package" : "Make available offline"}
-          </button>
-          {offlinePackStatus?.ready ? <button type="button" disabled={removeOfflinePackMutation.isPending} onClick={() => removeOfflinePackMutation.mutate()}>{removeOfflinePackMutation.isPending ? "Removing…" : "Remove offline copy"}</button> : null}
-        </div>
-      </section>
+
 
       <div className="qms-audit-prepare-stage__stack">
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
-          <header><div><h3>Audit basis</h3></div></header>
-          <dl>
-            <div><dt>Scope</dt><dd>{context.regulatory_and_manual_basis?.audit_scope || auditQuery.data.scope || "—"}</dd></div>
-            <div><dt>Objectives</dt><dd>{auditQuery.data.objectives || "—"}</dd></div>
-            <div><dt>Criteria</dt><dd>{context.regulatory_and_manual_basis?.audit_criteria || auditQuery.data.criteria || "—"}</dd></div>
-            <div><dt>Checklists</dt><dd>{checklistBindings} revision(s)</dd></div>
-            <div><dt>Prep revision</dt><dd>{prepRevision ? `Rev ${prepRevision.revision_no} · ${prepRevision.status}` : "Not issued"}</dd></div>
-          </dl>
-        </section>
-
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__intelligence">
-          <header>
-            <div>
-              <h3>Preparation intelligence</h3>
-              <p>Authoritative history, open corrective action exposure and source context assembled for this audit.</p>
-            </div>
-            <span className="qms-audit-prepare-stage__meta-chip">As of {new Date(context.as_of).toLocaleString()}</span>
-          </header>
-          <div className="qms-audit-prepare__intelligence-grid">
-            <article><strong>{context.prior_audit_history.items.length}</strong><span>Comparable prior audits</span><small>{context.prior_audit_history.matching_basis}</small></article>
-            <article><strong>{context.prior_findings.total}</strong><span>Prior findings</span><small>{Object.entries(context.prior_findings.classification_counts || {}).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") || "No prior finding classification counts"}</small></article>
-            <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAPA exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
-            <article><strong>{context.cross_source_assurance_pressure.factors.length}</strong><span>Preparation context factors</span><small>{context.cross_source_assurance_pressure.statement}</small></article>
-          </div>
-          {context.prior_findings.items.length ? (
-            <div className="qms-audit-prepare__prior-findings" aria-label="Relevant prior findings">
-              <strong>Relevant prior findings</strong>
-              <ul>
-                {context.prior_findings.items.slice(0, 12).map((finding) => (
-                  <li key={finding.id}>
-                    <span><strong>{finding.finding_ref || "Finding"}</strong>{finding.requirement_ref ? <small>{finding.requirement_ref}</small> : null}</span>
-                    <p>{finding.description || "No finding description recorded."}</p>
-                    <small>{[finding.classification, finding.severity, finding.status].filter(Boolean).join(" · ") || "Status not recorded"}</small>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {context.cross_source_assurance_pressure.factors.length ? <div className="qms-audit-prepare__factor-list" aria-label="Preparation context factors">{context.cross_source_assurance_pressure.factors.map((factor) => <div key={factor.code}><span><strong>{factor.label}</strong><small>{factor.source}</small></span><span>{String(factor.value ?? "—")}</span><small>{factor.rationale}</small></div>)}</div> : null}
-          {context.data_quality.warnings.length ? <div className="qms-audit-prepare-stage__notice is-warning"><AlertTriangle size={14} aria-hidden /><span>{context.data_quality.warnings.map((warning) => warning.message).join(" · ")}</span></div> : null}
-        </section>
-
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__readiness" id="audit-preparation-readiness">
-          <header>
-            <div><h3>Readiness</h3><p>Deterministic checks from persisted setup, checklist and document-request state.</p></div>
+          <header><span className="audit-workflow-section-icon"><CheckCircle2 size={19} aria-hidden /></span>
+            <div><h3>Readiness</h3><p>Confirm the checklist, audit team and required documents before opening fieldwork.</p></div>
             <span className="qms-audit-prepare-stage__meta-chip">{readiness?.complete_count || 0}/{readiness?.total_count || 0} complete</span>
           </header>
           <div className="qms-audit-prepare__readiness-list">
@@ -1057,70 +1001,14 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {readiness?.fieldwork_blockers.length ? <ul className="qms-audit-prepare__blocker-list">{readiness.fieldwork_blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : <p className="qms-audit-prepare-stage__notice is-info"><CheckCircle2 size={14} aria-hidden /> No fieldwork readiness blockers remain.</p>}
         </section>
 
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__fieldwork-plan">
-          <header>
-            <div><h3>Fieldwork plan</h3><p>Governed agenda/interviews and checklist sampling requirements available before entering Live Audit.</p></div>
-            <span className="qms-audit-prepare-stage__meta-chip">{meetingPlan.length} meeting(s) · {samplingPlan.length} sampling instruction(s)</span>
-          </header>
-          <div className="qms-audit-prepare__fieldwork-plan-grid">
-            <article>
-              <h4>Agenda / interviews</h4>
-              {!meetingPlan.length ? <p className="qms-audit-prepare__empty">No opening, closing, follow-up or other audit meeting is currently scheduled.</p> : (
-                <ul>{meetingPlan.map((meeting, index) => {
-                  const type = String(meeting.meeting_type || "MEETING").replaceAll("_", " ");
-                  const start = String(meeting.scheduled_start || meeting.scheduled_at || "");
-                  const end = String(meeting.scheduled_end || "");
-                  return <li key={String(meeting.id || index)}><strong>{type}</strong><span>{start ? new Date(start).toLocaleString() : "Time not recorded"}{end ? ` – ${new Date(end).toLocaleString()}` : ""}</span><small>{String(meeting.auditee_department || "Auditee / department not specified")} · Auditor {String(meeting.auditor_user_id || auditQuery.data.lead_auditor_user_id || "not assigned")}</small>{meeting.agenda ? <p>{String(meeting.agenda)}</p> : null}<small>{String(meeting.location || meeting.conference_url || meeting.status || "Planned audit coordination")}</small></li>;
-                })}</ul>
-              )}
-            </article>
-            <article>
-              <h4>Sampling plan</h4>
-              {fullBindingsQuery.isLoading ? <p className="qms-audit-prepare__empty">Loading frozen checklist sampling requirements…</p> : fullBindingsQuery.isError ? <p className="qms-audit-prepare-stage__notice is-warning" role="alert">Sampling requirements could not be loaded from the current checklist binding.</p> : !samplingPlan.length ? <p className="qms-audit-prepare__empty">No explicit sampling requirement is defined in the bound checklist revision.</p> : (
-                <ul>{samplingPlan.map((sample) => <li key={sample.key}><strong>{sample.reference}</strong><span>{sample.requirement}</span><small>{sample.section}{sample.method ? ` · ${sample.method.replaceAll("_", " ")}` : ""}</small></li>)}</ul>
-              )}
-            </article>
-          </div>
-        </section>
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__applicability">
-          <header>
-            <div><h3>Applicability context</h3><p>Select only governed DMS applicability rules that define the actual aircraft, capability, authorization, location, role, work package or other audited scope.</p></div>
-            <span className="qms-audit-prepare-stage__meta-chip">{applicabilityFacts.length} selected</span>
-          </header>
-          {fieldworkOpen ? <p className="qms-audit-prepare-stage__notice is-info"><ShieldAlert size={14} aria-hidden /> Applicability context is frozen for the active fieldwork package. Return the audit through the governed preparation lifecycle before changing scope inputs.</p> : null}
-          {applicabilityFacts.length ? <div className="qms-audit-prepare__applicability-selected">
-            {applicabilityFacts.map((fact) => <article key={fact.id}>
-              <div><strong>{fact.target_type.replaceAll("_", " ")}</strong><span>{fact.target_value || fact.target_id || "Governed target"}</span><small>{fact.rule_type} · {fact.source}</small><p>{fact.reason}</p></div>
-              {canEditFrozenPreparation ? <button type="button" onClick={() => removeApplicabilityMutation.mutate(fact.id)} disabled={removeApplicabilityMutation.isPending} aria-label="Remove applicability context"><Trash2 size={15} /></button> : null}
-            </article>)}
-          </div> : <p className="qms-audit-prepare__empty">No governed applicability context is selected. Scoped documentary evidence will remain unverified rather than being assumed applicable or N/A.</p>}
-          {canEditFrozenPreparation ? <div className="qms-audit-prepare__applicability-picker">
-            <label><span>Search governed rules</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={applicabilitySearch} onChange={(event) => setApplicabilitySearch(event.target.value)} placeholder="Aircraft, base, department, authorization, work package…" /></div></label>
-            <label className="is-wide"><span>Selection basis</span><input value={applicabilityReason} onChange={(event) => setApplicabilityReason(event.target.value)} placeholder="Why this governed target belongs to this audit scope" /></label>
-            <div className="qms-audit-prepare__applicability-rules is-wide">
-              {applicabilityRules.length ? applicabilityRules.slice(0, 60).map((rule) => <article key={rule.id} className={rule.selected ? "is-selected" : ""}>
-                <div><strong>{rule.document_code} · {rule.target_type.replaceAll("_", " ")}</strong><span>{rule.target_value || rule.target_id || rule.document_title}</span><small>{rule.rule_type} · Rev {rule.current_revision} · {rule.source}</small></div>
-                <button type="button" disabled={rule.selected || addApplicabilityMutation.isPending || applicabilityReason.trim().length < 8} onClick={() => addApplicabilityMutation.mutate(rule.id)}>{rule.selected ? "Selected" : "Add to audit"}</button>
-              </article>) : <p className="qms-audit-prepare__empty">No current-published governed DMS applicability rules match this search.</p>}
-            </div>
-          </div> : null}
-        </section>
-
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__references">
-          <header><div><h3>Controlled references</h3><p>Approved source documents retained with this audit preparation.</p></div><span className="qms-audit-prepare-stage__meta-chip">{controlledReferences.documents.length} source(s)</span></header>
-          {controlledReferences.documents.length ? <div className="qms-audit-prepare__reference-list">{controlledReferences.documents.map((source, index) => <ControlledSourceReference key={index} source={source} index={index} />)}</div> : <p className="qms-audit-prepare__empty">No controlled source document has been captured yet.</p>}
-          {controlledReferences.recordCount > 0 ? <p className="qms-audit-prepare__empty">{controlledReferences.recordCount} audit, checklist and request references are retained in the preparation history.</p> : null}
-        </section>
-
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__checklists" id="audit-preparation-checklists">
-          <header>
+          <header><span className="audit-workflow-section-icon"><ClipboardList size={19} aria-hidden /></span>
             <div>
               <h3>Fieldwork checklist</h3>
               <p>Select a current DMS checklist, or create the audit questions here.</p>
             </div>
             <span className="qms-audit-prepare-stage__meta-chip">{checklistBindings} bound</span>
           </header>
-
           {bindings.length ? (
             <div className="qms-audit-prepare__binding-list" aria-label="Bound checklist revisions">
               {bindings.map((binding) => (
@@ -1131,6 +1019,13 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ))}
             </div>
           ) : <p className="qms-audit-prepare__empty">No fieldwork checklist is bound. Fieldwork cannot open until one is selected or created.</p>}
+
+          {bindings.length ? <ChecklistSourceReview amoCode={amoCode} auditId={auditId} hasPendingChanges={false}
+            onRebuilt={async () => {
+              await removeAuditOfflinePack(auditId);
+              await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(auditId) });
+              setLocalSuccess("Checklist rebuilt from the uploaded table. Review and issue the new preparation revision.");
+            }} /> : null}
 
           {canEditFrozenPreparation ? <>
             <div className="qms-audit-prepare__mode" role="tablist" aria-label="Checklist source">
@@ -1146,17 +1041,17 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <form className="qms-audit-prepare__checklist-form" onSubmit={(event) => { event.preventDefault(); setLocalError(null); setLocalSuccess(null); if (!effectiveDmsChecklistId) { setLocalError("Select a current effective DMS checklist first."); return; } if (!dmsResponseSchemeValid) { setLocalError("Define the source checklist response scheme before binding it. The portal will not infer YES/NO/N/A, U or S from the document text."); return; } if (checklistReason.trim().length < 8) { setLocalError("Enter a selection reason of at least 8 characters."); return; } applyChecklistMutation.mutate(); }}>
                 <label><span>Document type</span><select value={checklistDocumentType} onChange={(event) => { setChecklistDocumentType(event.target.value as "CHECKLIST" | "FORM"); setSelectedDmsChecklistId(""); }}><option value="CHECKLIST">Checklist</option><option value="FORM">Form</option></select></label>
                 <label><span>Search DMS</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={checklistSearch} onChange={(event) => setChecklistSearch(event.target.value)} placeholder="Document code or title" /></div></label>
-                <label className="is-wide"><span>Current controlled document</span><select required value={effectiveDmsChecklistId} onChange={(event) => setSelectedDmsChecklistId(event.target.value)}><option value="">Select the current effective {checklistDocumentType.toLowerCase()}</option>{dmsChecklists.map((item) => <option key={item.document_id} value={item.document_id}>{item.code} · {item.title} · Rev {item.current_revision.revision_number}</option>)}</select></label>
+                <label className="is-wide"><span>Current controlled document</span><select aria-label="Current controlled document" required value={effectiveDmsChecklistId} onChange={(event) => setSelectedDmsChecklistId(event.target.value)}><option value="">Select the current effective {checklistDocumentType.toLowerCase()}</option>{dmsChecklists.map((item) => <option key={item.document_id} value={item.document_id}>{item.code} · {item.title} · Rev {item.current_revision.revision_number}</option>)}</select></label>
                 {dmsChecklistsQuery.data?.recommendation ? <p className="qms-audit-prepare-stage__notice is-info is-wide"><CheckCircle2 size={14} /> Suggested from a similar audit: {dmsChecklistsQuery.data.recommendation.code} · {dmsChecklistsQuery.data.recommendation.title} ({dmsChecklistsQuery.data.recommendation.reason || "previously used for this audit context"}).</p> : null}
                 {selectedDmsChecklist ? <div className="qms-audit-prepare__current-revision is-wide"><strong>Current effective revision</strong><span>Issue {selectedDmsChecklist.current_revision.issue_number || "—"} · Rev {selectedDmsChecklist.current_revision.revision_number}{selectedDmsChecklist.current_revision.effective_date ? ` · effective ${selectedDmsChecklist.current_revision.effective_date}` : ""}</span><small>{selectedDmsChecklist.hierarchy_path || "DMS controlled-document library"}</small></div> : null}
                 <fieldset className="qms-audit-prepare__response-options is-wide">
                   <legend>Source response scheme</legend>
-                  <p>Select the response vocabulary defined by the controlled source. This is a governed mapping, not a conversion of the source document.</p>
-                  <label><span>Response vocabulary</span><select required value={dmsResponseType} onChange={(event) => {
+                  <p>Keep the uploaded table’s response columns, or choose an explicit alternative mapping.</p>
+                  <label><span>Response vocabulary</span><select aria-label="Response vocabulary" required value={dmsResponseType} onChange={(event) => {
                     const responseType = event.target.value as typeof dmsResponseType;
                     setDmsResponseType(responseType);
                     setDmsResponseOptions(responseType === "CUSTOM" ? customResponseOptions() : []);
-                  }}><option value="">Select source scheme</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="CUSTOM">Custom source vocabulary (including U / S where defined)</option></select></label>
+                  }}><option value="SOURCE">Use response columns from uploaded source</option><option value="YES_NO_NA">YES / NO / N/A</option><option value="COMPLIANCE">Compliance / NCR / Observation / N/A / Not verified</option><option value="CUSTOM">Custom source vocabulary (including U / S where defined)</option></select></label>
                   {dmsResponseType === "CUSTOM" ? <div className="qms-audit-prepare__response-options-list">{dmsResponseOptions.map((option, optionIndex) => <div key={`dms-response-${optionIndex}`} className="qms-audit-prepare__response-option"><label><span>Source value</span><input value={option.value} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, value: event.target.value } : candidate))} /></label><label><span>Display label</span><input value={option.label} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, label: event.target.value } : candidate))} /></label><label><span>Workflow meaning</span><select value={option.canonical_status} onChange={(event) => setDmsResponseOptions((current) => current.map((candidate, index) => index === optionIndex ? { ...candidate, canonical_status: event.target.value as ChecklistResponseOption["canonical_status"] } : candidate))}><option value="">Select meaning</option><option value="COMPLIANT">Compliant</option><option value="NONCOMPLIANT">Noncompliant</option><option value="OBSERVATION">Observation</option><option value="NOT_APPLICABLE">Not applicable</option><option value="NOT_VERIFIED">Not verified / incomplete</option></select></label><button type="button" aria-label={`Remove source response ${option.label || option.value || optionIndex + 1}`} disabled={dmsResponseOptions.length <= 2} onClick={() => setDmsResponseOptions((current) => current.filter((_, index) => index !== optionIndex))}><Trash2 size={14} /></button></div>)}<button type="button" onClick={() => setDmsResponseOptions((current) => [...current, { value: "", label: "", canonical_status: "" }])}><Plus size={14} /> Add source response</button></div> : null}
                 </fieldset>
                 <label className="qms-audit-prepare__check is-wide"><input type="checkbox" checked={allowExistingItems} onChange={(event) => setAllowExistingItems(event.target.checked)} /> Add to the existing checklist</label>
@@ -1177,7 +1072,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 {uploadedDraft ? <section className="qms-audit-prepare__import-review is-wide" aria-label="Imported checklist awaiting review">
                   <strong>Imported draft · {uploadedDraft.question_count} questions · {uploadedDraft.section_count} sections</strong>
                   <small>{uploadedDraft.filename} · SHA-256 {uploadedDraft.sha256.slice(0, 12)}…</small>
-                  <p>Nothing has been issued. Correct the extracted questions, sections, numbering and response mapping before you commit. The original upload is not automatically stored in the controlled DMS library.</p>
+                  <p>Review questions and response columns before creating the audit checklist. The source file remains separate from the DMS library.</p>
                   {uploadedDraft.warnings.map((warning, index) => <p key={index} role="note">{warning}</p>)}
                   <button type="button" onClick={() => { setUploadedDraft(null); setChecklistItems([emptyChecklistItem()]); }}>Discard imported draft</button>
                 </section> : null}
@@ -1262,7 +1157,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         </section>
 
         <section className="qms-audit-prepare-stage__section" id="audit-preparation-requests">
-          <header>
+          <header><span className="audit-workflow-section-icon"><FileText size={19} aria-hidden /></span>
             <div><h3>Document requests</h3></div>
             {canManage ? <button type="button" onClick={() => setShowRequestForm((value) => !value)}><Plus size={15} /> New request</button> : null}
           </header>
@@ -1276,7 +1171,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                 <label className="is-wide"><span>Linked criterion / requirement</span><textarea rows={2} value={newRequest.linkedCriterion} onChange={(event) => setNewRequest((current) => ({ ...current, linkedCriterion: event.target.value }))} placeholder="Exact regulation, manual paragraph, procedure or checklist criterion this evidence supports" /></label>
                 <label><span>Responsible party</span><input value={newRequest.responsibleParty} onChange={(event) => setNewRequest((current) => ({ ...current, responsibleParty: event.target.value }))} placeholder="Auditee, department or process owner" /></label>
                 <label><span>Associated checklist items</span><select multiple size={Math.min(5, Math.max(2, requestChecklistOptions.length || 2))} value={newRequest.checklistItemIds} onChange={(event) => setNewRequest((current) => ({ ...current, checklistItemIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value) }))}>{requestChecklistOptions.map((option) => <option key={option.id} value={option.id}>{option.section ? `${option.section} · ` : ""}{option.label}</option>)}</select><small>Use Ctrl/Cmd or touch multi-select where supported. Selected IDs are validated against this audit on the server.</small></label>
-                <label><span>Submission source</span><select value={newRequest.sourceMode} onChange={(event) => setNewRequest((current) => ({ ...current, sourceMode: event.target.value as NewRequest["sourceMode"], controlledDocumentId: "" }))}><option value="UPLOAD_OR_CONTROLLED">Upload or controlled DMS record</option><option value="UPLOAD">Upload only</option><option value="CONTROLLED_DMS">Controlled DMS record only</option></select></label>
+                <label><span>Submission source</span><select aria-label="Submission source" value={newRequest.sourceMode} onChange={(event) => setNewRequest((current) => ({ ...current, sourceMode: event.target.value as NewRequest["sourceMode"], controlledDocumentId: "" }))}><option value="UPLOAD_OR_CONTROLLED">Upload or controlled DMS record</option><option value="UPLOAD">Upload only</option><option value="CONTROLLED_DMS">Controlled DMS record only</option></select></label>
                 <label><span>Workflow requirement</span><select value={newRequest.requirementStage} onChange={(event) => setNewRequest((current) => ({ ...current, requirementStage: event.target.value as NewRequest["requirementStage"], isRequired: event.target.value !== "REQUESTED_NOT_BLOCKING" }))}><option value="REQUIRED_BEFORE_ISSUE">Required before preparation issue</option><option value="REQUIRED_BEFORE_FIELDWORK">Required before fieldwork</option><option value="REQUIRED_DURING_FIELDWORK">Required during fieldwork</option><option value="REQUESTED_NOT_BLOCKING">Requested · not blocking</option></select></label>
                 {newRequest.sourceMode !== "UPLOAD" ? <>
                   <label className="is-wide"><span>Search controlled DMS</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={requestDmsSearch} onChange={(event) => setRequestDmsSearch(event.target.value)} placeholder="Document code, title or type" /></div></label>
@@ -1304,20 +1199,26 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                     {request.canonical_document_id ? <code><Link2 size={13} /> DMS document {request.canonical_document_id}{request.canonical_revision_id ? ` · revision ${request.canonical_revision_id}` : ""}</code> : null}
                     {request.review_note ? <blockquote>{request.review_note}</blockquote> : null}
                   </div>
-                  {canManage && ["UPLOADED", "REJECTED"].includes(request.status) ? (
+                  {canManage && (request.status === "UPLOADED" ||
+                     (request.status === "REQUESTED" && request.source_mode !== "UPLOAD" &&
+                      Boolean(
+                        (request.controlled_document_id && request.controlled_revision_id) ||
+                        (request.canonical_document_id && request.canonical_revision_id)
+                      ))) ? (
                     <div className="qms-audit-prepare__review">
                       <textarea rows={2} value={reviewNotes[request.id] || ""} onChange={(event) => setReviewNotes((current) => ({ ...current, [request.id]: event.target.value }))} placeholder="Review note / return instructions" />
                       <div><button type="button" onClick={() => reviewMutation.mutate({ request, status: "REJECTED" })} disabled={reviewMutation.isPending}>Return / reject</button><button type="button" className="is-primary" onClick={() => reviewMutation.mutate({ request, status: "ACCEPTED" })} disabled={reviewMutation.isPending}><CheckCircle2 size={14} /> Accept</button></div>
                     </div>
                   ) : null}
-                  {canManage && request.status === "REQUESTED" && !request.is_required ? <button type="button" onClick={() => reviewMutation.mutate({ request, status: "WAIVED" })} disabled={reviewMutation.isPending}>Waive optional request</button> : null}
+                  {request.status === "REJECTED" ? <p className="qms-audit-prepare-stage__notice is-warning" role="status">Returned for correction. Await a new document submission before reviewing it again.</p> : null}
+                   {canManage && request.status === "REQUESTED" && !request.is_required ? <button type="button" onClick={() => reviewMutation.mutate({ request, status: "WAIVED" })} disabled={reviewMutation.isPending}>Waive optional request</button> : null}
                 </article>
               ))}
             </div>
         </section>
 
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__participants" id="audit-preparation-participants">
-          <header>
+          <header><span className="audit-workflow-section-icon"><UserPlus size={19} aria-hidden /></span>
             <div><h3>External participants</h3></div>
             {canManage ? <button type="button" onClick={() => setShowParticipantForm((value) => !value)}><UserPlus size={15} /> Invite</button> : null}
           </header>
@@ -1342,8 +1243,122 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
         </section>
 
+        <WorkflowDisclosure id="audit-preparation-offline" title="Offline reference files" description="Download and manage controlled files on this device" icon={DownloadCloud} className="qms-audit-prepare-stage__section">
+      <section className="qms-audit-prepare__offline-pack" aria-label="Offline fieldwork package">
+        <div className="qms-audit-prepare__offline-pack-copy">
+          <DownloadCloud size={18} aria-hidden />
+          <span>
+            <strong>{offlinePackStatus?.ready ? "Offline package ready" : "Offline reference files"}</strong>
+            <small>
+              {offlinePackStatus?.ready
+                ? `${offlinePackStatus.checklistItems} checklist item(s) · ${offlinePackStatus.evidenceRecords} governed evidence record(s) · ${offlinePackStatus.offlineReferences} controlled reference(s) · verified ${offlinePackStatus.verifiedAt ? new Date(offlinePackStatus.verifiedAt).toLocaleString() : "on this device"}`
+                : prepRevision?.status === "ISSUED"
+                  ? "Save the issued checklist and reference documents on this device to keep working without a connection."
+                  : "Issue preparation first. Draft preparation is not an offline fieldwork authority."}
+            </small>
+            {offlinePackStatus?.workPackageSha256 ? <details className="qms-audit-prepare__package-verification"><summary>Package verification</summary><code className="qms-audit-prepare__offline-pack-hash">{offlinePackStatus.workPackageSha256}</code></details> : null}
+          </span>
+        </div>
+        <div className="qms-audit-prepare__offline-pack-actions">
+          {offlinePackStatus?.ready ? <span className="qms-audit-prepare__offline-pack-device"><HardDrive size={14} aria-hidden /> Stored securely on this device</span> : null}
+          <button
+            type="button"
+            className="is-primary"
+            disabled={!readiness?.fieldwork_ready || prepRevision?.status !== "ISSUED" || offlinePackMutation.isPending}
+            onClick={() => offlinePackMutation.mutate()}
+          >
+            {offlinePackMutation.isPending ? "Preparing…" : offlinePackStatus?.ready ? "Refresh offline package" : "Download reference files"}
+          </button>
+          {offlinePackStatus?.ready ? <button type="button" disabled={removeOfflinePackMutation.isPending} onClick={() => removeOfflinePackMutation.mutate()}>{removeOfflinePackMutation.isPending ? "Removing…" : "Remove offline copy"}</button> : null}
+        </div>
+      </section>
+        </WorkflowDisclosure>
+
+        <WorkflowDisclosure title="Fieldwork plan" description="Meetings, interviews and sampling instructions" icon={CalendarDays} className="qms-audit-prepare-stage__section qms-audit-prepare__fieldwork-plan">
+          <div className="qms-audit-prepare__fieldwork-plan-grid">
+            <article>
+              <h4>Agenda / interviews</h4>
+              {!meetingPlan.length ? <p className="qms-audit-prepare__empty">No opening, closing, follow-up or other audit meeting is currently scheduled.</p> : (
+                <ul>{meetingPlan.map((meeting, index) => {
+                  const type = String(meeting.meeting_type || "MEETING").replaceAll("_", " ");
+                  const start = String(meeting.scheduled_start || meeting.scheduled_at || "");
+                  const end = String(meeting.scheduled_end || "");
+                  return <li key={String(meeting.id || index)}><strong>{type}</strong><span>{start ? new Date(start).toLocaleString() : "Time not recorded"}{end ? ` – ${new Date(end).toLocaleString()}` : ""}</span><small>{String(meeting.auditee_department || "Auditee / department not specified")} · Auditor {String(meeting.auditor_user_id || auditQuery.data.lead_auditor_user_id || "not assigned")}</small>{meeting.agenda ? <p>{String(meeting.agenda)}</p> : null}<small>{String(meeting.location || meeting.conference_url || meeting.status || "Planned audit coordination")}</small></li>;
+                })}</ul>
+              )}
+            </article>
+            <article>
+              <h4>Sampling plan</h4>
+              {fullBindingsQuery.isLoading ? <p className="qms-audit-prepare__empty">Loading frozen checklist sampling requirements…</p> : fullBindingsQuery.isError ? <p className="qms-audit-prepare-stage__notice is-warning" role="alert">Sampling requirements could not be loaded from the current checklist binding.</p> : !samplingPlan.length ? <p className="qms-audit-prepare__empty">No explicit sampling requirement is defined in the bound checklist revision.</p> : (
+                <ul>{samplingPlan.map((sample) => <li key={sample.key}><strong>{sample.reference}</strong><span>{sample.requirement}</span><small>{sample.section}{sample.method ? ` · ${sample.method.replaceAll("_", " ")}` : ""}</small></li>)}</ul>
+              )}
+            </article>
+          </div>
+        </WorkflowDisclosure>
+
+        <WorkflowDisclosure title="Controlled references" description="Approved documents retained with this audit" icon={BookOpen} className="qms-audit-prepare-stage__section qms-audit-prepare__references">
+          {controlledReferences.documents.length ? <div className="qms-audit-prepare__reference-list">{controlledReferences.documents.map((source, index) => <ControlledSourceReference key={index} source={source} index={index} />)}</div> : <p className="qms-audit-prepare__empty">No controlled source document has been captured yet.</p>}
+          {controlledReferences.recordCount > 0 ? <p className="qms-audit-prepare__empty">{controlledReferences.recordCount} audit, checklist and request references are retained in the preparation history.</p> : null}
+        </WorkflowDisclosure>
+
+        <WorkflowDisclosure defaultOpen title="Audit basis" description="Scope, objectives and criteria" icon={Compass} className="qms-audit-prepare-stage__section qms-audit-prepare__basis">
+          <dl>
+            <div><dt>Scope</dt><dd>{context.regulatory_and_manual_basis?.audit_scope || auditQuery.data.scope || "—"}</dd></div>
+            <div><dt>Objectives</dt><dd>{auditQuery.data.objectives || "—"}</dd></div>
+            <div><dt>Criteria</dt><dd>{context.regulatory_and_manual_basis?.audit_criteria || auditQuery.data.criteria || "—"}</dd></div>
+            <div><dt>Checklists</dt><dd>{checklistBindings} revision(s)</dd></div>
+            <div><dt>Prep revision</dt><dd>{prepRevision ? `Rev ${prepRevision.revision_no} · ${prepRevision.status}` : "Not issued"}</dd></div>
+          </dl>
+        </WorkflowDisclosure>
+
+        <WorkflowDisclosure title="Previous audits & insights" description="Relevant findings and corrective action exposure" icon={Sparkles} className="qms-audit-prepare-stage__section qms-audit-prepare__intelligence">
+          <div className="qms-audit-prepare__intelligence-grid">
+            <article><strong>{context.prior_audit_history.items.length}</strong><span>Comparable prior audits</span><small>{context.prior_audit_history.matching_basis}</small></article>
+            <article><strong>{context.prior_findings.total}</strong><span>Prior findings</span><small>{Object.entries(context.prior_findings.classification_counts || {}).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") || "No prior finding classification counts"}</small></article>
+            <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAPA exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
+            <article><strong>{context.cross_source_assurance_pressure.factors.length}</strong><span>Preparation context factors</span><small>{context.cross_source_assurance_pressure.statement}</small></article>
+          </div>
+          {context.prior_findings.items.length ? (
+            <div className="qms-audit-prepare__prior-findings" aria-label="Relevant prior findings">
+              <strong>Relevant prior findings</strong>
+              <ul>
+                {context.prior_findings.items.slice(0, 12).map((finding) => (
+                  <li key={finding.id}>
+                    <span><strong>{finding.finding_ref || "Finding"}</strong>{finding.requirement_ref ? <small>{finding.requirement_ref}</small> : null}</span>
+                    <p>{finding.description || "No finding description recorded."}</p>
+                    <small>{[finding.classification, finding.severity, finding.status].filter(Boolean).join(" · ") || "Status not recorded"}</small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {context.cross_source_assurance_pressure.factors.length ? <div className="qms-audit-prepare__factor-list" aria-label="Preparation context factors">{context.cross_source_assurance_pressure.factors.map((factor) => <div key={factor.code}><span><strong>{factor.label}</strong><small>{factor.source}</small></span><span>{String(factor.value ?? "—")}</span><small>{factor.rationale}</small></div>)}</div> : null}
+          {context.data_quality.warnings.length ? <div className="qms-audit-prepare-stage__notice is-warning"><AlertTriangle size={14} aria-hidden /><span>{context.data_quality.warnings.map((warning) => warning.message).join(" · ")}</span></div> : null}
+        </WorkflowDisclosure>
+
+        <WorkflowDisclosure title="Applicability" description="Aircraft, capabilities and other scope rules" icon={SlidersHorizontal} className="qms-audit-prepare-stage__section qms-audit-prepare__applicability">
+          {fieldworkOpen ? <p className="qms-audit-prepare-stage__notice is-info"><ShieldAlert size={14} aria-hidden /> Applicability context is frozen for the active fieldwork package. Return the audit through the governed preparation lifecycle before changing scope inputs.</p> : null}
+          {applicabilityFacts.length ? <div className="qms-audit-prepare__applicability-selected">
+            {applicabilityFacts.map((fact) => <article key={fact.id}>
+              <div><strong>{fact.target_type.replaceAll("_", " ")}</strong><span>{fact.target_value || fact.target_id || "Governed target"}</span><small>{fact.rule_type} · {fact.source}</small><p>{fact.reason}</p></div>
+              {canEditFrozenPreparation ? <button type="button" onClick={() => removeApplicabilityMutation.mutate(fact.id)} disabled={removeApplicabilityMutation.isPending} aria-label="Remove applicability context"><Trash2 size={15} /></button> : null}
+            </article>)}
+          </div> : <p className="qms-audit-prepare__empty">No governed applicability context is selected. Scoped documentary evidence will remain unverified rather than being assumed applicable or N/A.</p>}
+          {canEditFrozenPreparation ? <div className="qms-audit-prepare__applicability-picker">
+            <p className="qms-audit-prepare__guidance">Select only governed DMS applicability rules that are current and attributable to this audit scope.</p>
+            <label><span>Search governed rules</span><div className="qms-audit-prepare__search"><Search size={15} aria-hidden /><input value={applicabilitySearch} onChange={(event) => setApplicabilitySearch(event.target.value)} placeholder="Aircraft, base, department, authorization, work package…" /></div></label>
+            <label className="is-wide"><span>Selection basis</span><input value={applicabilityReason} onChange={(event) => setApplicabilityReason(event.target.value)} placeholder="Why this governed target belongs to this audit scope" /></label>
+            <div className="qms-audit-prepare__applicability-rules is-wide">
+              {applicabilityRules.length ? applicabilityRules.slice(0, 60).map((rule) => <article key={rule.id} className={rule.selected ? "is-selected" : ""}>
+                <div><strong>{rule.document_code} · {rule.target_type.replaceAll("_", " ")}</strong><span>{rule.target_value || rule.target_id || rule.document_title}</span><small>{rule.rule_type} · Rev {rule.current_revision} · {rule.source}</small></div>
+                <button type="button" disabled={rule.selected || addApplicabilityMutation.isPending || applicabilityReason.trim().length < 8} onClick={() => addApplicabilityMutation.mutate(rule.id)}>{rule.selected ? "Selected" : "Add to audit"}</button>
+              </article>) : <p className="qms-audit-prepare__empty">No current-published governed DMS applicability rules match this search.</p>}
+            </div>
+          </div> : null}
+        </WorkflowDisclosure>
+
         <section className="qms-audit-prepare-stage__section qms-audit-prepare__activity" id="audit-occurrence-activity">
-          <header>
+          <header><span className="audit-workflow-section-icon"><History size={19} aria-hidden /></span>
             <div><h3><History size={16} /> Activity / audit trail</h3><p>Append-only preparation and audit-domain events for this occurrence.</p></div>
             <button type="button" onClick={() => void activityQuery.refetch()} disabled={activityQuery.isFetching}>Refresh</button>
           </header>

@@ -14,8 +14,13 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 import { getCachedUser } from "../../services/auth";
+import RetentionFields from "../../components/QMS/RetentionFields";
+import { RetentionEventEditor } from "./DocumentControlRetentionActions";
+import { getDocumentRetentionPolicy } from "../../services/documentControlRetention";
+import { emptyRetentionFacts, retentionDispositionReady, type AmoCompliancePolicy } from "../../services/amoCompliancePolicy";
 import {
   createRecordSeries,
+  updateRecordRetention,
   getRecord,
   disposeRecord,
   downloadRecord,
@@ -242,6 +247,10 @@ function RecordsControlDesk({
   const [seriesTitle, setSeriesTitle] = useState("");
   const [ownerDepartment, setOwnerDepartment] = useState("");
   const [retentionYears, setRetentionYears] = useState(7);
+  const [retentionPolicy, setRetentionPolicy] = useState<AmoCompliancePolicy | null>(null);
+  const [retentionClass, setRetentionClass] = useState("");
+  const [retentionFacts, setRetentionFacts] = useState(emptyRetentionFacts);
+  useEffect(() => { void getDocumentRetentionPolicy(tenant).then(setRetentionPolicy).catch(caught => setError(caught instanceof Error ? caught.message : "Retention schedule unavailable.")); }, [tenant, setError]);
 
   const [depositSeries, setDepositSeries] = useState("");
   const [recordNumber, setRecordNumber] = useState("");
@@ -290,7 +299,7 @@ function RecordsControlDesk({
       sourceEntityType,
       sourceEntityId,
       capturedAt,
-      metadata: { description, tags },
+      metadata: { description, tags, retention_class: retentionClass, compliance_retention: retentionFacts },
     }, { signal: abort.signal, onProgress: setProgress }), "Record deposited. Text and metadata indexing is queued.")
       .finally(() => { setController(null); setProgress(null); });
   };
@@ -314,11 +323,12 @@ function RecordsControlDesk({
       <label><span>Source entity type</span><input value={sourceEntityType} onChange={(e) => setSourceEntityType(e.target.value)} maxLength={80} placeholder="e.g. AUDIT_FINDING" /></label>
       <label><span>Source entity ID</span><input value={sourceEntityId} onChange={(e) => setSourceEntityId(e.target.value)} maxLength={128} /></label>
       <label><span>Captured at</span><input type="datetime-local" value={capturedAt} onChange={(e) => setCapturedAt(e.target.value)} /></label>
+      <RetentionFields policy={retentionPolicy} primary={retentionClass} onPrimary={setRetentionClass} value={retentionFacts} onChange={setRetentionFacts} disabled={busy} />
       <label><span>Tags</span><input value={tags} onChange={(e) => setTags(e.target.value)} maxLength={500} placeholder="Comma separated" /></label>
       <label className="wide"><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} /></label>
       <label className="wide"><span>Evidence file</span><input type="file" onChange={(e) => setArtifact(e.target.files?.[0] || null)} required /></label>
       {progress !== null ? <div className="records-vault__progress" role="status"><progress value={progress} max={100} /> {progress}% uploaded {controller ? <button type="button" className="dc-button" onClick={() => controller.abort()}>Cancel</button> : null}</div> : null}
-      <button className="dc-button dc-button--primary" disabled={busy || !artifact}>Deposit</button>
+      <button className="dc-button dc-button--primary" disabled={busy || !artifact || !retentionPolicy || !retentionClass}>Deposit</button>
     </form> : null}
   </section>;
 }
@@ -337,6 +347,8 @@ function RecordControlButtons({
   setError: (value: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [retentionPolicy, setRetentionPolicy] = useState<AmoCompliancePolicy | null>(null);
+  const [editingRetention, setEditingRetention] = useState(false);
   const reason = (action: string) => window.prompt(`Reason for ${action}:`)?.trim() || "";
 
   const hold = async (enabled: boolean) => {
@@ -358,11 +370,15 @@ function RecordControlButtons({
   };
 
   return <>
+    {record.disposition_status !== "DISPOSED" && <><button type="button" className="dc-button" onClick={()=>{
+      setEditingRetention(value=>!value);
+      if(!retentionPolicy) void getDocumentRetentionPolicy(tenant).then(setRetentionPolicy).catch(cause=>setError(cause instanceof Error?cause.message:"Retention schedule unavailable."));
+    }}>Retention dates</button>{editingRetention && <RetentionEventEditor policy={retentionPolicy} tenant={tenant} record={{id:record.id,retention_class:String(record.metadata?.retention_class||record.series_code),metadata:record.metadata||{}}} save={payload=>updateRecordRetention(tenant,record.id,payload)} onSaved={async()=>{setNotice("Retention update recorded.");setEditingRetention(false);onChanged();}} />}</>}
     <button type="button" className="dc-button" disabled={busy} onClick={() => void hold(!record.legal_hold)}>{record.legal_hold ? <UnlockKeyhole size={14} /> : <LockKeyhole size={14} />}{record.legal_hold ? "Release hold" : "Legal hold"}</button>
     {!record.legal_hold && record.disposition_status === "ACTIVE" ? <>
       <button type="button" className="dc-button" disabled={busy} onClick={() => void disposition("ARCHIVED")}><Archive size={14} /> Archive</button>
       <button type="button" className="dc-button" disabled={busy} onClick={() => void disposition("TRANSFERRED")}>Transfer</button>
-      <button type="button" className="dc-button dc-button--danger" disabled={busy} onClick={() => void disposition("DISPOSED")}><ShieldAlert size={14} /> Record disposition</button>
+      <button type="button" className="dc-button dc-button--danger" disabled={busy || !retentionDispositionReady(retentionPolicy,String(record.metadata?.retention_class||record.series_code),record.metadata||{},record.retention_due_at)} onClick={() => void disposition("DISPOSED")}><ShieldAlert size={14} /> Record disposition</button>
     </> : null}
   </>;
 }

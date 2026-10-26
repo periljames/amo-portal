@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -89,7 +90,7 @@ export function ReliabilityCalculationEvidence(): React.ReactElement {
         <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}>Refresh evidence</button>
       </div>
 
-      {loading && <div className="reliability-v2__loading" role="status">Loading calculation snapshots…</div>}
+      {loading && <div className="reliability-v2__loading"><InlineLoading label={"Loading calculation snapshots…"}/></div>}
       {error && <div className="reliability-v2__error" role="alert">{error}</div>}
 
       {!loading && runs.length > 0 && (

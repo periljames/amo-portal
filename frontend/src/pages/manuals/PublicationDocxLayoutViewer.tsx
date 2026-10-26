@@ -5,8 +5,9 @@ import "./publicationDocxLayout.css";
 
 const FRAME_DOCUMENT = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:;"><style>html,body{margin:0;min-height:100%;background:#e5e7eb}body{padding:12px;box-sizing:border-box;overflow:auto}#document{transform-origin:top left;contain:layout style}.docx-wrapper{padding:0!important;background:transparent!important}.docx-wrapper>section.docx{margin:0 auto 12px!important;box-shadow:0 2px 8px #0002}.docx-wrapper img,.docx-wrapper svg{max-width:none;image-rendering:auto}.docx-media-fallback{display:inline-flex;align-items:center;justify-content:center;min-width:120px;min-height:48px;padding:8px;border:1px dashed #b45309;background:#fffbeb;color:#92400e;font:600 12px/1.35 system-ui,sans-serif;text-align:center}</style></head><body><div id="styles"></div><div id="document"></div></body></html>`;
 
-export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTextFallback }: {
+export default function PublicationDocxLayoutViewer({ fileUrl, fileBlob, title, zoom, onTextFallback }: {
   fileUrl: string;
+  fileBlob?: Blob;
   title: string;
   zoom: string;
   onTextFallback: () => void;
@@ -35,7 +36,8 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
     void (async () => {
       try {
         const [response, { renderAsync }] = await Promise.all([
-          fetch(`${getApiBaseUrl()}${fileUrl}`, { headers: authHeaders(), signal: controller.signal }),
+          fileBlob ? Promise.resolve(new Response(fileBlob, { status: 200 })) :
+            fetch(`${getApiBaseUrl()}${fileUrl}`, { headers: authHeaders(), signal: controller.signal }),
           import("docx-preview"),
         ]);
         if (!response.ok) throw new Error(`The Word source could not be loaded (${response.status}).`);
@@ -96,7 +98,7 @@ export default function PublicationDocxLayoutViewer({ fileUrl, title, zoom, onTe
       }
     })();
     return () => { current = false; controller.abort(); host.replaceChildren(); styles.replaceChildren(); };
-  }, [fileUrl, frameReady]);
+  }, [fileUrl, fileBlob, frameReady]);
 
   useEffect(() => {
     if (!ready) return;

@@ -1,6 +1,8 @@
 """Controlled Workforce bulk-operation endpoints."""
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
@@ -351,7 +353,7 @@ def download_bulk_failure_report(
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="workforce-bulk-{operation_id}-failures.csv"'},
+        headers={"Content-Disposition": attachment_header(download_name("workforce-bulk-failures", extension="csv"))},
     )
 
 

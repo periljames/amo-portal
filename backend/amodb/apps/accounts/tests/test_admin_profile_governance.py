@@ -213,13 +213,17 @@ def test_profile_governance_routes_are_the_only_tenant_admin_guard_exemption() -
     db.execute.assert_not_called()
 
 
-def test_standing_tenant_admin_api_does_not_require_delegated_session() -> None:
+def test_standing_tenant_admin_api_requires_timed_admin_view() -> None:
     db = MagicMock()
+    db.execute.return_value.first.return_value = None
     current = actor(role="AMO_ADMIN", is_amo_admin=True)
-
+    with pytest.raises(HTTPException) as error:
+        require_active_admin_profile(request("/accounts/admin/users"), current, db)
+    assert error.value.status_code == 403
+    db.execute.return_value.first.return_value = ("session-1",)
     assert require_active_admin_profile(request("/accounts/admin/users"), current, db) is current
     assert getattr(current, "_admin_profile_elevated", False) is False
-    db.execute.assert_not_called()
+    assert db.execute.call_args.args[1]["implicit_admin"] is True
 
 
 def test_active_backend_session_unlocks_delegated_tenant_admin_api() -> None:
@@ -300,8 +304,9 @@ def test_missing_auth_session_identity_fails_closed() -> None:
     db.execute.assert_not_called()
 
 
-def test_standing_admin_profile_state_is_permanent_without_session_row(monkeypatch) -> None:
+def test_standing_admin_keeps_appointment_but_view_starts_inactive(monkeypatch) -> None:
     db = MagicMock()
+    db.execute.return_value.mappings.return_value.first.return_value = None
     monkeypatch.setattr(profile_router, "_ensure_schema", lambda _db: None)
 
     result = _state(
@@ -312,13 +317,12 @@ def test_standing_admin_profile_state_is_permanent_without_session_row(monkeypat
 
     assert result == {
         "eligible": True,
-        "active": True,
+        "active": False,
         "session_id": None,
         "expires_at": None,
         "grant_type": "PERMANENT",
-        "reason": "Standing AMO administrator assigned by the platform superuser",
+        "reason": "Standing AMO administrator",
     }
-    db.execute.assert_not_called()
 
 
 def test_standing_admin_cross_module_boundaries_do_not_require_profile_capabilities() -> None:

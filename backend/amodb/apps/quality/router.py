@@ -1,6 +1,8 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name
+
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 
 from datetime import date, datetime, time, timezone, timedelta
@@ -1737,6 +1739,16 @@ def _require_audit_access(
     raise HTTPException(status_code=403, detail="Insufficient privileges to modify audit data")
 
 
+def _require_car_read_access(db: Session, current_user: account_models.User, car: models.CorrectiveActionRequest) -> None:
+    from .tenant_security import TenantContext, assert_quality_permission
+
+    amo_id = str(_current_amo_id(current_user))
+    if str(car.amo_id) != amo_id:
+        raise HTTPException(status_code=404, detail="CAR not found.")
+    assert_quality_permission(db, TenantContext(amo_code="", amo_id=amo_id,
+        user_id=str(current_user.id), is_superuser=bool(getattr(current_user, "is_superuser", False))), "qms.car.view")
+
+
 def _require_car_write_access(
     db: Session,
     current_user: account_models.User,
@@ -1983,20 +1995,21 @@ def update_audit_document_request(
     if not (_is_quality_admin(current_user) or _audit_allows_user_by_audit(audit, current_user.id) or audit.auditee_user_id == current_user.id):
         raise HTTPException(status_code=403, detail="Insufficient privileges to update this document request")
     data = payload.model_dump(exclude_unset=True)
-    review_change = False
+    # The legacy free-form PATCH must not bypass the governed evidence upload,
+    # reviewer authorization and source-revision checks used by Prepare.
+    # In particular, a client-supplied file_ref is not proof of a stored file.
+    if "status" in data or "file_ref" in data:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Document status and submission evidence are governed. "
+                "Use the audit's governed-document-requests review endpoint "
+                "and the controlled evidence submission workflow."
+            ),
+        )
     for field, value in data.items():
-        if field == "status" and value in {"ACCEPTED", "REJECTED", "WAIVED"}:
-            _require_audit_access(current_user, audit)
-            item.reviewed_by_user_id = current_user.id
-            item.reviewed_at = datetime.now(timezone.utc)
-            review_change = True
-        if field == "file_ref" and value:
-            item.uploaded_by_user_id = current_user.id
-            item.uploaded_at = datetime.now(timezone.utc)
-            if "status" not in data:
-                item.status = "UPLOADED"
         setattr(item, field, value)
-    audit_services.log_event(db, amo_id=audit.amo_id, actor_user_id=current_user.id, entity_type="quality_document_request", entity_id=str(item.id), action="review" if review_change else "update", after={"status": item.status}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=review_change)
+    audit_services.log_event(db, amo_id=audit.amo_id, actor_user_id=current_user.id, entity_type="quality_document_request", entity_id=str(item.id), action="update", after={"status": item.status}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request), critical=False)
     db.commit()
     db.refresh(item)
     return item
@@ -6430,7 +6443,7 @@ def export_car_evidence_pack(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
-    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    _require_car_read_access(db, current_user, car)
     return build_evidence_pack(
         "qms_car",
         car_id,
@@ -6625,7 +6638,7 @@ def _sync_car_review_state(db: Session, car: models.CorrectiveActionRequest, *, 
     has_evidence = _car_has_evidence(db, car)
     latest = _latest_reviewable_car_response(db, car.id)
     from .car_response_workflow import sync_response_milestones
-    staged_control = sync_response_milestones(db, car, actor_user_id=actor_user_id)
+    sync_response_milestones(db, car, actor_user_id=actor_user_id)
 
     if car.root_cause_status == "REJECTED" or car.capa_status == "REJECTED":
         if latest is not None:
@@ -6648,12 +6661,12 @@ def _sync_car_review_state(db: Session, car: models.CorrectiveActionRequest, *, 
             car.status = models.CARStatus.IN_PROGRESS
             _mark_audit_in_progress_or_cap_open(db, car)
             return car.status, "accepted_pending_evidence"
-        if staged_control:
-            car.status = models.CARStatus.IN_PROGRESS
-            _mark_audit_in_progress_or_cap_open(db, car)
-            return car.status, "accepted_pending_control_loop"
-        _close_accepted_car_workflow(db, car, actor_user_id=actor_user_id)
-        return car.status, "closed"
+        # Accepting a proposed plan is not evidence of implementation or
+        # effectiveness. Missing control-plan setup must never bypass closure
+        # gates; explicit governed closeout owns the eventual finding closure.
+        car.status = models.CARStatus.IN_PROGRESS
+        _mark_audit_in_progress_or_cap_open(db, car)
+        return car.status, "accepted_pending_control_loop"
 
     if latest is not None or car.submitted_at:
         car.status = models.CARStatus.PENDING_VERIFICATION
@@ -7261,7 +7274,7 @@ def list_car_attachments(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
-    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    _require_car_read_access(db, current_user, car)
     return [
         CARAttachmentOut(
             id=a.id,
@@ -7318,6 +7331,8 @@ def upload_car_attachment(
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_not_escalated(car)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
+        raise HTTPException(status_code=423, detail="Closed or cancelled CAR evidence is read-only.")
     target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
@@ -7364,7 +7379,7 @@ def download_car_attachment(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
-    _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
+    _require_car_read_access(db, current_user, car)
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
@@ -7444,6 +7459,13 @@ def _close_legacy_cap_for_car(
     verified_at: datetime,
 ) -> None:
     if not getattr(car, "finding_id", None):
+        return
+    # Post-cutover migration c8d1e2f3a4b5 renamed this legacy CAP
+    # table, and gated migration d9e2f3a4b5c6 may delete it.
+    # The authoritative quality_cars/finding closure must not query a
+    # retired table. Only synchronize during an actual legacy coexistence.
+    from sqlalchemy import inspect as sa_inspect
+    if not sa_inspect(db.get_bind()).has_table("qms_corrective_actions"):
         return
     cap = (
         db.query(models.QMSCorrectiveAction)
@@ -8137,7 +8159,8 @@ def open_revision(doc_id: UUID, rev_id: UUID, request: Request, db: Session = De
     if not integrity_ok:
         audit_services.log_event(db, amo_id=amo_id, actor_user_id=current_user.id, entity_type="qms.document.revision", entity_id=str(rev.id), action="integrity_mismatch", after={"stored": rev.sha256, "computed": computed}, correlation_id=str(uuid.uuid4()), metadata=_audit_metadata(request))
         db.commit()
-    response = FileResponse(path=file_path, media_type=rev.mime_type or "application/octet-stream", filename=file_path.name)
+    document = db.query(models.QMSDocument).filter(models.QMSDocument.id == doc_id, models.QMSDocument.amo_id == amo_id).one()
+    response = FileResponse(path=file_path, media_type=rev.mime_type or "application/octet-stream", filename=download_name(document.doc_code, document.title, f"issue-{rev.issue_no}", f"rev-{rev.rev_no}", extension=file_path.suffix))
     response.headers["X-Document-Integrity"] = "ok" if integrity_ok else "compromised"
     return response
 

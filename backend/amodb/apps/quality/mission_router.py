@@ -5,12 +5,13 @@ from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.database import get_read_db
 
 from .mission_models import QualityMission, QualityMissionDecision, QualityMissionGate
+from .mission_change_policy import CHANGE_GATE_TEMPLATE, CONTROLLED_CHANGE_TYPES
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
@@ -53,9 +54,10 @@ DecisionStatus = Literal["APPROVED", "REJECTED", "RETURNED"]
 
 
 class MissionCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     mission_type: MissionType
     title: str = Field(min_length=3, max_length=255)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=4000)
     scope: dict[str, Any] = Field(default_factory=dict)
     regulatory_basis: list[dict[str, Any] | str] = Field(default_factory=list)
     risk_level: MissionRisk = "MEDIUM"
@@ -63,8 +65,24 @@ class MissionCreate(BaseModel):
     sponsor_user_id: str | None = Field(default=None, max_length=36)
     target_date: date | None = None
 
+    @model_validator(mode="after")
+    def validate_controlled_change(self):
+        from .mission_workflow import ChangeAuthorityPolicy
+        if self.mission_type in CONTROLLED_CHANGE_TYPES | {"CAPABILITY_ADDITION"}:
+            self.scope["authority_policy"] = ChangeAuthorityPolicy.model_validate(self.scope.get("authority_policy", {})).model_dump()
+        if self.mission_type in CONTROLLED_CHANGE_TYPES:
+            affected = self.scope.get("affected_scope")
+            if not isinstance(affected, str) or not 3 <= len(affected.strip()) <= 500:
+                raise ValueError("Identify the affected capability, location or procedure.")
+            if len(self.description or "") < 10:
+                raise ValueError("Describe the proposed change and reason in at least 10 characters.")
+            if not self.regulatory_basis:
+                self.regulatory_basis = ["MOPM 1.9; 1.10"]
+        return self
+
 
 class GatePatch(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     status: GateStatus | None = None
     source_owner_module: str | None = Field(default=None, max_length=80)
     source_type: str | None = Field(default=None, max_length=48)
@@ -75,12 +93,17 @@ class GatePatch(BaseModel):
     owner_user_id: str | None = Field(default=None, max_length=36)
     due_date: date | None = None
     blocking_reason: str | None = None
+    expected_updated_at: datetime | None = None
 
 
 class MissionDecisionCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     decision_type: DecisionType
     status: DecisionStatus
-    rationale: str = Field(min_length=3)
+    rationale: str = Field(min_length=3, max_length=4000)
+    evidence_asset_id: str | None = Field(default=None, max_length=36)
+    notified_on: date | None = None
+    expected_updated_at: datetime | None = None
 
 
 CAPABILITY_ADDITION_GATE_TEMPLATE: tuple[dict[str, Any], ...] = (
@@ -259,6 +282,7 @@ def mission_readiness(gates: list[QualityMissionGate]) -> dict[str, Any]:
 
 
 def _mission_dict(mission: QualityMission, *, include_detail: bool = False) -> dict[str, Any]:
+    from .mission_workflow import next_action
     gates = list(mission.gates or [])
     result: dict[str, Any] = {
         "id": str(mission.id),
@@ -281,6 +305,7 @@ def _mission_dict(mission: QualityMission, *, include_detail: bool = False) -> d
         "created_at": mission.created_at,
         "updated_at": mission.updated_at,
         "readiness": mission_readiness(gates),
+        "next_action": next_action(mission),
     }
     if include_detail:
         result["gates"] = [_gate_dict(gate) for gate in gates]
@@ -299,7 +324,7 @@ def _load_mission(db: Session, *, amo_id: str, mission_id: str, for_update: bool
         .filter(QualityMission.id == mission_id)
     )
     if for_update:
-        query = query.with_for_update()
+        query = query.with_for_update(of=QualityMission)
     mission = query.first()
     if not mission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quality Mission not found.")
@@ -314,13 +339,18 @@ def _latest_decision(mission: QualityMission, decision_type: str) -> QualityMiss
 
 
 def assert_mission_decision_allowed(mission: QualityMission, payload: MissionDecisionCreate) -> None:
+    from .mission_workflow import governed, next_action
     if mission.status in {"COMPLETE", "CANCELLED"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Mission decisions are immutable after {mission.status}.",
         )
     if payload.decision_type == "CUSTOM":
+        if governed(mission):
+            raise HTTPException(422, "Use the governed implementation or review action.")
         return
+    if governed(mission) and next_action(mission) != payload.decision_type:
+        raise HTTPException(409, "This decision is no longer the next required action. Refresh the change.")
 
     readiness = mission_readiness(list(mission.gates or []))
     if payload.decision_type == "QUALITY_SELF_EVALUATION" and payload.status == "APPROVED":
@@ -365,6 +395,11 @@ def _decision_evidence_snapshot(mission: QualityMission) -> dict[str, Any]:
     return {
         "mission_ref": mission.mission_ref,
         "mission_type": mission.mission_type,
+        "scope": mission.scope,
+        "title": mission.title,
+        "description": mission.description,
+        "owner_user_id": mission.owner_user_id,
+        "sponsor_user_id": mission.sponsor_user_id,
         "readiness": mission_readiness(list(mission.gates or [])),
         "gates": [
             {
@@ -374,6 +409,10 @@ def _decision_evidence_snapshot(mission: QualityMission) -> dict[str, Any]:
                 "source_type": gate.source_type,
                 "source_id": gate.source_id,
                 "source_route": gate.source_route,
+                "source_snapshot": gate.source_snapshot,
+                "requirement_ref": gate.requirement_ref,
+                "passed_by_user_id": gate.passed_by_user_id,
+                "passed_at": gate.passed_at.isoformat() if gate.passed_at else None,
                 "updated_at": gate.updated_at.isoformat() if gate.updated_at else None,
             }
             for gate in mission.gates
@@ -383,9 +422,18 @@ def _decision_evidence_snapshot(mission: QualityMission) -> dict[str, Any]:
 
 
 def _apply_decision_to_mission(mission: QualityMission, payload: MissionDecisionCreate) -> None:
+    from .mission_workflow import governed
     if payload.status in {"REJECTED", "RETURNED"}:
-        if payload.decision_type in {"QUALITY_SELF_EVALUATION", "ACCOUNTABLE_EXECUTIVE"}:
+        if governed(mission) or payload.decision_type in {"QUALITY_SELF_EVALUATION", "ACCOUNTABLE_EXECUTIVE"}:
             mission.status = "IN_PROGRESS"
+            mission.approved_at = None
+            # A fresh readiness review is mandatory after a return/rejection.
+            if governed(mission):
+                for gate in mission.gates:
+                    gate.status = "PENDING"
+                    gate.evidence_status = "LINKED" if gate.source_id else "UNLINKED"
+                    gate.passed_at = None
+                    gate.passed_by_user_id = None
         return
 
     if payload.decision_type == "QUALITY_SELF_EVALUATION":
@@ -396,8 +444,9 @@ def _apply_decision_to_mission(mission: QualityMission, payload: MissionDecision
     elif payload.decision_type == "AUTHORITY_SUBMISSION":
         mission.status = "SUBMITTED_TO_AUTHORITY"
     elif payload.decision_type == "AUTHORITY_ACCEPTANCE":
-        mission.status = "COMPLETE"
-        mission.completed_at = _utcnow()
+        if not governed(mission):
+            mission.status = "COMPLETE"
+            mission.completed_at = _utcnow()
 
 
 @router.get("/templates")
@@ -411,7 +460,8 @@ def mission_templates(
                 "label": "Aircraft / capability inclusion",
                 "description": "Govern the readiness evidence and approval chain for adding an aircraft, article or maintenance capability.",
                 "hard_gates": [dict(item) for item in CAPABILITY_ADDITION_GATE_TEMPLATE],
-            }
+            },
+            *[{"mission_type": kind, "label": kind.replace("_", " ").title(), "hard_gates": [dict(item) for item in CHANGE_GATE_TEMPLATE]} for kind in sorted(CONTROLLED_CHANGE_TYPES)],
         ],
         "tenant": {"amo_code": ctx.amo_code},
     }
@@ -424,11 +474,27 @@ def list_missions(
     owner_user_id: str | None = Query(default=None, max_length=36),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    view: Literal["register", "pending-approval", "implemented", "rejected"] = "register",
     ctx: TenantContext = Depends(require_quality_permission("qms.change.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    query = _mission_query(db, amo_id=ctx.amo_id).options(selectinload(QualityMission.gates))
+    query = _mission_query(db, amo_id=ctx.amo_id).options(selectinload(QualityMission.gates), selectinload(QualityMission.decisions))
+    from sqlalchemy import exists, and_, or_, not_, func
+    implemented = exists().where(and_(QualityMissionDecision.mission_id == QualityMission.id, QualityMissionDecision.amo_id == ctx.amo_id, QualityMissionDecision.evidence_snapshot["workflow_action"].as_string() == "IMPLEMENTATION", QualityMissionDecision.status == "APPROVED"))
+    if view == "pending-approval":
+        versioned = func.coalesce(QualityMission.scope["change_workflow_version"].as_integer(), 0) == 2
+        accepted = exists().where(and_(QualityMissionDecision.mission_id == QualityMission.id, QualityMissionDecision.amo_id == ctx.amo_id, QualityMissionDecision.evidence_snapshot["workflow_action"].as_string() == "AUTHORITY_ACCEPTANCE", QualityMissionDecision.status == "APPROVED"))
+        query = query.filter(not_(implemented), or_(
+            QualityMission.status.in_(["GATE_REVIEW", "READY_FOR_APPROVAL"]),
+            and_(QualityMission.status == "APPROVED", or_(not_(versioned), QualityMission.scope["authority_policy"]["notification_required"].as_boolean().is_(True))),
+            and_(QualityMission.status == "SUBMITTED_TO_AUTHORITY", or_(not_(versioned), and_(QualityMission.scope["authority_policy"]["approval_required"].as_boolean().is_(True), not_(accepted))))))
+    elif view == "implemented":
+        query = query.filter(implemented)
+    elif view == "rejected":
+        # The latest outcome determines this queue; corrected approvals leave it.
+        latest = db.query(QualityMissionDecision.status).filter(QualityMissionDecision.mission_id == QualityMission.id, QualityMissionDecision.amo_id == ctx.amo_id).order_by(QualityMissionDecision.decided_at.desc(), QualityMissionDecision.created_at.desc()).limit(1).correlate(QualityMission).scalar_subquery()
+        query = query.filter(latest.in_(["REJECTED", "RETURNED"]))
     if mission_type:
         query = query.filter(QualityMission.mission_type == mission_type)
     if status_filter:

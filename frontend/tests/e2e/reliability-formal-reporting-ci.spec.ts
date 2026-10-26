@@ -252,6 +252,9 @@ async function openReview(page: Page, api: ReturnType<typeof createMockApi>): Pr
 
 async function createAndPublish(page: Page, period: "HALF_YEAR" | "ANNUAL", number: string, start: string, end: string): Promise<string> {
   const createForm = page.locator(".rfw-create-form");
+  if (!(await createForm.isVisible())) {
+    await page.locator(".rfw-create-drawer > summary").click();
+  }
   await expect(createForm).toBeVisible();
   await createForm.locator("select").nth(1).selectOption(period);
   await createForm.locator("input[type='date']").nth(0).fill(start);

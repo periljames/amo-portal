@@ -1,0 +1,5 @@
+.portal-update-notice{position:fixed;right:16px;bottom:16px;z-index:1500;width:min(360px,calc(100vw - 32px));padding:16px;background:var(--surface,#fff);color:var(--text-primary,#152536);border:1px solid var(--surface-border,#cad4df);border-radius:10px;box-shadow:0 8px 30px #172b4226;font-size:14px}
+.portal-update-notice p{margin:8px 0;line-height:1.45}
+.portal-update-notice>div{display:flex;gap:8px;margin-top:12px}
+.portal-update-notice button{padding:8px 12px;border:1px solid var(--surface-border,#cad4df);border-radius:6px;cursor:pointer;background:var(--surface,#fff);color:inherit}
+.portal-update-notice button:first-child{background:#075e95;color:#fff;border-color:#075e95}

@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -52,7 +53,7 @@ const QualityPlannerStrategicHost: React.FC<Props> = ({ amoCode }) => {
         <button type="button" className={view === "coverage" ? "is-active" : ""} onClick={() => setView("coverage")}><Building2 size={15} /> Coverage</button>
       </nav>
       <div className="qms-planner-strategic-body">
-        {query.isLoading ? <p>Loading authoritative Planner coverage…</p> : query.error ? <p role="alert">{query.error instanceof Error ? query.error.message : "Audit coverage planning could not be loaded."}</p> : null}
+        {query.isLoading ? <p><InlineLoading label={"Loading authoritative Planner coverage…"}/></p> : query.error ? <p role="alert">{query.error instanceof Error ? query.error.message : "Audit coverage planning could not be loaded."}</p> : null}
         {data && view === "year" ? <>
           <section className="qms-planner-strategic-summary"><strong>{data.schedule_count}</strong><span>authoritative audit schedules in {year}</span><small>{data.timezone_name}</small></section>
           <div className="qms-planner-strategic-months">{data.months.map((row) => <article key={row.month}><strong>{MONTHS[row.month - 1]}</strong><div><span style={{ height: `${Math.max(6, (row.schedule_count / maxMonth) * 100)}%` }} /></div><small>{row.schedule_count}</small></article>)}</div>

@@ -1,3 +1,5 @@
+import Pagination from "../../components/shared/Pagination";
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, {
   useCallback,
   useEffect,
@@ -19,9 +21,8 @@ import {
 import type {
   ColDef,
   ICellRendererParams,
-  RowClickedEvent,
 } from "ag-grid-community";
-import { AgGridReact } from "ag-grid-react";
+import RecordTable from "../../components/shared/RecordTable";
 import {
   Activity,
   AlertTriangle,
@@ -35,8 +36,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
 import { ResponsiveSegmentedControl } from "../../components/QMS/ResponsiveSegmentedControl";
 import { useToast } from "../../components/feedback/ToastProvider";
 import { getContext } from "../../services/auth";
@@ -466,7 +465,6 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         minWidth: 220,
         flex: 1.5,
         wrapText: true,
-        autoHeight: true,
         cellRenderer: AuditIdentityCell,
         comparator: (_a, _b, nodeA, nodeB) =>
           (nodeA?.data?.audit_ref || "").localeCompare(
@@ -492,6 +490,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       {
         headerName: "Scheduled",
         field: "scheduledLabel",
+        wrapText: true,
         colId: "scheduled",
         minWidth: 150,
         flex: 1,
@@ -558,19 +557,9 @@ const QualityAuditsWorkspacePage: React.FC = () => {
     [canDeleteAudit, requestDelete],
   );
 
-  const defaultColDef = useMemo<ColDef<AuditGridRow>>(
-    () => ({
-      sortable: true,
-      resizable: true,
-      flex: 1,
-      minWidth: 96,
-      suppressMovable: true,
-    }),
-    [],
-  );
 
   const onRowClicked = useCallback(
-    (event: RowClickedEvent<AuditGridRow>) => {
+    (event: { data?: AuditGridRow; event?: Event }) => {
       const target = event.event?.target;
       if (target instanceof Element && target.closest("a, button")) return;
       const href = event.data?.nextActionHref;
@@ -755,64 +744,12 @@ const QualityAuditsWorkspacePage: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="qa-audits-list__grid-shell ag-theme-alpine">
-          <AgGridReact<AuditGridRow>
-            rowData={auditsQuery.isError ? [] : rowData}
-            columnDefs={columnDefs}
-            defaultColDef={{ ...defaultColDef, sortable: false }}
-            getRowId={(row) => row.data.id}
-            headerHeight={38}
-            animateRows={false}
-            suppressCellFocus
-            onRowClicked={onRowClicked}
-            rowClass="qa-audits-grid__row"
-            loading={auditsQuery.isLoading}
-            overlayLoadingTemplate='<span class="qa-audits-grid__overlay">Loading audits…</span>'
-            overlayNoRowsTemplate='<span class="qa-audits-grid__overlay"><strong>No audits in this view</strong><br/>Create a scheduled audit or start surveillance.</span>'
-            domLayout="normal"
-            containerStyle={{ width: "100%", height: "100%" }}
-          />
+        <div className="qa-audits-list__grid-shell" style={{ "--audit-row-count": Math.max(1, rowData.length) } as React.CSSProperties}>
+          <RecordTable rows={rowData} columns={columnDefs} label="Audits" loading={auditsQuery.isLoading} onRowClick={(data, event) => onRowClicked({ data, event: event.nativeEvent })} />
         </div>
-        <nav className="qa-audits-list__pager" aria-label="Audit result pages">
-          <span className="qa-audits-list__pager-meta">
-            {auditsQuery.data?.total ?? 0} results · Page {safePage}
-          </span>
-          <button
-            type="button"
-            disabled={safePage <= 1 || auditsQuery.isFetching}
-            onClick={() => patchParams({ page: String(safePage - 1) })}
-          >
-            Previous
-          </button>
-          <button
-            type="button"
-            disabled={
-              !auditsQuery.data ||
-              safePage * pageSize >= auditsQuery.data.total ||
-              auditsQuery.isFetching
-            }
-            onClick={() => patchParams({ page: String(safePage + 1) })}
-          >
-            Next
-          </button>
-          <label className="qa-audits-list__filter">
-            Results per page
-            <select
-              value={pageSize}
-              onChange={(event) =>
-                patchParams({ pageSize: event.target.value, page: null })
-              }
-            >
-              {WORKSPACE_PAGE_SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-        </nav>
+        <Pagination label="Audits" page={safePage} pageSize={pageSize} total={auditsQuery.data?.total} visibleCount={rowData.length} busy={auditsQuery.isFetching} pageSizes={WORKSPACE_PAGE_SIZES} onPageChange={(value)=>patchParams({page:String(value)})} onPageSizeChange={(value)=>patchParams({pageSize:String(value),page:null})} />
       </section>
-      {launchMode && launchAuditsQuery.isLoading ? <p role="status">Loading existing audits...</p> : null}
+      {launchMode && launchAuditsQuery.isLoading ? <p><InlineLoading label={"Loading existing audits..."}/></p> : null}
       {launchMode && launchAuditsQuery.isError ? <p role="alert">Existing audits could not be loaded. <button onClick={() => void launchAuditsQuery.refetch()}>Retry</button></p> : null}
       {launchMode && launchAuditsQuery.data ? (
         <AuditLaunchDrawer

@@ -1,3 +1,4 @@
+import { getOrCreateDeviceStorageKey } from "../../services/deviceStorageKey";
 import { authHeaders, getCachedUser } from "../../services/auth";
 import { getApiBaseUrl } from "../../services/config";
 import type { PdfWorkingCopyIdentity } from "./pdfWorkingCopyStore";
@@ -170,40 +171,11 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 async function deviceKey(database: IDBDatabase): Promise<CryptoKey> {
-  if (deviceKeyPromise) return deviceKeyPromise;
-  const loadOrCreate = async (): Promise<CryptoKey> => {
-    const read = database.transaction(KEY_STORE, "readonly");
-    const existing = await requestResult<{ id: string; key: CryptoKey } | undefined>(
-      read.objectStore(KEY_STORE).get(DEVICE_KEY_ID),
-    );
-    await transactionDone(read);
-    if (existing?.key) return existing.key;
-
-    const generated = await crypto.subtle.generateKey(
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"],
-    );
-    const recheck = database.transaction(KEY_STORE, "readonly");
-    const createdByAnotherTab = await requestResult<{ id: string; key: CryptoKey } | undefined>(
-      recheck.objectStore(KEY_STORE).get(DEVICE_KEY_ID),
-    );
-    await transactionDone(recheck);
-    if (createdByAnotherTab?.key) return createdByAnotherTab.key;
-
-    const write = database.transaction(KEY_STORE, "readwrite");
-    write.objectStore(KEY_STORE).put({ id: DEVICE_KEY_ID, key: generated });
-    await transactionDone(write);
-    return generated;
-  };
-  const locks = (navigator as Navigator & {
-    locks?: { request<T>(name: string, callback: () => T | PromiseLike<T>): Promise<T> };
-  }).locks;
-  const pending: Promise<CryptoKey> = locks
-    ? locks.request<CryptoKey>("amo-controlled-pdf-device-key", loadOrCreate)
-    : loadOrCreate();
-  deviceKeyPromise = pending;
-  return pending;
+  if (!deviceKeyPromise) {
+    deviceKeyPromise = getOrCreateDeviceStorageKey(database, KEY_STORE, DEVICE_KEY_ID)
+      .catch((error) => { deviceKeyPromise = null; throw error; });
+  }
+  return deviceKeyPromise;
 }
 
 function additionalData(key: string, sourceSha256: string, index: number): ArrayBuffer {

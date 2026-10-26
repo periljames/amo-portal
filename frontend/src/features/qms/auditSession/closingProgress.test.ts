@@ -169,6 +169,13 @@ describe("closing progressive disclosure", () => {
     expect(closingLockedReason(7, active)).toMatch(/execution|assurance/i);
   });
 
+  it("issued revision stays at execution closure even after the approved active draft disappears", () => {
+    const issued = { ...base, hasGeneratedDraft: true, activeRevisionStatus: null, hasSignature: true, hasIssuedRevision: true };
+    expect(resolveActiveClosingStep(issued)).toBe(6);
+    expect(closingStepAllowsActions(6, resolveActiveClosingStep(issued))).toBe(true);
+    expect(resolveActiveClosingStep({ ...issued, executionClosed: true })).toBe(7);
+  });
+
   it("execution closed: assurance stage 7 current; completed stages readable", () => {
     const active = resolveActiveClosingStep({
       ...base,

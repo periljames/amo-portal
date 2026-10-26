@@ -1,3 +1,4 @@
+import { resolveDownloadFilename, saveDownloadedFile } from "../../utils/downloads";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -63,12 +64,7 @@ async function downloadPdf(id: number, filename: string): Promise<void> {
   const response = await fetch(`${getApiBaseUrl()}${ROOT}/reports/${id}/pdf`, { headers: authHeaders({ Accept: "application/pdf" }) });
   if (!response.ok) throw new Error(`Controlled PDF could not be generated (${response.status}).`);
   const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  saveDownloadedFile(blob, resolveDownloadFilename(response.headers.get("Content-Disposition"), filename, blob.type));
 }
 
 export function ReliabilityManagementReports(): React.ReactElement {
@@ -152,7 +148,7 @@ export function ReliabilityManagementReports(): React.ReactElement {
       });
       setSnapshot(result);
       setPreviewHtml(await readHtml(result.id));
-      navigate(`/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${result.id}`, { replace: true });
+      navigate(`/maintenance/${encodeURIComponent(amoCode)}/reliability/management-reports?snapshot=${result.id}`, { replace: true });
       setNotice(`Snapshot ${result.id} was retained. Opening this link later reads the same retained report rather than recalculating it.`);
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : "The management report could not be generated.");
@@ -161,7 +157,7 @@ export function ReliabilityManagementReports(): React.ReactElement {
 
   const copyLink = async () => {
     if (!snapshot) return;
-    const link = `${window.location.origin}/maintenance/${encodeURIComponent(amoCode)}/reliability/workbook-reports?snapshot=${snapshot.id}`;
+    const link = `${window.location.origin}/maintenance/${encodeURIComponent(amoCode)}/reliability/management-reports?snapshot=${snapshot.id}`;
     try {
       await navigator.clipboard.writeText(link);
       setNotice("Authenticated retained-report link copied.");

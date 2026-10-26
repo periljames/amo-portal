@@ -1,7 +1,27 @@
 import { apiRequest, qmsPath } from "./apiClient";
+import { uploadTimeoutMs } from "./transferPolicy";
 import type { PublicationUploadPayload } from "./publications";
 import { projectOfflineChecklistBindings, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
+
+export type ChecklistSourceReview = {
+  documents: Array<{ binding_id: string; document_code: string; filename: string; previous_count: number; question_count: number; items: ChecklistTemplateItem[] }>;
+  preview_sha256: string;
+  can_rebuild: boolean;
+  can_manage: boolean;
+  blocker: string | null;
+};
+
+export function reviewChecklistSource(amoCode: string, auditId: string) {
+  return apiRequest<ChecklistSourceReview>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings/source-review`),
+    { cacheTtlMs: 0, offline: { cache: false, allowStaleFallback: false } });
+}
+
+export function rebuildChecklistSource(amoCode: string, auditId: string, preview_sha256: string, reason: string) {
+  return apiRequest<{ question_count: number; requires_preparation_issue: boolean }>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings/rebuild-source`),
+    { method: "POST", body: JSON.stringify({ preview_sha256, reason }), offline: { queueMutation: false } });
+}
 
 export type ChecklistFindingTrigger = "NONE" | "NONCOMPLIANT" | "OBSERVATION" | "ADVERSE_RESPONSE";
 export type ChecklistCanonicalStatus = "COMPLIANT" | "NONCOMPLIANT" | "OBSERVATION" | "NOT_APPLICABLE" | "NOT_VERIFIED";
@@ -212,12 +232,16 @@ export type UploadedChecklistDraft = {
 };
 
 /** Extract editable candidates; the upload itself never binds or issues a checklist. */
-export function parseUploadedAuditChecklist(amoCode: string, auditId: string, file: File) {
+export async function parseUploadedAuditChecklist(amoCode: string, auditId: string, file: File) {
+  if (/\.docx$/i.test(file.name)) {
+    const { importWordChecklist } = await import("./qmsWordChecklistImport");
+    return importWordChecklist(file);
+  }
   const body = new FormData();
   body.append("file", file);
   return apiRequest<UploadedChecklistDraft>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklists/parse-upload`),
-    { method: "POST", body, timeoutMs: 120_000, offline: { queueMutation: false } },
+    { method: "POST", body, timeoutMs: uploadTimeoutMs(body), offline: { queueMutation: false } },
   );
 }
 
@@ -316,6 +340,6 @@ export function uploadDmsChecklistFromAudit(
   }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-library/upload`), {
     method: "POST",
     body,
-    timeoutMs: 120_000,
+    timeoutMs: uploadTimeoutMs(body),
   });
 }

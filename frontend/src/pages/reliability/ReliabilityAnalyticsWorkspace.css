@@ -479,3 +479,84 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Workspace-specific density and containment. Charts remain live and interactive. */
+.rel-analytics-dashboard { min-width: 0; max-width: none; }
+.rel-analytics-dashboard__categories {
+  display: flex; gap: .45rem; overflow-x: auto; overscroll-behavior-x: contain;
+  padding: .2rem .1rem .75rem; margin: 0 0 .5rem;
+  border-bottom: 1px solid var(--reliability-border);
+}
+.rel-analytics-dashboard__categories a {
+  flex: 0 0 auto; color: CanvasText; text-decoration: none;
+  border: 1px solid var(--reliability-border);
+  border-radius: .5rem; padding: .57rem .8rem; font-size: .83rem; font-weight: 600;
+}
+.rel-analytics-dashboard__categories a:hover { background: var(--reliability-surface-strong); }
+.rel-analytics-dashboard__categories a.is-active {
+  border-color: #0f766e; background: color-mix(in srgb, #0f766e 12%, Canvas);
+  box-shadow: inset 0 -2px 0 #0f766e;
+}
+.rel-analytics-dashboard__categories a:focus-visible { outline: 3px solid #0f766e; outline-offset: 2px; }
+.rel-analytics-dashboard__filters {
+  border: 1px solid var(--reliability-border); border-radius: .65rem; margin: 0 0 1rem; background: Canvas;
+}
+.rel-analytics-dashboard__filters > summary {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: .5rem;
+  padding: .85rem 1rem; cursor: pointer; font-weight: 700; font-size: .82rem;
+}
+.rel-analytics-dashboard__filters > summary span { font-weight: 550; color: var(--reliability-muted); }
+.rel-analytics-dashboard__filters[open] > summary { border-bottom: 1px solid var(--reliability-border); }
+.rel-analytics-dashboard__filters .reliability-analytics__toolbar {
+  position: static; margin: 0; border: 0; border-radius: 0; box-shadow: none;
+  padding: .85rem; background: transparent; backdrop-filter: none;
+}
+.rel-analytics-dashboard__shortcuts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: .6rem; margin: 0 0 1rem;
+}
+.rel-analytics-dashboard__shortcuts a {
+  display: grid; gap: .32rem; min-width: 0;
+  border: 1px solid var(--reliability-border); border-radius: .6rem;
+  padding: .85rem; text-decoration: none; color: CanvasText; font-size: .92rem; font-weight: 700;
+  background: var(--reliability-surface);
+}
+.rel-analytics-dashboard__shortcuts a:hover { border-color: #0f766e; }
+.rel-analytics-dashboard__shortcuts a span { font-size: .75rem; color: var(--reliability-muted); font-weight: 500; }
+.rel-analytics-dashboard .reliability-analytics__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.rel-analytics-dashboard .reliability-analytics__chart { min-height: 23rem; }
+.rel-analytics-dashboard .reliability-analytics__chart-card--wide { grid-column: 1 / -1; }
+.rel-analytics-dashboard .reliability-analytics__register { min-width: 0; }
+@media (max-width: 850px) {
+  .rel-analytics-dashboard .reliability-analytics__grid { grid-template-columns: 1fr; }
+  .rel-analytics-dashboard .reliability-analytics__chart-card--wide { grid-column: auto; }
+}
+@media print {
+  .rel-analytics-dashboard__categories, .rel-analytics-dashboard__filters, .rel-analytics-dashboard__shortcuts { display: none; }
+}
+
+.rel-chart-table__controls {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; gap: .6rem; flex-wrap: wrap; align-items: center;
+  background: Canvas; padding: .7rem;
+  border-bottom: 1px solid var(--reliability-border);
+  font-size: .77rem;
+}
+.rel-chart-table__controls label { display: flex; align-items: center; gap: .3rem; }
+.rel-chart-table__controls input, .rel-chart-table__controls select {
+  min-height: 2.35rem; background: Canvas; color: CanvasText; font: inherit;
+  border: 1px solid var(--reliability-border); border-radius: .4rem; padding: .4rem .55rem;
+}
+.rel-chart-table__controls button { background: Canvas; color: CanvasText; font: inherit;
+  border-radius: .4rem; border: 1px solid var(--reliability-border); padding: .4rem .55rem; }
+.rel-chart-table__controls button:disabled { opacity: .5; }
+.rel-analytics-dashboard .reliability-analytics__chart-table { overflow: auto; max-height: 50vh; }
+.rel-analytics-dashboard .reliability-analytics__chart-table thead { position: sticky; top: 0; background: Canvas; z-index: 1; }
+
+.rel-analytics-dashboard__kpi-details{margin:.5rem 0 1rem;border:1px solid var(--reliability-border);border-radius:.65rem;background:Canvas}
+.rel-analytics-dashboard__kpi-details>summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:.4rem;cursor:pointer;
+  font-size:.83rem;font-weight:750;padding:.85rem 1rem;min-height:42px}
+.rel-analytics-dashboard__kpi-details>summary span{font-weight:450;font-size:.75rem;color:var(--reliability-muted)}
+.rel-analytics-dashboard__kpi-details[open]>summary{border-bottom:1px solid var(--reliability-border)}
+.rel-analytics-dashboard__kpi-details .reliability-analytics__metrics{padding:.75rem;margin:0}
+.rel-analytics-dashboard__kpi-details>summary:focus-visible{outline:2px solid #0f766e;outline-offset:2px}

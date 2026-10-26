@@ -2,6 +2,7 @@ import { apiRequest, qmsPath } from "./apiClient";
 import { getContext, getToken, handleAuthFailure } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { CARAttachmentOut } from "./qms";
+import { fetchFileDownload } from "./fileTransfers";
 
 export {
   downloadCarEvidencePack,
@@ -59,7 +60,7 @@ export async function qmsUploadCarAttachment(carId: string, file: File): Promise
 }
 
 export async function qmsDownloadCarAttachmentBlob(carId: string, attachmentId: string): Promise<Blob> {
-  const response = await fetch(
+  const { response, blob } = await fetchFileDownload(
     `${getApiBaseUrl()}${evidencePath(carId, `/${encodeURIComponent(attachmentId)}/download`)}`,
     {
       method: "GET",
@@ -68,7 +69,7 @@ export async function qmsDownloadCarAttachmentBlob(carId: string, attachmentId: 
     },
   );
   await assertResponse(response);
-  return response.blob();
+  return blob!;
 }
 
 export async function qmsDeleteCarAttachment(carId: string, attachmentId: string): Promise<void> {

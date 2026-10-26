@@ -17,6 +17,8 @@ Role model (from security / AccountRole):
 
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 
 from datetime import date
@@ -207,6 +209,7 @@ def get_work_order_by_number(
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
 )
+@offline_create('/work-orders', schemas.WorkOrderRead, status_code=status.HTTP_201_CREATED)
 def create_work_order(
     payload: schemas.WorkOrderCreate,
     db: Session = Depends(get_db),
@@ -380,6 +383,7 @@ def get_task(
     response_model=schemas.TaskCardRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/work-orders/{work_order_id}/tasks', schemas.TaskCardRead, status_code=status.HTTP_201_CREATED)
 def create_task(
     work_order_id: int,
     payload: schemas.TaskCardCreate,
@@ -504,6 +508,7 @@ def update_task(
             models.TaskCard.id == task_id,
             models.TaskCard.amo_id == current_user.effective_amo_id,
         )
+        .with_for_update()
         .first()
     )
     if not task:
@@ -544,7 +549,12 @@ def update_task(
     if expected_updated_at is not None and task.updated_at != expected_updated_at:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Task card has been modified by another user.",
+            detail={
+                "error_code": "TASK_REVISION_CONFLICT",
+                "detail": "Task card has been modified by another user. Review the latest version before reapplying this change.",
+                "current_updated_at": task.updated_at.isoformat(),
+                "retryable": True,
+            },
         )
 
     incoming_status = data.get("status")
@@ -989,6 +999,7 @@ def list_work_logs_for_task(
     response_model=schemas.WorkLogRead,
     status_code=status.HTTP_201_CREATED,
 )
+@offline_create('/work-orders/tasks/{task_id}/work-logs', schemas.WorkLogRead, status_code=status.HTTP_201_CREATED)
 def create_work_log(
     task_id: int,
     payload: schemas.WorkLogCreate,

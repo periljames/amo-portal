@@ -24,7 +24,9 @@ const LEADER_KEY = "amo_portal_connectivity_leader_v1";
 // between successful probes and create duplicate liveness traffic.
 const LEADER_TTL_MS = 45_000;
 const HEALTHY_PROBE_MS = 30_000;
-const CONNECTIVITY_PROBE_TIMEOUT_MS = 1_500;
+// Public Funnel TLS/relay round trips can exceed three seconds even while the
+// backend is healthy. A LAN-sized deadline manufactures portal-wide outages.
+const CONNECTIVITY_PROBE_TIMEOUT_MS = 8_000;
 const BACKOFF_MS = [2_000, 5_000, 10_000, 20_000, 40_000, 60_000];
 const READINESS_NEUTRAL_PATHS = new Set(["/", "/livez", "/health", "/time"]);
 const tabId = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -236,6 +238,10 @@ function responseIsReadinessNeutral(response: Response): boolean {
 
 export function notePortalResponse(response: Response): void {
   if (response.status === 503) {
+    // A module dependency can fail while the rest of the API remains healthy.
+    // Only an explicit shared-dependency signal or a readiness probe may
+    // change portal-wide connectivity.
+    if (!isSharedServiceUnavailable(response)) return;
     const delay = retryAfterMs(response) ?? nextDelay();
     const reason = response.headers.get("X-Error-Code") || "SERVICE_UNAVAILABLE";
     const changed = snapshot.state !== "DEGRADED" || snapshot.reason !== reason;
@@ -261,6 +267,17 @@ export function notePortalResponse(response: Response): void {
       attempt: 0,
       reason: null,
     }, changed);
+  }
+}
+
+export function isSharedServiceUnavailable(response: Response): boolean {
+  if (response.status !== 503) return false;
+  const readiness = response.headers.get("X-Portal-Readiness");
+  if (readiness === "offline" || readiness === "degraded") return true;
+  try {
+    return ["/readyz", "/healthz"].includes(new URL(response.url).pathname);
+  } catch {
+    return false;
   }
 }
 
@@ -324,8 +341,22 @@ export function probePortalReadiness(force = false): Promise<PortalConnectivityS
       schedule(delay);
       return next;
     } catch (error) {
-      notePortalNetworkFailure(error instanceof Error ? error.message : "network-unreachable");
-      return snapshot;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        notePortalNetworkFailure("device-offline");
+        return snapshot;
+      }
+      // A failed background observation is ambiguous. Let actual requests
+      // establish availability; explicit failed readiness responses above
+      // still report their dependency outage, and expired sessions stay blocked.
+      const delay = nextDelay();
+      const reason = error instanceof Error ? error.message : "readiness-probe-unreachable";
+      const changed = snapshot.state !== "DEGRADED" || snapshot.reason !== reason;
+      const next = update("DEGRADED", {
+        checkedAt: Date.now(), attempt: Math.min(snapshot.attempt + 1, BACKOFF_MS.length - 1),
+        retryAt: Date.now() + delay, reason,
+      }, changed);
+      schedule(delay);
+      return next;
     } finally {
       probeInFlight = null;
     }

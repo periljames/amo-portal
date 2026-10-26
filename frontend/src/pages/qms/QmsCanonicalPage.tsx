@@ -1,3 +1,4 @@
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 import React, { lazy, Suspense } from "react";
 import { qmsPageLoaders } from "../../app/qmsRouteLoaders";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
@@ -14,13 +15,13 @@ const QmsRegisterPage = lazy(qmsPageLoaders.register);
 const QmsPlannerLivePage = lazy(qmsPageLoaders.planner);
 
 export default function QmsCanonicalPage(): React.ReactElement {
-  return <Suspense fallback={<div role="status" className="qms-route-loading">Loading Quality workspace…</div>}><QmsCanonicalContent /></Suspense>;
+  return <Suspense fallback={<WorkspaceLoading label="Loading Quality workspace…" />}><QmsCanonicalContent /></Suspense>;
 }
 
 function assuranceWorkspace(title: string, subtitle: string, content: React.ReactNode): React.ReactElement {
   return (
     <QualityAuditsSectionLayout title={title} subtitle={subtitle}>
-      {content}
+      <Suspense fallback={<WorkspaceLoading />}>{content}</Suspense>
     </QualityAuditsSectionLayout>
   );
 }
@@ -114,7 +115,7 @@ function QmsCanonicalContent(): React.ReactElement {
   const isEvidenceRegister = /\/quality\/evidence-vault(?:\/(?:search|audit-packages|car-packages|document-approval-packages|management-review-packages|regulator-packages|immutable-archive|retention|files))?\/?$/i.test(location.pathname);
   if (isEvidenceRegister) {
     return assuranceWorkspace(
-      "Evidence",
+      "Evidence Vault",
       "Objective evidence and retained assurance records.",
       <QmsRegisterPage embedded />
     );

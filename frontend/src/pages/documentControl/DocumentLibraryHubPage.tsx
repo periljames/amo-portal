@@ -435,6 +435,7 @@ export default function DocumentLibraryHubPage() {
     canControl={canControl}
     actions={<>
       {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("warehouse"); setLibraryServicesOpen(true); }}><Search size={14} /> Search everything</button> : null}\n      {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("catalog"); setLibraryServicesOpen(true); }}><LibraryBig size={14} /> Library services</button> : null}
+      {!selectedJob ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/structure`)}><Workflow size={14} /> Browse hierarchy</button> : null}
       {!selectedJob ? <button type="button" className="dc-button" onClick={() => { setLibraryServicesMode("scan"); setLibraryServicesOpen(true); }}><ScanLine size={14} /> Scan item</button> : null}
       {canControl && !selectedJob ? <button type="button" className="dc-button dc-button--primary" onClick={() => setUploadOpen(true)}><UploadCloud size={14} /> Register document</button> : null}
       {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/records`)}><Archive size={14} /> Records vault</button> : null}

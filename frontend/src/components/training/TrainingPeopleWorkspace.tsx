@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useDeferredValue, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, FileUp, PanelRightOpen, RefreshCw, Search, UserRound, UsersRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -90,7 +91,7 @@ const TrainingPeopleWorkspace: React.FC<Props> = ({ canManage, onOpenImport }) =
         <label><span className="sr-only">Employment state</span><select value={active} onChange={(event) => { setActive(event.target.value as typeof active); setOffset(0); }}><option value="active">Active people</option><option value="inactive">Inactive people</option><option value="all">All people</option></select></label>
       </div>
 
-      {people.isLoading ? <div className="tos-loading">Loading the server register…</div> : null}
+      {people.isLoading ? <div className="tos-loading"><InlineLoading label={"Loading the server register…"}/></div> : null}
       {people.isError ? <div className="tos-empty"><AlertTriangle size={24} /><strong>People source unavailable</strong><span>No false-zero register has been rendered.</span><button onClick={() => void people.refetch()}>Retry source</button></div> : null}
       {people.data && !people.data.items.length ? <div className="tos-empty"><UsersRound size={24} /><strong>No matching people</strong><span>Change the filters or import the canonical people and training history.</span>{canManage ? <button onClick={onOpenImport}><FileUp size={16} /> Import data</button> : null}</div> : null}
 

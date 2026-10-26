@@ -86,9 +86,10 @@ def test_replay_events_since_persists_via_audit_store(db_session):
     )
     db_session.commit()
 
-    replay, reset = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(first.id))
+    replay, reset, cursor = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(first.id))
     assert reset is False
     assert [event.id for event in replay] == [str(second.id)]
+    assert cursor[1] == str(second.id)
 
 
 def test_replay_events_since_orders_events_with_the_same_timestamp(db_session):
@@ -115,10 +116,11 @@ def test_replay_events_since_orders_events_with_the_same_timestamp(db_session):
     second.occurred_at = occurred_at
     db_session.commit()
 
-    replay, reset = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(first.id))
+    replay, reset, cursor = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(first.id))
 
     assert reset is False
     assert first.id < second.id
+    assert cursor[1] == str(second.id)
     assert [event.id for event in replay] == [str(second.id)]
 
 
@@ -140,10 +142,10 @@ def test_replay_events_since_requires_reset_for_unknown_or_expired_cursor(db_ses
     )
     db_session.commit()
 
-    _, reset_unknown = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id="missing")
+    _, reset_unknown, _ = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id="missing")
     assert reset_unknown is True
 
-    _, reset_stale = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(old_event.id))
+    _, reset_stale, _ = events_router._replay_events_since(db_session, amo_id=amo.id, last_event_id=str(old_event.id))
     assert reset_stale is True
 
 
@@ -177,9 +179,10 @@ def test_replay_events_since_respects_tenant_scope(db_session):
     )
     db_session.commit()
 
-    replay, reset = events_router._replay_events_since(db_session, amo_id=amo_a.id, last_event_id=str(anchor.id))
+    replay, reset, cursor = events_router._replay_events_since(db_session, amo_id=amo_a.id, last_event_id=str(anchor.id))
     assert reset is False
     assert [event.id for event in replay] == [str(later_a.id)]
+    assert cursor[1] == str(later_a.id)
 
 
 def test_list_event_history_cursor_pagination(db_session):
@@ -302,10 +305,12 @@ def test_stream_bootstrap_releases_db_before_keepalive(db_session, monkeypatch):
         headers = {"authorization": f"Bearer {token}"}
         query_params = {}
 
-    resolved_user, bootstrap = events_router._prepare_stream_bootstrap(_Req())
+    resolved_user, bootstrap, cursor, delivered_ids = events_router._prepare_stream_bootstrap(_Req())
     assert str(resolved_user.id) == str(user.id)
     assert str(resolved_user.amo_id) == str(amo.id)
     assert bootstrap == []
+    assert cursor is None
+    assert delivered_ids == set()
     assert closed["count"] == 1
 
 

@@ -41,7 +41,11 @@ export default function ManualReaderPage() {
 
   const openReview = () => {
     if (!workspaceCode || !params.manualId || !params.revId) return;
-    navigate(`/maintenance/${encodeURIComponent(workspaceCode)}/publications/${encodeURIComponent(params.manualId)}/rev/${encodeURIComponent(params.revId)}/diff`);
+    // The PDF renderer owns asynchronous PDF.js worker and canvas tasks.
+    // A document navigation releases that renderer's lifetime before the
+    // revision comparison mounts, avoiding stale worker responses racing
+    // with a second route in the same JavaScript realm.
+    window.location.assign(`/maintenance/${encodeURIComponent(workspaceCode)}/publications/${encodeURIComponent(params.manualId)}/rev/${encodeURIComponent(params.revId)}/diff`);
   };
 
   const toggleFullscreen = async () => {

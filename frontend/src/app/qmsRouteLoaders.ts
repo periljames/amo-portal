@@ -1,5 +1,9 @@
 /** Shared lazy entry points for navigation, intent preloading, and QMS dispatch. */
 export const qmsPageLoaders = {
+  auditWorkspace: () => import("../pages/qualityAudits/QualityAuditsWorkspacePage"),
+  auditRegister: () => import("../pages/qualityAudits/QualityAuditRegisterPage"),
+  auditScopes: () => import("../pages/qualityAudits/QualityAuditScopesPage"),
+  auditPlan: () => import("../pages/qualityAudits/QualityAuditPlanSchedulePage"),
   canonical: () => import("../pages/qms/QmsCanonicalPage"),
   overview: () => import("../pages/qms/QmsOverviewPage"),
   people: () => import("../pages/qms/QmsPeoplePage"),
@@ -14,6 +18,8 @@ export const qmsPageLoaders = {
   carControl: () => import("../pages/qms/QmsCarControlLoopPage"),
   carReport: () => import("../pages/qms/QmsCarPerformanceReportPage"),
   providers: () => import("../pages/qms/QmsExternalProvidersPage"),
+  providerAccess: () => import("../pages/externalProvider/ExternalProviderQualityPage"),
+  settings: () => import("../pages/qms/QmsSettingsPage"),
   register: () => import("../pages/qms/QmsRegisterPage"),
   planner: () => import("../pages/qms/planner/QmsPlannerLivePage"),
   setup: () => import("../features/qms/auditSession/AuditSetupWorkspace"),
@@ -36,11 +42,17 @@ export function qmsRouteLoaderKey(path: string): keyof typeof qmsPageLoaders | n
   }
   const stage = /\/audits\/[^/]+\/(setup|prepare|live|closing|follow-up|archive)\/?$/i.exec(pathname)?.[1]?.toLowerCase();
   if (stage) return stage === "follow-up" ? "followUp" : stage as "setup" | "prepare" | "live" | "closing" | "archive";
+  if (/\/audits\/workspace\/?$/i.test(pathname)) return "auditWorkspace";
+  if (/\/audits\/register\/?$/i.test(pathname)) return "auditRegister";
+  if (/\/audits\/scopes\/?$/i.test(pathname)) return "auditScopes";
+  if (/\/audits\/plan\/?$/i.test(pathname)) return "auditPlan";
   if (/\/calendar(?:\/|$)/i.test(pathname)) return "planner";
   if (/\/audits\/checklists(?:\/|$)/i.test(pathname)) return "checklist";
   if (/\/audits\/program\/[^/]+\/items\/[^/]+\/schedule\/?$/i.test(pathname)) return "programmeSchedule";
   if (/\/audits\/program(?:\/|$)/i.test(pathname)) return "programme";
   if (/\/suppliers(?:\/|$)/i.test(pathname)) return "providers";
+  if (/\/external-accounts(?:\/|$)/i.test(pathname)) return "providerAccess";
+  if (/\/settings(?:\/|$)/i.test(pathname)) return "settings";
   if (/\/reports\/car-performance(?:\/|$)/i.test(pathname)) return "carReport";
   if (/\/evidence-vault(?:\/|$)/i.test(pathname)) return "register";
   if (/\/cars(?:\/|$)/i.test(pathname)) return "cars";

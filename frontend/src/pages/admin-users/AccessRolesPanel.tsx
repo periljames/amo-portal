@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -193,7 +194,7 @@ export default function AccessRolesPanel({ amoId }: { amoId?: string | null }) {
     });
   };
 
-  if (framework.isPending) return <section className="access-roles-panel"><p>Loading role framework…</p></section>;
+  if (framework.isPending) return <section className="access-roles-panel"><p><InlineLoading label={"Loading role framework…"}/></p></section>;
   if (framework.isError) return <section className="access-roles-panel"><div className="access-roles-panel__feedback is-error">{(framework.error as Error).message}</div></section>;
 
   if (!framework.data?.initialized) {

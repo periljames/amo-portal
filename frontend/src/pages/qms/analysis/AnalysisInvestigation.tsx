@@ -1,3 +1,4 @@
+import Pagination from "../../../components/shared/Pagination";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { addQmsInvestigationEntry, createQmsAssuranceCase, listQmsAssuranceCases, type QmsAssuranceCase, type QmsInvestigationEntryType, type QmsInvestigationMethod } from "../../../services/qmsAssuranceCases";
@@ -47,7 +48,8 @@ export default function AnalysisInvestigation({ tenant, caseId, study, onSelect,
     <section className="qa-analysis-card"><h2>Qualitative investigation</h2><p>Record facts, test hypotheses, then document supported causal conclusions. Entries are retained in Assurance Cases; corrections are appended to preserve attribution.</p>
       <div className="qa-analysis-form-grid"><label>Open investigation<select value={caseId} onChange={e => { onSelect(e.target.value); setParent(""); }}><option value="">Select an assurance case</option>{study && !cases.data?.items.some(item => item.id === study.id) && <option value={study.id}>{study.case_ref} · {study.title}</option>}{cases.data?.items.map(item => <option key={item.id} value={item.id}>{item.case_ref} · {item.title}</option>)}</select></label>
       {canEdit && <label>New investigation title<input value={title} maxLength={255} onChange={e => setTitle(e.target.value)} /></label>}</div>
-      <div className="qa-analysis-actions"><button disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 50))}>Previous cases</button><button disabled={!cases.data?.has_more} onClick={() => setOffset(offset + 50)}>More cases</button>{canEdit && <button disabled={busy || title.trim().length < 3} onClick={() => void create()}>Create investigation</button>}</div>
+      <div className="qa-analysis-actions">{canEdit && <button disabled={busy || title.trim().length < 3} onClick={() => void create()}>Create investigation</button>}</div>
+      <Pagination label="Investigations" page={Math.floor(offset / 50) + 1} pageSize={50} total={cases.data?.total} visibleCount={cases.data?.items.length || 0} hasNext={Boolean(cases.data?.has_more)} busy={cases.isFetching} onPageChange={page => setOffset((page - 1) * 50)} />
       {cases.isError && <p role="alert">Investigations could not be loaded. <button onClick={() => void cases.refetch()}>Retry</button></p>}
     </section>
     {study && <section className="qa-analysis-card"><h2>{study.case_ref} · {study.title}</h2><p>{study.status.replaceAll("_", " ")} · {references.length} evidence references selected for the next statement.</p>

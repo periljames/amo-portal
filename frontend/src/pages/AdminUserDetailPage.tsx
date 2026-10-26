@@ -1,3 +1,5 @@
+import InlineLoading from "../components/shared/InlineLoading";
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,7 +65,7 @@ const downloadBlob = ({ blob, filename }: { blob: Blob; filename: string }) => {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -246,7 +248,7 @@ const AdminUserDetailPage: React.FC = () => {
   if (workspaceQuery.isPending) {
     return (
       <DepartmentLayout amoCode={resolvedAmoCode} activeDepartment="admin-users">
-        <div className="admin-user-profile"><div className="aum-panel"><div className="aum-empty">Loading user workspace…</div></div></div>
+        <div className="admin-user-profile"><div className="aum-panel"><div className="aum-empty"><InlineLoading label={"Loading user workspace…"}/></div></div></div>
       </DepartmentLayout>
     );
   }

@@ -8,6 +8,8 @@
 import { ApiClientError, apiRequest, qualityPath } from "./apiClient";
 import { getToken, handleAuthFailure, getContext } from "./auth";
 import { getApiBaseUrl } from "./config";
+import { portalFetch } from "./offlineHttp";
+import { fetchFileDownload } from "./fileTransfers";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import {
   beginBackgroundLoading,
@@ -517,56 +519,20 @@ function toQuery(params: Record<string, QueryVal>): string {
 }
 
 function downloadEvidencePack(path: string): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", `${API_BASE}${path}`);
-    const token = getToken();
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
-    xhr.responseType = "blob";
-
-    xhr.addEventListener("load", () => {
-      if (xhr.status === 401) {
-        handleAuthFailure("expired");
-        reject(new Error("Session expired. Please sign in again."));
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const message = xhr.responseText || `Request failed (${xhr.status})`;
-        reject(new Error(message));
-        return;
-      }
-      resolve(xhr.response as Blob);
-    });
-
-    xhr.addEventListener("error", () => {
-      reject(new Error("Network error while downloading evidence pack."));
-    });
-
-    xhr.timeout = 45000;
-    xhr.addEventListener("timeout", () => {
-      reject(new Error("Timed out while downloading evidence pack."));
-    });
-    xhr.send();
-  });
+  return downloadBinary(path);
 }
 
 async function downloadBinary(path: string): Promise<Blob> {
   const token = getToken();
   beginBackgroundLoading();
   try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort("timeout"), 30000);
-    const res = await fetch(`${API_BASE}${path}`, {
+    const { response: res, blob } = await fetchFileDownload(`${API_BASE}${path}`, {
       method: "GET",
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: "include",
-      signal: controller.signal,
     });
-    window.clearTimeout(timeout);
 
     if (res.status === 401) {
       handleAuthFailure("expired");
@@ -577,7 +543,7 @@ async function downloadBinary(path: string): Promise<Blob> {
       const text = await res.text().catch(() => "");
       throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
     }
-    return res.blob();
+    return blob!;
   } finally {
     endBackgroundLoading();
   }
@@ -667,18 +633,15 @@ async function fetchJson<T>(
   const token = getToken();
   if (!options?.silent) beginBackgroundLoading();
   try {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    const res = await portalFetch(path, {
       method: "GET",
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: "include",
-      signal: controller.signal,
+      timeoutMs: 20_000,
     });
-    window.clearTimeout(timeout);
 
     if (res.status === 401) {
       handleAuthFailure("expired");

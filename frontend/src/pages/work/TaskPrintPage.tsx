@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 // src/pages/work/TaskPrintPage.tsx
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -48,7 +49,7 @@ const TaskPrintPage: React.FC = () => {
     <div style={{ padding: 24, fontFamily: "Inter, sans-serif", color: "#0f172a" }}>
       <h1 style={{ marginBottom: 6 }}>Task Summary</h1>
       {error && <p>{error}</p>}
-      {!task && !error && <p>Loading task…</p>}
+      {!task && !error && <p><InlineLoading label={"Loading task…"}/></p>}
       {task && (
         <div style={{ display: "grid", gap: 12 }}>
           <div>

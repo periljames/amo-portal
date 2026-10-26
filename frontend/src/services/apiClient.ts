@@ -8,6 +8,10 @@ import {
 } from "./auth";
 import { getApiBaseUrl, normaliseBaseUrl } from "./config";
 import { isQmsLiveAuthority } from "./qmsCachePolicy";
+import { newOfflineIdempotencyKey } from "./offlinePersistence";
+import { classifyOfflineMutation } from "./offlineCapabilities";
+import { portalErrorMessage } from "./portalError";
+import { uploadTimeoutMs } from "./transferPolicy";
 import {
   isProxyTransportFailureResponse,
   portalFetch,
@@ -60,16 +64,33 @@ let observedScope = "";
 let activeApiRequests = 0;
 const apiRequestWaiters: Array<() => void> = [];
 
-function acquireApiSlot(): Promise<void> {
+function acquireApiSlot(signal: AbortSignal | null | undefined, timeoutMs: number): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException("Request was cancelled", "AbortError"));
   if (activeApiRequests < MAX_PARALLEL_API_REQUESTS) {
     activeApiRequests += 1;
     return Promise.resolve();
   }
-  return new Promise<void>((resolve) => {
-    apiRequestWaiters.push(() => {
+  return new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      const index = apiRequestWaiters.indexOf(enter);
+      if (index >= 0) apiRequestWaiters.splice(index, 1);
+      signal?.removeEventListener("abort", cancel);
+      reject(new Error("Request timed out while waiting for a network slot. Please retry."));
+    }, timeoutMs);
+    const cancel = () => {
+      window.clearTimeout(timeout);
+      const index = apiRequestWaiters.indexOf(enter);
+      if (index >= 0) apiRequestWaiters.splice(index, 1);
+      reject(new DOMException("Request was cancelled", "AbortError"));
+    };
+    const enter = () => {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancel);
       activeApiRequests += 1;
       resolve();
-    });
+    };
+    apiRequestWaiters.push(enter);
+    signal?.addEventListener("abort", cancel, { once: true });
   });
 }
 
@@ -140,10 +161,12 @@ function clearExpiredCache(now = Date.now()): void {
 
 function clearPersistedApiCache(): void {
   if (typeof window === "undefined") return;
-  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
-    const key = window.sessionStorage.key(index);
-    if (key?.startsWith(PERSISTED_CACHE_PREFIX)) window.sessionStorage.removeItem(key);
-  }
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(PERSISTED_CACHE_PREFIX)) window.sessionStorage.removeItem(key);
+    }
+  } catch { /* Optional cache access must not turn a committed save into an error. */ }
 }
 
 export function clearApiResponseCache(): void {
@@ -159,9 +182,9 @@ export function clearQmsApiResponseCache(): void {
 
 function readPersistedCache(cacheKey: string, scope: string): CacheEntry | null {
   if (typeof window === "undefined") return null;
-  const raw = window.sessionStorage.getItem(persistedKey(cacheKey));
-  if (!raw) return null;
   try {
+    const raw = window.sessionStorage.getItem(persistedKey(cacheKey));
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as CacheEntry;
     if (parsed.scope !== scope || parsed.staleUntil <= Date.now()) {
       window.sessionStorage.removeItem(persistedKey(cacheKey));
@@ -170,7 +193,7 @@ function readPersistedCache(cacheKey: string, scope: string): CacheEntry | null 
     responseCache.set(cacheKey, parsed);
     return parsed;
   } catch {
-    window.sessionStorage.removeItem(persistedKey(cacheKey));
+    try { window.sessionStorage.removeItem(persistedKey(cacheKey)); } catch { /* Optional cache. */ }
     return null;
   }
 }
@@ -228,13 +251,7 @@ function errorMessageFromBody(response: Response, responseBody: unknown): string
     const body = responseBody as { detail?: unknown; message?: unknown; error?: unknown };
     const detail = body.detail ?? body.message ?? body.error;
     if (typeof detail === "string") return detail;
-    if (detail != null) {
-      try {
-        return JSON.stringify(detail);
-      } catch {
-        return String(detail);
-      }
-    }
+    if (detail != null) return portalErrorMessage({ detail }, response.statusText || "Request failed");
   }
   if (typeof responseBody === "string" && responseBody.trim()) return responseBody.trim();
   return response.statusText || "Request failed";
@@ -311,7 +328,7 @@ function isRetryableNetworkError(error: unknown): boolean {
 
 export async function apiRequest<T>(path: string, options: ApiClientOptions = {}): Promise<T> {
   const {
-    timeoutMs = 30_000,
+    timeoutMs = uploadTimeoutMs(options.body) ?? 30_000,
     cacheTtlMs,
     persistCache = false,
     staleWhileOfflineMs = DEFAULT_STALE_OFFLINE_MS,
@@ -321,10 +338,13 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
     signal,
     ...rest
   } = options;
+  const method = getMethod(rest);
   const finalHeaders = new Headers(authHeaders(headers));
+  if ((offline?.queueMutation ?? classifyOfflineMutation(path, method).autoQueue) && !finalHeaders.has("Idempotency-Key")) {
+    finalHeaders.set("Idempotency-Key", offline?.idempotencyKey || newOfflineIdempotencyKey("mutation"));
+  }
   if (body && !(body instanceof FormData) && !finalHeaders.has("Content-Type")) finalHeaders.set("Content-Type", "application/json");
 
-  const method = getMethod(rest);
   if (!ensureAuthenticatedRequestAllowed()) {
     throw new ApiClientError(401, "Your session has ended. Sign in again to continue.", null);
   }
@@ -352,28 +372,36 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
   }
 
   const requestPromise = (async () => {
-    await acquireApiSlot();
+    const deadline = Date.now() + timeoutMs;
+    await acquireApiSlot(signal, timeoutMs);
     try {
+      if (scope !== currentApiCacheScope()) throw new DOMException("Account or AMO context changed", "AbortError");
       let lastError: unknown;
       for (let index = 0; index < urls.length; index += 1) {
         const url = urls[index];
         try {
+          if (Date.now() >= deadline) throw new Error("Request timed out before an alternate connection could start.");
           const { response, body: responseBody } = await fetchOnce<T>(
             url,
             { ...rest, method, body, headers: finalHeaders },
-            timeoutMs,
+            Math.max(1, deadline - Date.now()),
             signal,
             {
-              cache: canUseCache,
-              cacheTtlMs: effectiveCacheTtlMs,
+              // Zero freshness requests still need a durable copy for offline
+              // work. Live authority and explicit cache opt-outs stay excluded.
+              cache: method === "GET" && offline?.cache !== false && !isQmsLiveAuthority(path),
+              cacheTtlMs: offline?.cacheTtlMs ?? effectiveCacheTtlMs,
               allowStaleFallback: offline?.allowStaleFallback !== false,
-              queueMutation: offline?.queueMutation === true,
+              queueMutation: offline?.queueMutation,
+              queueOnly: offline?.queueOnly,
               entityType: offline?.entityType,
               entityId: offline?.entityId,
               idempotencyKey: offline?.idempotencyKey,
               requireDurable: offline?.requireDurable === true,
             },
           );
+
+          if (scope !== currentApiCacheScope()) throw new DOMException("Account or AMO context changed", "AbortError");
 
           if (!response.ok) {
             const detail = errorMessageFromBody(response, responseBody);
@@ -402,7 +430,10 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
           return responseBody as T;
         } catch (error) {
           lastError = error;
-          const canTryNext = index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
+          // A lost upload acknowledgement may follow a committed write. Only
+          // replay a write if the proxy confirms it never reached the backend.
+          const replaySafe = method === "GET" || method === "HEAD" || (error instanceof ApiClientError && error.transportFailure);
+          const canTryNext = replaySafe && index < urls.length - 1 && isRetryableNetworkError(error) && !signal?.aborted;
           if (canTryNext) {
             console.warn("[apiClient] primary request failed; retrying alternate backend route", { path, error });
             continue;
@@ -420,7 +451,7 @@ export async function apiRequest<T>(path: string, options: ApiClientOptions = {}
       releaseApiSlot();
     }
   })().finally(() => {
-    if (canUseCache) inFlightGets.delete(cacheKey);
+    if (canUseCache && inFlightGets.get(cacheKey) === requestPromise) inFlightGets.delete(cacheKey);
   });
 
   if (canUseCache) inFlightGets.set(cacheKey, requestPromise as Promise<unknown>);

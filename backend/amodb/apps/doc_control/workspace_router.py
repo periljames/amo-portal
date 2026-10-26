@@ -734,6 +734,19 @@ def list_change_requests(
     return [_change_payload(row, users) for row in rows]
 
 
+def _authorize_offline_change(arguments):
+    db, user, payload = arguments["db"], arguments["current_user"], arguments["payload"]
+    tenant = resolve_tenant(db, arguments["tenant_slug"], user)
+    manual = get_manual(db, tenant, payload.manual_id)
+    require_manual_access(user, get_profile(db, tenant, manual.id))
+
+
+def _authorize_offline_review(arguments):
+    require_control_user(arguments["current_user"])
+    tenant = resolve_tenant(arguments["db"], arguments["tenant_slug"], arguments["current_user"])
+    get_manual(arguments["db"], tenant, arguments["payload"].manual_id)
+
+
 @router.post("/t/{tenant_slug}/change-requests")
 def create_change_request(
     tenant_slug: str,

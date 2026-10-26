@@ -16,13 +16,14 @@ export type ClosingProgressInput = {
 
 /** 1=freeze/generate … 7=assurance/verification */
 export function resolveActiveClosingStep(input: ClosingProgressInput): number {
+  // An ISSUED report is authoritative even when no active DRAFT/APPROVED
+  // revision remains. Do not return to step 1 after formal issue.
+  if (input.hasIssuedRevision && !input.executionClosed) return 6;
+  if (input.hasIssuedRevision && input.executionClosed) return 7;
   if (!input.hasGeneratedDraft || !input.activeRevisionStatus) return 1;
   const status = input.activeRevisionStatus;
   if (status === "DRAFT" && !input.hasAcknowledgement) return 2;
   if (status === "DRAFT" || status === "INTERNAL_REVIEW") return 3;
-  // Issued revision wins over an APPROVED active pointer still present after issue.
-  if (input.hasIssuedRevision && !input.executionClosed) return 6;
-  if (input.hasIssuedRevision && input.executionClosed) return 7;
   if (status === "APPROVED" && !input.hasSignature) return 4;
   if (status === "APPROVED" && input.hasSignature) return 5;
   return 7;

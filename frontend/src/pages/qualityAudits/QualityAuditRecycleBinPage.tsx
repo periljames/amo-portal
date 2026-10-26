@@ -1,7 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { AgGridReact } from "ag-grid-react";
+import RecordTable from "../../components/shared/RecordTable";
+import Pagination from "../../components/shared/Pagination";
+import { useParams } from "react-router-dom";
+import { apiRequest, qualityPath } from "../../services/apiClient";
+import { getContext } from "../../services/auth";
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -12,8 +16,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
 import Button from "../../components/UI/Button";
 import InlineError from "../../components/shared/InlineError";
 import { useToast } from "../../components/feedback/ToastProvider";
@@ -21,15 +23,11 @@ import { hasQmsRolePermission } from "../../app/routeGuards";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
   qmsGetAuditDeletionImpact,
-  qmsListAllAudits,
-  qmsListAuditSchedules,
   qmsPurgeAudit,
   qmsPurgeAuditSchedule,
   qmsRestoreAudit,
   qmsRestoreAuditSchedule,
   type AuditDeletionImpact,
-  type QMSAuditOut,
-  type QMSAuditScheduleOut,
 } from "../../services/qms";
 import "./quality-audit-recycle-bin.css";
 
@@ -44,7 +42,6 @@ type RecoverableRow = {
   purgeAt: string;
   daysRemaining: number;
   reason: string;
-  source: QMSAuditOut | QMSAuditScheduleOut;
 };
 
 type PendingAction = {
@@ -63,17 +60,6 @@ function formatDateTime(value?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatDate(value?: string | null): string {
-  if (!value) return "Not scheduled";
-  const parsed = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function humanize(value: string): string {
-  return value.replaceAll("_", " ").toLowerCase().replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function errorMessage(error: unknown): string | null {
@@ -112,62 +98,31 @@ const QualityAuditRecycleBinPage: React.FC = () => {
   const [purgeImpact, setPurgeImpact] = useState<AuditDeletionImpact | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
 
-  const auditsQuery = useQuery({
-    queryKey: ["qms-audit-recycle-bin", "audits"],
-    queryFn: () => qmsListAllAudits({ domain: "AMO", deleted_only: true, limit: 500 }),
-    staleTime: 15_000,
+  const params = useParams<{ amoCode: string }>();
+  const amoCode = params.amoCode || getContext().amoSlug || getContext().amoCode || "";
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sort, setSort] = useState<{key:string;direction:"asc"|"desc"}>({key:"deletedAt",direction:"desc"});
+  useEffect(()=>{if(search.trim()===debouncedSearch)return;const timer=window.setTimeout(()=>{setDebouncedSearch(search.trim());setPage(1);},250);return()=>window.clearTimeout(timer);},[search,debouncedSearch]);
+  const binQuery = useQuery({
+    queryKey:["qms-audit-recycle-bin",amoCode,page,pageSize,debouncedSearch,typeFilter,sort.key,sort.direction],
+    staleTime:15_000,
+    queryFn:async ({signal})=>{
+      const query=new URLSearchParams({domain:"AMO",limit:String(pageSize),offset:String((page-1)*pageSize),record_type:typeFilter,sort:sort.key,direction:sort.direction});
+      if(debouncedSearch)query.set("search",debouncedSearch);
+      const result = await apiRequest<{items:RecoverableRow[];total:number;summary:{total:number;audits:number;schedules:number;expiringSoon:number}}>(`${qualityPath(amoCode,"/audits/recycle-bin/paged")}?${query}`,{signal,cacheTtlMs:0});
+          if (!Array.isArray(result.items) || !result.summary || !Number.isFinite(result.total)) throw new Error("The recycle bin could not load its records. Please retry.");
+      return result;
+    },
   });
-
-  const schedulesQuery = useQuery({
-    queryKey: ["qms-audit-recycle-bin", "schedules"],
-    queryFn: () => qmsListAuditSchedules({ domain: "AMO", deleted_only: true, limit: 500 }),
-    staleTime: 15_000,
-  });
-
-  const deletedAudits = useMemo(() => auditsQuery.data ?? [], [auditsQuery.data]);
-  const deletedSchedules = useMemo(() => schedulesQuery.data ?? [], [schedulesQuery.data]);
-  const loading = auditsQuery.isLoading || schedulesQuery.isLoading;
-  const firstError = errorMessage(auditsQuery.error) || errorMessage(schedulesQuery.error);
-
-  const rows = useMemo<RecoverableRow[]>(() => {
-    const auditRows = deletedAudits.map((audit) => ({
-      id: audit.id,
-      recordType: "audit" as const,
-      reference: audit.audit_ref,
-      title: audit.title,
-      state: humanize(audit.status),
-      detail: `${formatDate(audit.planned_start)} – ${formatDate(audit.planned_end)}`,
-      deletedAt: audit.deleted_at ?? "",
-      purgeAt: audit.purge_at ?? "",
-      daysRemaining: audit.days_remaining ?? 0,
-      reason: audit.delete_reason?.trim() || "No reason provided",
-      source: audit,
-    }));
-    const scheduleRows = deletedSchedules.map((schedule) => ({
-      id: schedule.id,
-      recordType: "schedule" as const,
-      reference: "Audit schedule",
-      title: schedule.title,
-      state: humanize(schedule.frequency),
-      detail: `Next due ${formatDate(schedule.next_due_date)}`,
-      deletedAt: schedule.deleted_at ?? "",
-      purgeAt: schedule.purge_at ?? "",
-      daysRemaining: schedule.days_remaining ?? 0,
-      reason: schedule.delete_reason?.trim() || "No reason provided",
-      source: schedule,
-    }));
-    return [...auditRows, ...scheduleRows].sort((left, right) => right.deletedAt.localeCompare(left.deletedAt));
-  }, [deletedAudits, deletedSchedules]);
-
-  const filteredRows = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (typeFilter !== "all" && row.recordType !== typeFilter) return false;
-      if (!needle) return true;
-      return [row.reference, row.title, row.state, row.detail, row.reason]
-        .some((value) => value.toLowerCase().includes(needle));
-    });
-  }, [rows, search, typeFilter]);
+  const rows = binQuery.data?.items || [];
+  const loading = binQuery.isLoading;
+  const firstError = errorMessage(binQuery.error);
+  if (binQuery.data) {
+    const maxPage = Math.max(1, Math.ceil(binQuery.data.total / pageSize));
+    if (page > maxPage) setPage(maxPage);
+  }
 
   const invalidateAll = async () => {
     await Promise.all([
@@ -280,7 +235,7 @@ const QualityAuditRecycleBinPage: React.FC = () => {
     },
   ];
 
-  const expiringSoon = rows.filter((row) => row.daysRemaining <= 7).length;
+  const expiringSoon = binQuery.data?.summary?.expiringSoon || 0;
   const actionPending = restoreMutation.isPending || purgeMutation.isPending;
   const waitingForImpact = pendingAction?.kind === "purge"
     && pendingAction.row.recordType === "audit"
@@ -293,7 +248,7 @@ const QualityAuditRecycleBinPage: React.FC = () => {
       title="Recycle bin"
       subtitle="Restore audits and schedules with their prior workflow state, or permanently delete them. Items are retained for 30 days."
       toolbar={(
-        <Button size="sm" variant="secondary" onClick={() => void Promise.all([auditsQuery.refetch(), schedulesQuery.refetch()])} loading={auditsQuery.isFetching || schedulesQuery.isFetching}>
+        <Button size="sm" variant="secondary" onClick={() => void binQuery.refetch()} loading={binQuery.isFetching}>
           <RefreshCw size={14} /> Refresh
         </Button>
       )}
@@ -302,9 +257,9 @@ const QualityAuditRecycleBinPage: React.FC = () => {
         {firstError ? <InlineError message={firstError} /> : null}
 
         <section className="qa-bin-summary" aria-label="Recycle bin summary">
-          <article><FileClock size={17} /><div><strong>{loading ? "—" : rows.length}</strong><span>Recoverable</span></div></article>
-          <article><ArchiveRestore size={17} /><div><strong>{loading ? "—" : deletedAudits.length}</strong><span>Audits</span></div></article>
-          <article><CalendarClock size={17} /><div><strong>{loading ? "—" : deletedSchedules.length}</strong><span>Schedules</span></div></article>
+          <article><FileClock size={17} /><div><strong>{loading ? "—" : binQuery.data?.summary?.total || 0}</strong><span>Recoverable</span></div></article>
+          <article><ArchiveRestore size={17} /><div><strong>{loading ? "—" : binQuery.data?.summary?.audits || 0}</strong><span>Audits</span></div></article>
+          <article><CalendarClock size={17} /><div><strong>{loading ? "—" : binQuery.data?.summary?.schedules || 0}</strong><span>Schedules</span></div></article>
           <article className={expiringSoon ? "is-warning" : ""}><AlertTriangle size={17} /><div><strong>{loading ? "—" : expiringSoon}</strong><span>Delete within 7 days</span></div></article>
         </section>
 
@@ -312,12 +267,12 @@ const QualityAuditRecycleBinPage: React.FC = () => {
           <header>
             <div>
               <h2>Deleted records</h2>
-              <p>Restoring clears only the deletion marker; the saved lifecycle and all linked records remain unchanged.</p>
+
             </div>
             <div className="qa-bin-controls">
               <div className="qa-bin-segments" role="group" aria-label="Filter record type">
                 {(["all", "audit", "schedule"] as const).map((value) => (
-                  <button key={value} type="button" className={typeFilter === value ? "is-active" : ""} onClick={() => setTypeFilter(value)}>
+                  <button key={value} type="button" className={typeFilter === value ? "is-active" : ""} onClick={() => {setTypeFilter(value);setPage(1);}}>
                     {value === "all" ? "All" : value === "audit" ? "Audits" : "Schedules"}
                   </button>
                 ))}
@@ -329,22 +284,8 @@ const QualityAuditRecycleBinPage: React.FC = () => {
             </div>
           </header>
 
-          <div className="ag-theme-alpine qa-bin-grid">
-            <AgGridReact<RecoverableRow>
-              rowData={filteredRows}
-              columnDefs={columnDefs}
-              defaultColDef={{ sortable: true, resizable: true, suppressHeaderMenuButton: true }}
-              getRowId={({ data }) => `${data.recordType}:${data.id}`}
-              pagination
-              paginationPageSize={25}
-              paginationPageSizeSelector={[25, 50, 100]}
-              rowHeight={54}
-              headerHeight={38}
-              overlayLoadingTemplate="<span>Loading deleted records…</span>"
-              overlayNoRowsTemplate="<span>The recycle bin is empty.</span>"
-              loading={loading}
-            />
-          </div>
+          <div className="qa-bin-grid"><RecordTable label="Deleted records" rows={rows} columns={columnDefs} getRowId={(row)=>`${row.recordType}:${row.id}`} loading={loading} sort={sort} onSortChange={(next)=>{setSort(next);setPage(1);}} /></div>
+          <Pagination label="Recycle bin" page={page} pageSize={pageSize} total={binQuery.data?.total} visibleCount={rows.length} busy={binQuery.isFetching} onPageChange={setPage} onPageSizeChange={(value)=>{setPageSize(value);setPage(1);}} />
         </section>
       </div>
 

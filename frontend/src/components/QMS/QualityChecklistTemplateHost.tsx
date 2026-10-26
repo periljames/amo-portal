@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -512,7 +513,7 @@ const QualityChecklistTemplateHost: React.FC<Props> = ({ amoCode = "" }) => {
               </label>
               <div className="qms-checklist-ai__criteria-list" role="listbox" aria-label="Readable controlled criteria" aria-multiselectable="true">
                 {criteriaQuery.isLoading && !criteriaRows.length ? (
-                  <p className="qms-checklist-ai__empty">Loading criteria…</p>
+                  <p className="qms-checklist-ai__empty"><InlineLoading label={"Loading criteria…"}/></p>
                 ) : criteriaRows.length ? criteriaRows.map((row) => {
                   const selected = selectedCriteriaIds.has(row.id);
                   return (

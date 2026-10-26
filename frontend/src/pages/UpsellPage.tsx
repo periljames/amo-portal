@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 // src/pages/UpsellPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -404,7 +405,7 @@ const UpsellPage: React.FC = () => {
       </section>
 
       <section className="pricing-grid" ref={pricingRef}>
-        {loading && <div className="upsell-alert">Loading catalog…</div>}
+        {loading && <div className="upsell-alert"><InlineLoading label={"Loading catalog…"}/></div>}
         {!loading && productViews.length === 0 && (
           <div className="upsell-alert upsell-alert--error">
             No pricing data found. Please check your connection.

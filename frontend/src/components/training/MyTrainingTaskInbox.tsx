@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React from "react";
 import { CheckCircle2, ClipboardCheck, RefreshCw } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +29,7 @@ const MyTrainingTaskInbox: React.FC = () => {
               <RefreshCw size={17} />
             </button>
           </div>
-          {tasks.isLoading ? <p>Loading assigned work…</p> : null}
+          {tasks.isLoading ? <p><InlineLoading label={"Loading assigned work…"}/></p> : null}
           {tasks.isError ? <div className="card card--error"><strong>Task source unavailable</strong><p>Your queue is Unknown, not empty.</p></div> : null}
           {tasks.data && !tasks.data.items.length ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0" }}>

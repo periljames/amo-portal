@@ -90,6 +90,10 @@ export function listRecordSeries(tenant: string): Promise<{ items: RecordSeries[
   return api(path(tenant, "/records/series"));
 }
 
+export function updateRecordRetention(tenant: string, id: string, payload: { retention_class: string; metadata: Record<string, unknown>; reason: string }): Promise<RetainedRecord> {
+  return api(path(tenant, `/records/${encodeURIComponent(id)}/retention`), { method: "PATCH", body: JSON.stringify(payload) });
+}
+
 export function createRecordSeries(
   tenant: string,
   payload: {
@@ -128,7 +132,7 @@ export function getRecord(tenant: string, recordId: string): Promise<RetainedRec
 
 export function uploadRecord(
   tenant: string,
-  payload: { artifact: File; seriesId: string; recordNumber: string; title: string; sourceModule?: string; sourceEntityType?: string; sourceEntityId?: string; capturedAt?: string; metadata?: Record<string, string> },
+  payload: { artifact: File; seriesId: string; recordNumber: string; title: string; sourceModule?: string; sourceEntityType?: string; sourceEntityId?: string; capturedAt?: string; metadata?: Record<string, unknown> },
   options: { onProgress?: (percentage: number) => void; signal?: AbortSignal } = {},
 ): Promise<RetainedRecord> {
   const body = new FormData();

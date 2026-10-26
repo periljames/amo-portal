@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const source = readFileSync(new URL("../../public/portal-sw.js", import.meta.url), "utf8");
 
+const workerVersion = /const VERSION = "([^"]+)"/.exec(source)![1];
+
 function worker(fetch: typeof globalThis.fetch) {
   const stores = new Map<string, Map<string, Response>>();
   const handlers = new Map<string, (event: unknown) => void>();
@@ -40,6 +42,68 @@ function worker(fetch: typeof globalThis.fetch) {
 }
 
 describe("QMS service-worker caching", () => {
+  it("confirms a user-requested reload only after refreshing canonical HTML", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("new release", { headers: { "Content-Type": "text/html" } })));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("new release");
+    expect(postMessage).toHaveBeenCalledWith({ ok: true });
+  });
+  it("does not replace saved HTML with a gateway error during an update", async () => {
+    const { handlers, stores, background, waitUntil } = worker(vi.fn(async () => new Response("Bad gateway", { status: 502 })));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("saved release")]]));
+    const postMessage = vi.fn();
+    handlers.get("message")!({ data: { type: "REFRESH_PORTAL_SHELL" }, ports: [{ postMessage }], waitUntil });
+    await Promise.all(background);
+    expect(postMessage).toHaveBeenCalledWith({ ok: false });
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.text()).toBe("saved release");
+  });
+  it("serves content-addressed chunks without re-downloading them on a weak link", async () => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    const { context } = worker(fetch);
+    context.caches.open = vi.fn().mockResolvedValue({ match: vi.fn(async () => new Response("cached immutable code")), put: vi.fn() });
+    const sandbox = { ...context, request: new Request("https://portal.test/assets/workspace-Ab12_Cd3.js") };
+    const result = await runInNewContext("cacheFirstAsset(request)", sandbox) as Response;
+    expect(await result.text()).toBe("cached immutable code");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("serves precached public code when a module reload adds an Origin header", async () => {
+    const { context } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
+    const response = new Response("cached module", { headers: { Vary: "Origin" } });
+    const match = vi.fn(async (_request: Request, options?: CacheQueryOptions) =>
+      options?.ignoreVary ? response.clone() : undefined);
+    context.caches.open = vi.fn().mockResolvedValue({ match, put: vi.fn() });
+    const sandbox = { ...context, request: new Request("https://portal.test/assets/app.js", {
+      headers: { Origin: "https://portal.test" }, mode: "cors",
+    }) };
+    const result = await runInNewContext("cacheFirstAsset(request)", sandbox) as Response;
+    expect(await result.text()).toBe("cached module");
+    expect(match).toHaveBeenCalledWith(sandbox.request, { ignoreVary: true });
+  });
+
+  it("warms all module code with bounded concurrency and excludes authenticated data", async () => {
+    const assets: string[] = [];
+    let active = 0;
+    let peak = 0;
+    const { context } = worker(vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/portal-precache.json") return Response.json({ portalUrls: [
+        "/assets/training.js", "/assets/procurement.js", "/assets/records.css", "/accounts/me", "/api/private", "/documents/controlled.pdf",
+      ] });
+      assets.push(url);
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return new Response("code");
+    }));
+    await runInNewContext("Promise.all([precachePortal(), precachePortal()])", context);
+    expect(peak).toBe(2);
+    expect(assets.sort()).toEqual(["/assets/procurement.js", "/assets/records.css", "/assets/training.js"]);
+    await runInNewContext("precachePortal()", context);
+    expect(assets).toHaveLength(3);
+  });
   it("coalesces warmups, limits downloads to two, and never precaches API payloads", async () => {
     let active = 0;
     let peak = 0;
@@ -71,7 +135,7 @@ describe("QMS service-worker caching", () => {
       vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })),
     );
     stores.set(
-      "amo-portal-shell-v11",
+      `amo-portal-shell-${workerVersion}`,
       new Map([["/", new Response("offline shell", { headers: { "Content-Type": "text/html" } })]]),
     );
     const sandbox = { ...context, waitUntil };
@@ -81,7 +145,7 @@ describe("QMS service-worker caching", () => {
     )) as Response;
     expect(await result.text()).toBe("offline shell");
     await Promise.all(background);
-    expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("offline shell");
+    expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.clone().text()).toBe("offline shell");
   });
 
   it("acknowledges browser-only audit readiness only after QMS chunks are cached", async () => {
@@ -116,6 +180,21 @@ describe("QMS service-worker caching", () => {
     }
   });
 
+  it("prefers current HTML over a saved shell when the server responds promptly", async () => {
+    const { context, stores, waitUntil } = worker(vi.fn(async () => new Response("current shell", { headers: { "Content-Type": "text/html" } })));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("old shell")]]));
+    const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })", { ...context, waitUntil }) as Response;
+    expect(await response.text()).toBe("current shell");
+  });
+  it("uses the updated root shell rather than an older route warmup when offline", async () => {
+    const { context, stores, waitUntil } = worker(vi.fn().mockRejectedValue(new TypeError("Offline")));
+    stores.set(`amo-portal-shell-${workerVersion}`, new Map([
+      ["/", new Response("current release")],
+      ["/maintenance/t/quality/settings/general", new Response("previous release")],
+    ]));
+    const response = await runInNewContext("cachedShellNavigation('/maintenance/t/quality/settings/general', null, { waitUntil })", { ...context, waitUntil }) as Response;
+    expect(await response.text()).toBe("current release");
+  });
   it("returns the cached shell without waiting for a slow network refresh", async () => {
     vi.useFakeTimers();
     try {
@@ -124,17 +203,18 @@ describe("QMS service-worker caching", () => {
         finish = resolve;
       });
       const { context, stores, background, waitUntil } = worker(vi.fn().mockReturnValue(pending));
-      stores.set("amo-portal-shell-v11", new Map([["/", new Response("saved shell")]]));
+      stores.set(`amo-portal-shell-${workerVersion}`, new Map([["/", new Response("saved shell")]]));
       const sandbox = { ...context, waitUntil };
       const result = runInNewContext(
         "cachedShellNavigation('/maintenance/t/quality', null, { waitUntil })",
         sandbox,
       ) as Promise<Response>;
-      // No timers or network completion are needed for a cached navigation.
+      // The stale-shell fallback is bounded, even if the server never responds.
+      await vi.advanceTimersByTimeAsync(350);
       expect(await (await result).text()).toBe("saved shell");
       finish(new Response("fresh shell", { headers: { "Content-Type": "text/html" } }));
       await Promise.all(background);
-      expect(await stores.get("amo-portal-shell-v11")!.get("/")!.clone().text()).toBe("fresh shell");
+      expect(await stores.get(`amo-portal-shell-${workerVersion}`)!.get("/")!.clone().text()).toBe("fresh shell");
     } finally {
       vi.useRealTimers();
     }

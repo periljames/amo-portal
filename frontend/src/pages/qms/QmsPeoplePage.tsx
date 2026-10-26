@@ -1,4 +1,7 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import InlineLoading from "../../components/shared/InlineLoading";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { loadQmsAuthorizationWorkspace } from "../../services/qmsAuthorizationWorkspace";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -26,29 +29,18 @@ import {
   downloadQmsAuthorizationRecord,
   ensureQmsDefaultPrivilegeRules,
   getQmsAuthorizationCase,
-  getQmsAuthorizationOverview,
   getQmsAuthorizationPerson,
-  listQmsAuthorizationCases,
-  listQmsAuthorizationPeople,
-  listQmsAuthorizationReviews,
-  listQmsAuthorizations,
-  listQmsPrivilegeRules,
   prepareQmsAuthorizationCase,
   revokeQmsControlledExemption,
   submitQmsAuthorizationCase,
   updateQmsPrivilegeRule,
   uploadQmsAuthorizationCaseEvidence,
   type QmsAuthorization,
-  type QmsAuthorizationCaseDetail,
-  type QmsAuthorizationCaseSummary,
-  type QmsAuthorizationOverview,
-  type QmsAuthorizationPerson,
-  type QmsAuthorizationPersonDetail,
-  type QmsAuthorizationReview,
   type QmsPrivilegeRule,
 } from "../../services/qmsPeople";
 import { downloadBlob } from "../../services/typedApi";
 import "../../styles/qms/people.css";
+import "../../styles/qms/assurance-workspace.css";
 
 type Props = { amoCode: string };
 type Tab = "overview" | "people" | "cases" | "reviews" | "administration";
@@ -66,13 +58,14 @@ const CASE_STATUSES = [
 ] as const;
 
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
 function inOneYear(): string {
   const d = new Date();
   d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
 function human(value?: string | null): string {
@@ -116,26 +109,35 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
 const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab") as Tab | null;
+  const workspaceQuery = useQuery({
+    queryKey: ["qms-authorization-control", amoCode],
+    queryFn: ({ signal }) => loadQmsAuthorizationWorkspace(amoCode, signal),
+    staleTime: 15_000,
+  });
+
   const [tab, setTab] = useState<Tab>(
     requestedTab && ["overview", "people", "cases", "reviews", "administration"].includes(requestedTab)
       ? requestedTab
       : "overview",
   );
-  const [revision, setRevision] = useState(0);
-  const [overview, setOverview] = useState<QmsAuthorizationOverview | null>(null);
-  const [people, setPeople] = useState<QmsAuthorizationPerson[]>([]);
-  const [cases, setCases] = useState<QmsAuthorizationCaseSummary[]>([]);
-  const [reviews, setReviews] = useState<QmsAuthorizationReview[]>([]);
-  const [authorizations, setAuthorizations] = useState<QmsAuthorization[]>([]);
-  const [rules, setRules] = useState<QmsPrivilegeRule[]>([]);
+  const overview = workspaceQuery.data?.overview ?? null;
+  const people = useMemo(() => workspaceQuery.data?.people ?? [], [workspaceQuery.data?.people]);
+  const cases = useMemo(() => workspaceQuery.data?.cases ?? [], [workspaceQuery.data?.cases]);
+  const reviews = workspaceQuery.data?.reviews ?? [];
+  const authorizations = useMemo(() => workspaceQuery.data?.authorizations ?? [], [workspaceQuery.data?.authorizations]);
+  const rules = workspaceQuery.data?.rules ?? [];
   const [selectedPersonKey, setSelectedPersonKey] = useState("");
-  const [personDetail, setPersonDetail] = useState<QmsAuthorizationPersonDetail | null>(null);
-  const [selectedCaseId, setSelectedCaseId] = useState("");
-  const [caseDetail, setCaseDetail] = useState<QmsAuthorizationCaseDetail | null>(null);
+  const selectedCaseId = searchParams.get("case") || "";
+  const setSelectedCaseId = (id: string) => setSearchParams(current => {
+    const next = new URLSearchParams(current);
+    if (id) next.set("case", id); else next.delete("case");
+    return next;
+  }, { replace: true });
   const [search, setSearch] = useState("");
   const [caseStatus, setCaseStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const [pageLoading, setPageLoading] = useState(true);
+  const busyRef = useRef(false);
+  const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -152,7 +154,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [preparationStatus, setPreparationStatus] = useState<"UNDER_REVIEW" | "DEVELOPMENT" | "AWAITING_EVIDENCE" | "RETURNED">("UNDER_REVIEW");
   const [recommendation, setRecommendation] = useState("");
   const [preparationReason, setPreparationReason] = useState("Authorization case preparation updated.");
-  const [decision, setDecision] = useState<"APPROVE" | "REJECT" | "RETURN">("APPROVE");
+  const [decision, setDecision] = useState<"APPROVE" | "REJECT" | "RETURN" | "CANCEL">("APPROVE");
   const [decisionReason, setDecisionReason] = useState("");
   const [decisionEffective, setDecisionEffective] = useState(todayKey());
   const [decisionExpiry, setDecisionExpiry] = useState("");
@@ -203,6 +205,28 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const [ruleIndependence, setRuleIndependence] = useState(true);
   const [ruleDevelopmental, setRuleDevelopmental] = useState(false);
 
+  const modalOpen = nominateOpen || batchOpen || exemptionOpen || reviewOpen || lifecycleOpen || ruleOpen;
+  useEffect(() => {
+    if (!modalOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const timer = requestAnimationFrame(() => document.querySelector<HTMLElement>('.qms-authz-modal input, .qms-authz-modal select, .qms-authz-modal button')?.focus());
+    const keyboard = (event: KeyboardEvent) => {
+      const modal = document.querySelector<HTMLElement>('.qms-authz-modal');
+      if (!modal) return;
+      if (event.key === "Escape" && !busyRef.current) {
+        event.preventDefault(); setNominateOpen(false); setBatchOpen(false); setExemptionOpen(false); setReviewOpen(false); setLifecycleOpen(false); setRuleOpen(false);
+      }
+      if (event.key === "Tab") {
+        const controls = Array.from(modal.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(el => el.getClientRects().length && el.tabIndex >= 0);
+        const first = controls[0], last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    document.addEventListener("keydown", keyboard);
+    return () => { cancelAnimationFrame(timer); document.removeEventListener("keydown", keyboard); if (previous?.isConnected) previous.focus(); };
+  }, [modalOpen]);
+
   const permissions = overview?.permissions;
   const actorName = getCachedUser()?.full_name || "Current authorized user";
   const canPrepare = permissions?.can_prepare === true;
@@ -213,6 +237,16 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   const selfServiceOnly = permissions?.self_service_only === true;
   const currentUserId = getCachedUser()?.id || "";
   const activePersonKey = selfServiceOnly ? currentUserId : selectedPersonKey;
+  const personQuery = useQuery({ queryKey: ["qms-authorization-person", amoCode, activePersonKey], queryFn: ({ signal }) => getQmsAuthorizationPerson(amoCode, activePersonKey, signal), enabled: Boolean(activePersonKey), staleTime: 10_000 });
+  const caseQuery = useQuery({ queryKey: ["qms-authorization-case", amoCode, selectedCaseId], queryFn: ({ signal }) => getQmsAuthorizationCase(amoCode, selectedCaseId, signal), enabled: Boolean(selectedCaseId && overview && !selfServiceOnly && tab === "cases"), staleTime: 10_000 });
+  const personDetail = personQuery.data ?? null;
+  const caseDetail = caseQuery.data ?? null;
+  const initializedCase = useRef("");
+  useEffect(() => {
+    if ((!selectedPersonKey && !selectedCaseId) || !window.matchMedia("(max-width: 700px)").matches) return;
+    const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>(".qms-authz-detail")?.scrollIntoView({ block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [selectedPersonKey, selectedCaseId]);
   const effectiveTab: Tab = selfServiceOnly ? "people" : tab;
   const visibleTabs: Array<[Tab, string]> = selfServiceOnly
     ? [["people", "My Authorization"]]
@@ -224,73 +258,24 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         ...(canManagePolicy ? [["administration", "Administration"] as [Tab, string]] : []),
       ];
 
-  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  const pageLoading = workspaceQuery.isFetching;
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["qms-authorization-control", amoCode] });
+    void queryClient.invalidateQueries({ queryKey: ["qms-authorization-person", amoCode] });
+    void queryClient.invalidateQueries({ queryKey: ["qms-authorization-case", amoCode] });
+  }, [amoCode, queryClient]);
+  useEffect(() => {
+    setTab(requestedTab && ["overview", "people", "cases", "reviews", "administration"].includes(requestedTab) ? requestedTab : "overview");
+  }, [requestedTab]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setPageLoading(true);
-    setError(null);
-    void getQmsAuthorizationOverview(amoCode, controller.signal)
-      .then(async (overviewData) => {
-        if (controller.signal.aborted) return;
-        setOverview(overviewData);
-        const canReadPolicy = overviewData.permissions.can_prepare || overviewData.permissions.can_manage_policy;
-        const [peopleData, caseData, reviewData, authorizationData, ruleData] = await Promise.all([
-          listQmsAuthorizationPeople(amoCode, { limit: 500 }, controller.signal),
-          listQmsAuthorizationCases(amoCode, { limit: 500 }, controller.signal),
-          listQmsAuthorizationReviews(amoCode, {}, controller.signal),
-          listQmsAuthorizations(amoCode, {}, controller.signal),
-          canReadPolicy
-            ? listQmsPrivilegeRules(amoCode, { includeInactive: true }, controller.signal)
-            : Promise.resolve({ items: [] as QmsPrivilegeRule[] }),
-        ]);
-        if (controller.signal.aborted) return;
-        setPeople(peopleData.items);
-        setCases(caseData.items);
-        setReviews(reviewData.items);
-        setAuthorizations(authorizationData.items);
-        setRules(ruleData.items);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(errorText(cause));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setPageLoading(false);
-      });
-    return () => controller.abort();
-  }, [amoCode, revision]);
-
-  useEffect(() => {
-    if (!activePersonKey) {
-      setPersonDetail(null);
-      return;
-    }
-    const controller = new AbortController();
-    void getQmsAuthorizationPerson(amoCode, activePersonKey, controller.signal)
-      .then(setPersonDetail)
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(errorText(cause));
-      });
-    return () => controller.abort();
-  }, [activePersonKey, amoCode, revision]);
-
-  useEffect(() => {
-    if (!selectedCaseId) {
-      setCaseDetail(null);
-      return;
-    }
-    const controller = new AbortController();
-    void getQmsAuthorizationCase(amoCode, selectedCaseId, controller.signal)
-      .then((detail) => {
-        setCaseDetail(detail);
-        setRecommendation(detail.case.recommendation || "");
-        setDecisionEvidenceIds([]);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(errorText(cause));
-      });
-    return () => controller.abort();
-  }, [amoCode, selectedCaseId, revision]);
+    if (caseDetail?.case.id !== selectedCaseId || initializedCase.current === selectedCaseId) return;
+    initializedCase.current = selectedCaseId;
+    setRecommendation(caseDetail?.case.recommendation || "");
+    setDecision(caseDetail?.case.status === "READY_FOR_DECISION" ? "APPROVE" : "RETURN");
+    setDecisionEvidenceIds([]); setDecisionReason(""); setPreparationReason("");
+    setEvidenceLabel(""); setEvidenceSource("");
+  }, [selectedCaseId, caseDetail]);
 
   useEffect(() => {
     const action = searchParams.get("action");
@@ -357,6 +342,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   async function run(label: string, action: () => Promise<unknown>): Promise<boolean> {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -369,6 +356,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       setError(errorText(cause));
       return false;
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -404,6 +392,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
 
   async function savePreparation() {
     if (!selectedCaseId) return;
+    if (preparationReason.trim().length < 8) { setError("Enter a preparation reason of at least 8 characters."); return; }
     await run("Case preparation saved.", () => prepareQmsAuthorizationCase(amoCode, selectedCaseId, {
       status: preparationStatus,
       recommendation,
@@ -412,8 +401,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   async function submitForDecision() {
-    if (!selectedCaseId || !recommendation.trim()) {
-      setError("Enter the Quality Officer recommendation before submitting the case.");
+    if (!selectedCaseId || recommendation.trim().length < 8) {
+      setError("Enter a recommendation of at least 8 characters before submitting the case.");
       return;
     }
     await run("Case submitted for final decision.", () => submitQmsAuthorizationCase(amoCode, selectedCaseId, {
@@ -423,7 +412,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   async function makeDecision() {
-    if (!selectedCaseId || !caseDetail || !decisionReason.trim()) {
+    if (!selectedCaseId || !caseDetail || caseDetail.case.id !== selectedCaseId || !decisionReason.trim()) {
       setError("A decision reason is required.");
       return;
     }
@@ -467,24 +456,23 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     if (evidenceSource.trim()) {
       sourceReference = { reference: evidenceSource.trim() };
     }
-    await run("Evidence reference linked.", () => addQmsAuthorizationEvidenceReference(amoCode, selectedCaseId, {
+    const ok = await run("Evidence reference linked.", () => addQmsAuthorizationEvidenceReference(amoCode, selectedCaseId, {
       evidence_type: evidenceType,
       label: evidenceLabel,
       source_module: evidenceSource ? "EXTERNAL" : undefined,
       source_reference: sourceReference,
     }));
-    setEvidenceLabel("");
-    setEvidenceSource("");
+    if (ok) { setEvidenceLabel(""); setEvidenceSource(""); }
   }
 
   async function uploadEvidence(file: File | null) {
     if (!file || !selectedCaseId) return;
-    await run("Evidence file uploaded.", () => uploadQmsAuthorizationCaseEvidence(amoCode, selectedCaseId, {
+    const ok = await run("Evidence file uploaded.", () => uploadQmsAuthorizationCaseEvidence(amoCode, selectedCaseId, {
       file,
       label: evidenceLabel.trim() || file.name,
       evidence_type: evidenceType,
     }));
-    setEvidenceLabel("");
+    if (ok) setEvidenceLabel("");
   }
 
   async function downloadEvidence(evidenceId: string, fallbackName: string) {
@@ -704,31 +692,30 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
   }
 
   if (pageLoading && !overview) {
-    return <section className="qms-authz qms-people qms-surface-root"><div className="qms-authz-loading">Loading Quality authorization control…</div></section>;
+    return <section className="qms-authz qms-people qms-surface-root"><div className="qms-authz-loading"><InlineLoading label={"Loading Quality authorization control…"}/></div></section>;
   }
 
   return (
-    <section className="qms-authz qms-people qms-surface-root" aria-label="QMS People and authorization control">
+    <section className={`qms-authz qms-people qms-surface-root${!selfServiceOnly && effectiveTab === "people" && selectedPersonKey ? " qms-authz--person-open" : ""}${effectiveTab === "cases" && selectedCaseId ? " qms-authz--case-open" : ""}`} aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
-          <p className="qms-authz-eyebrow">Quality Management System</p>
-          <h2 className="qms-authz-page-heading">Authorization governance</h2>
-          <p>
-            Govern Quality appointments, authorization cases, competence evidence, periodic reviews and authorization decisions.
-            Audit assignment remains in the audit workflow.
-          </p>
+          <h1 className="qms-authz-page-heading">People & authorization</h1>
+
         </div>
         <button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={refresh} disabled={pageLoading || busy}>
           <RefreshCw size={16} /> Refresh
         </button>
       </header>
 
+      {workspaceQuery.isError ? <div className="qms-authz-alert qms-authz-alert--error" role="alert"><span>Authorization control could not be loaded. {errorText(workspaceQuery.error)}</span><button type="button" onClick={refresh}>Retry</button></div> : null}
+      {workspaceQuery.data?.errors.length ? <div className="qms-authz-alert qms-authz-alert--error" role="alert"><div>{workspaceQuery.data.errors.map(message => <p key={message}>{message}</p>)}</div><button type="button" onClick={refresh}>Retry unavailable sections</button></div> : null}
+      {personQuery.isError || caseQuery.isError ? <div className="qms-authz-alert qms-authz-alert--error" role="alert"><span>{errorText(personQuery.error || caseQuery.error)}</span><button type="button" onClick={refresh}>Retry details</button></div> : null}
       {error ? <div className="qms-authz-alert qms-authz-alert--error" role="alert"><AlertTriangle size={17} /> {error}</div> : null}
       {notice ? <div className="qms-authz-alert qms-authz-alert--success" role="status"><CheckCircle2 size={17} /> {notice}</div> : null}
 
       <nav className="qms-authz-tabs" aria-label="Authorization control views">
         {visibleTabs.map(([value, label]) => (
-          <button key={value} type="button" className={effectiveTab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
+          <button key={value} type="button" aria-current={effectiveTab === value ? "page" : undefined} className={effectiveTab === value ? "is-active" : ""} onClick={() => chooseTab(value)}>
             {label}
           </button>
         ))}
@@ -803,7 +790,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           </article> : null}
 
           <article className="qms-authz-card qms-authz-detail">
-            {personDetail ? (
+            {!selfServiceOnly && selectedPersonKey ? <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button> : null}
+            {personQuery.isPending && activePersonKey ? <p><InlineLoading label={"Loading person…"}/></p> : personDetail ? (
               <>
                 <SectionTitle title={personDetail.person.name} subtitle={[personDetail.person.home_role ? human(personDetail.person.home_role) : null, personDetail.person.department].filter(Boolean).join(" · ")} />
                 <div className="qms-authz-facts">
@@ -904,7 +892,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           </article>
 
           <article className="qms-authz-card qms-authz-detail">
-            {caseDetail ? (
+            {selectedCaseId ? <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedCaseId("")}>← All cases</button> : null}
+            {caseQuery.isPending && selectedCaseId ? <p><InlineLoading label={"Loading authorization case…"}/></p> : caseDetail ? (
               <>
                 <SectionTitle title={caseDetail.case.person.name || "Person unavailable"} subtitle={caseDetail.case.authorization} />
                 <div className="qms-authz-case-banner">
@@ -983,14 +972,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   <details className="qms-authz-workflow" open={caseDetail.case.status !== "READY_FOR_DECISION"}>
                     <summary>Quality Officer preparation</summary>
                     <div className="qms-authz-form-grid">
-                      <label>Status<select value={preparationStatus} onChange={(event) => setPreparationStatus(event.target.value as typeof preparationStatus)}>
+                      <label>Status<select aria-label="Status" value={preparationStatus} onChange={(event) => setPreparationStatus(event.target.value as typeof preparationStatus)}>
                         <option value="UNDER_REVIEW">Under review</option>
                         <option value="DEVELOPMENT">Development</option>
                         <option value="AWAITING_EVIDENCE">Awaiting evidence</option>
                         <option value="RETURNED">Returned</option>
                       </select></label>
-                      <label className="span-2">Recommendation<textarea value={recommendation} onChange={(event) => setRecommendation(event.target.value)} rows={4} /></label>
-                      <label className="span-2">Preparation reason<textarea value={preparationReason} onChange={(event) => setPreparationReason(event.target.value)} rows={3} /></label>
+                      <label className="span-2">Recommendation<textarea aria-label="Recommendation" value={recommendation} onChange={(event) => setRecommendation(event.target.value)} rows={4} /></label>
+                      <label className="span-2">Preparation reason<textarea aria-label="Preparation reason" value={preparationReason} onChange={(event) => setPreparationReason(event.target.value)} rows={3} /></label>
                     </div>
                     <div className="qms-authz-actions">
                       <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={() => void savePreparation()} disabled={busy}>Save preparation</button>
@@ -1003,14 +992,14 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   <details className="qms-authz-workflow">
                     <summary>Evidence</summary>
                     <div className="qms-authz-form-grid">
-                      <label>Type<select value={evidenceType} onChange={(event) => setEvidenceType(event.target.value)}>
+                      <label>Type<select aria-label="Type" value={evidenceType} onChange={(event) => setEvidenceType(event.target.value)}>
                         {["COMPETENCE_ASSESSMENT", "PRIOR_AUTHORIZATION", "AUDIT_EXPERIENCE", "COMPETENCE_PACKAGE", "APPOINTMENT_LETTER", "OTHER"].map((value) => <option key={value} value={value}>{human(value)}</option>)}
                       </select></label>
-                      <label>Label<input value={evidenceLabel} onChange={(event) => setEvidenceLabel(event.target.value)} /></label>
-                      <label className="span-2">External reference<input value={evidenceSource} onChange={(event) => setEvidenceSource(event.target.value)} placeholder="Optional controlled source reference" /></label>
+                      <label>Label<input aria-label="Label" value={evidenceLabel} onChange={(event) => setEvidenceLabel(event.target.value)} /></label>
+                      <label className="span-2">External reference<input aria-label="External reference" value={evidenceSource} onChange={(event) => setEvidenceSource(event.target.value)} placeholder="Optional controlled source reference" /></label>
                       <div className="qms-authz-actions span-2">
                         <button type="button" className="qms-authz-button qms-authz-button--secondary" onClick={() => void addEvidenceReference()} disabled={!evidenceLabel.trim() || busy}>Link reference</button>
-                        <label className="qms-authz-file-button">Upload evidence<input type="file" onChange={(event) => void uploadEvidence(event.target.files?.[0] || null)} /></label>
+                        <label className="qms-authz-file-button">Upload evidence<input aria-label="Upload evidence" type="file" disabled={busy} onChange={(event) => { const input = event.currentTarget; void uploadEvidence(input.files?.[0] || null).finally(() => { input.value = ""; }); }} /></label>
                       </div>
                     </div>
                   </details>
@@ -1028,13 +1017,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   <div className="qms-authz-workflow">
                     <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
                     <div className="qms-authz-form-grid">
-                      <label>Missing criterion<input value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
-                      <label>Effective<input type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
-                      <label>Expires<input type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
-                      <label className="span-2">Why normal compliance is not currently possible<textarea value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
+                      <label>Missing criterion<input aria-label="Missing criterion" value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
+                      <label>Effective<input aria-label="Effective" type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
+                      <label>Expires<input aria-label="Expires" type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
+                      <label className="span-2">Why normal compliance is not currently possible<textarea aria-label="Why normal compliance is not currently possible" value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
                       <label className="span-2">Equivalent evidence, one controlled reference per line<textarea value={exemptionEquivalentEvidence} onChange={(event) => setExemptionEquivalentEvidence(event.target.value)} rows={3} /></label>
                       <label className="qms-authz-checkbox span-2"><input type="checkbox" checked={exemptionSupervisionRequired} onChange={(event) => setExemptionSupervisionRequired(event.target.checked)} /> Supervision required</label>
-                      {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
+                      {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select aria-label="Supervisor" value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
                       <label className="span-2">Operating conditions, one per line<textarea value={exemptionConditions} onChange={(event) => setExemptionConditions(event.target.value)} rows={3} /></label>
                       <label className="span-2">Limitations, one per line<textarea value={exemptionLimitations} onChange={(event) => setExemptionLimitations(event.target.value)} rows={3} /></label>
                     </div>
@@ -1042,7 +1031,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                   </div>
                 ) : null}
 
-                {canApprove && caseDetail.case.status === "READY_FOR_DECISION" ? (
+                {canApprove && !["APPROVED", "REJECTED", "CANCELLED"].includes(caseDetail.case.status) ? (
                   <div className="qms-authz-workflow qms-authz-workflow--decision">
                     <h3>Final authorization decision</h3>
                     <div className="qms-authz-decision-context">
@@ -1059,19 +1048,20 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                       </ul>
                     ) : null}
                     <div className="qms-authz-form-grid">
-                      <label>Decision<select value={decision} onChange={(event) => setDecision(event.target.value as typeof decision)}>
-                        <option value="APPROVE">Approve</option>
+                      <label>Decision<select aria-label="Decision" value={decision} onChange={(event) => setDecision(event.target.value as typeof decision)}>
+                        <option value="APPROVE" disabled={caseDetail.case.status !== "READY_FOR_DECISION"}>Approve</option>
                         <option value="RETURN">Return for more evidence</option>
-                        <option value="REJECT">Reject case</option>
+                        <option value="REJECT" disabled={caseDetail.case.status !== "READY_FOR_DECISION"}>Reject case</option>
+                        <option value="CANCEL">Cancel nomination</option>
                       </select></label>
                       {decision === "APPROVE" ? <>
-                        <label>Effective<input type="date" value={decisionEffective} onChange={(event) => setDecisionEffective(event.target.value)} /></label>
-                        <label>Expires<input type="date" value={decisionExpiry} onChange={(event) => setDecisionExpiry(event.target.value)} /></label>
-                        <label>Next review due<input type="date" value={decisionReviewDue} onChange={(event) => setDecisionReviewDue(event.target.value)} /></label>
+                        <label>Effective<input aria-label="Effective" type="date" value={decisionEffective} onChange={(event) => setDecisionEffective(event.target.value)} /></label>
+                        <label>Expires<input aria-label="Expires" type="date" value={decisionExpiry} onChange={(event) => setDecisionExpiry(event.target.value)} /></label>
+                        <label>Next review due<input aria-label="Next review due" type="date" value={decisionReviewDue} onChange={(event) => setDecisionReviewDue(event.target.value)} /></label>
                       </> : null}
-                      <label className="span-2">Decision reason<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} rows={4} /></label>
+                      <label className="span-2">Decision reason<textarea aria-label="Decision reason" value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} rows={4} /></label>
                       {decision === "APPROVE" && caseDetail.readiness.development.observed_audits < caseDetail.readiness.development.target && caseDetail.case.case_type === "CHANGE_AUTHORIZATION" ? (
-                        <label className="span-2">Basis for approval before development target is complete<textarea value={developmentBasis} onChange={(event) => setDevelopmentBasis(event.target.value)} rows={3} /></label>
+                        <label className="span-2">Basis for approval before development target is complete<textarea aria-label="Basis for approval before development target is complete" value={developmentBasis} onChange={(event) => setDevelopmentBasis(event.target.value)} rows={3} /></label>
                       ) : null}
                       {caseDetail.evidence.length ? (
                         <fieldset className="qms-authz-checklist span-2">
@@ -1093,7 +1083,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                         </fieldset>
                       ) : <p className="qms-authz-muted span-2">No separately linked case evidence is available; source-backed readiness remains captured in the decision snapshot.</p>}
                     </div>
-                    <button type="button" className="qms-authz-button" onClick={() => void makeDecision()} disabled={busy}>Record final decision</button>
+                    <button type="button" className="qms-authz-button" onClick={() => void makeDecision()} disabled={busy || decisionReason.trim().length < 12 || (["APPROVE", "REJECT"].includes(decision) && caseDetail.case.status !== "READY_FOR_DECISION")}>Record final decision</button>
                   </div>
                 ) : null}
 
@@ -1228,10 +1218,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {nominateOpen ? (
         <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Nominate person for Quality authorization">
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitNomination(event)}>
-            <div className="qms-authz-modal__header"><h2>Nominate for Quality authorization</h2><button type="button" onClick={() => setNominateOpen(false)}><XCircle size={20} /></button></div>
-            <label>Person<select required value={nominatePerson} onChange={(event) => setNominatePerson(event.target.value)}><option value="">Select person</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}{item.home_role ? ` — ${human(item.home_role)}` : ""}</option>)}</select></label>
-            <label>Authorization type<select required value={nominateRule} onChange={(event) => setNominateRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-            <label>Nomination reason<textarea required rows={4} value={nominateReason} onChange={(event) => setNominateReason(event.target.value)} /></label>
+            <div className="qms-authz-modal__header"><h2>Nominate for Quality authorization</h2><button type="button" aria-label="Close nomination" onClick={() => setNominateOpen(false)}><XCircle size={20} /></button></div>
+            <label>Person<select aria-label="Person" required value={nominatePerson} onChange={(event) => setNominatePerson(event.target.value)}><option value="">Select person</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}{item.home_role ? ` — ${human(item.home_role)}` : ""}</option>)}</select></label>
+            <label>Authorization type<select aria-label="Authorization type" required value={nominateRule} onChange={(event) => setNominateRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+            <label>Nomination reason<textarea aria-label="Nomination reason" required rows={4} value={nominateReason} onChange={(event) => setNominateReason(event.target.value)} /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setNominateOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy}>Create case</button></div>
           </form>
         </div>
@@ -1240,10 +1230,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {batchOpen ? (
         <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Batch nominate personnel">
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitBatch(event)}>
-            <div className="qms-authz-modal__header"><h2>Batch nominate</h2><button type="button" onClick={() => setBatchOpen(false)}><XCircle size={20} /></button></div>
-            <label>Authorization type<select required value={batchRule} onChange={(event) => setBatchRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+            <div className="qms-authz-modal__header"><h2>Batch nominate</h2><button type="button" aria-label="Close batch nomination" onClick={() => setBatchOpen(false)}><XCircle size={20} /></button></div>
+            <label>Authorization type<select aria-label="Authorization type" required value={batchRule} onChange={(event) => setBatchRule(event.target.value)}><option value="">Select authorization</option>{rules.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
             <fieldset className="qms-authz-checklist"><legend>People</legend>{people.filter((item) => item.workforce_status === "Active").map((item) => <label key={item.key}><input type="checkbox" checked={batchPeople.includes(item.key)} onChange={(event) => setBatchPeople((current) => event.target.checked ? [...current, item.key] : current.filter((value) => value !== item.key))} /> <span>{item.name}</span></label>)}</fieldset>
-            <label>Nomination reason<textarea required rows={4} value={batchReason} onChange={(event) => setBatchReason(event.target.value)} /></label>
+            <label>Nomination reason<textarea aria-label="Nomination reason" required rows={4} value={batchReason} onChange={(event) => setBatchReason(event.target.value)} /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setBatchOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy || !batchPeople.length}>Create {batchPeople.length || ""} case{batchPeople.length === 1 ? "" : "s"}</button></div>
           </form>
         </div>
@@ -1254,12 +1244,12 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitReview(event)}>
             <div className="qms-authz-modal__header"><h2>Record periodic review</h2><button type="button" onClick={() => setReviewOpen(false)}><XCircle size={20} /></button></div>
             <p><strong>Reviewer:</strong> {actorName}</p>
-            <label>Authorization<select required value={reviewAuthorization} onChange={(event) => setReviewAuthorization(event.target.value)}><option value="">Select active authorization</option>{authorizations.filter((item) => ["ACTIVE", "SUSPENDED"].includes(item.status)).map((item) => <option key={item.key} value={item.key}>{item.person} — {item.authorization}</option>)}</select></label>
-            <label>Outcome<select value={reviewOutcome} onChange={(event) => setReviewOutcome(event.target.value as typeof reviewOutcome)}><option value="CONTINUE">Continue</option><option value="CONTINUE_WITH_CONDITIONS">Continue with conditions</option><option value="REQUIRES_ACTION">Requires action</option><option value="SUSPEND">Suspend</option><option value="REVOKE">Revoke</option></select></label>
-            <label>Next review due<input type="date" value={reviewNextDue} onChange={(event) => setReviewNextDue(event.target.value)} /></label>
-            <label>Review reason<textarea required rows={4} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
-            <label>Evidence / controlled references<textarea rows={3} value={reviewEvidenceReferences} onChange={(event) => setReviewEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
-            <label>Review notes<textarea rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label>
+            <label>Authorization<select aria-label="Authorization" required value={reviewAuthorization} onChange={(event) => setReviewAuthorization(event.target.value)}><option value="">Select active authorization</option>{authorizations.filter((item) => ["ACTIVE", "SUSPENDED"].includes(item.status)).map((item) => <option key={item.key} value={item.key}>{item.person} — {item.authorization}</option>)}</select></label>
+            <label>Outcome<select aria-label="Outcome" value={reviewOutcome} onChange={(event) => setReviewOutcome(event.target.value as typeof reviewOutcome)}><option value="CONTINUE">Continue</option><option value="CONTINUE_WITH_CONDITIONS">Continue with conditions</option><option value="REQUIRES_ACTION">Requires action</option><option value="SUSPEND">Suspend</option><option value="REVOKE">Revoke</option></select></label>
+            <label>Next review due<input aria-label="Next review due" type="date" value={reviewNextDue} onChange={(event) => setReviewNextDue(event.target.value)} /></label>
+            <label>Review reason<textarea aria-label="Review reason" required rows={4} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} /></label>
+            <label>Evidence / controlled references<textarea aria-label="Evidence / controlled references" rows={3} value={reviewEvidenceReferences} onChange={(event) => setReviewEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
+            <label>Review notes<textarea aria-label="Review notes" rows={3} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setReviewOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy}>Record review</button></div>
           </form>
         </div>
@@ -1272,13 +1262,13 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
             <p><strong>{exemptionAuthorization.person || personDetail?.person.name}</strong> · {exemptionAuthorization.authorization}</p>
             <div className="qms-authz-decision-context"><span><strong>Approving authority:</strong> {actorName}</span></div>
             <div className="qms-authz-form-grid">
-              <label>Missing criterion<input value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
-              <label>Effective<input type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
-              <label>Expires<input type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
-              <label className="span-2">Why normal compliance is not currently possible<textarea value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
+              <label>Missing criterion<input aria-label="Missing criterion" value={exemptionCriterion} onChange={(event) => setExemptionCriterion(event.target.value)} /></label>
+              <label>Effective<input aria-label="Effective" type="date" value={exemptionEffective} onChange={(event) => setExemptionEffective(event.target.value)} /></label>
+              <label>Expires<input aria-label="Expires" type="date" value={exemptionExpiry} onChange={(event) => setExemptionExpiry(event.target.value)} /></label>
+              <label className="span-2">Why normal compliance is not currently possible<textarea aria-label="Why normal compliance is not currently possible" value={exemptionReason} onChange={(event) => setExemptionReason(event.target.value)} rows={3} /></label>
               <label className="span-2">Equivalent evidence, one controlled reference per line<textarea value={exemptionEquivalentEvidence} onChange={(event) => setExemptionEquivalentEvidence(event.target.value)} rows={3} /></label>
               <label className="qms-authz-checkbox span-2"><input type="checkbox" checked={exemptionSupervisionRequired} onChange={(event) => setExemptionSupervisionRequired(event.target.checked)} /> Supervision required</label>
-              {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
+              {exemptionSupervisionRequired ? <label className="span-2">Supervisor<select aria-label="Supervisor" value={exemptionSupervisor} onChange={(event) => setExemptionSupervisor(event.target.value)}><option value="">Select supervisor</option>{people.filter((item) => item.workforce_status === "Active").map((item) => <option value={item.key} key={item.key}>{item.name}</option>)}</select></label> : null}
               <label className="span-2">Operating conditions, one per line<textarea value={exemptionConditions} onChange={(event) => setExemptionConditions(event.target.value)} rows={3} /></label>
               <label className="span-2">Limitations, one per line<textarea value={exemptionLimitations} onChange={(event) => setExemptionLimitations(event.target.value)} rows={3} /></label>
             </div>
@@ -1293,7 +1283,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
       {lifecycleOpen && lifecycleAuthorization ? (
         <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Authorization lifecycle decision">
           <form className="qms-authz-modal__panel" onSubmit={(event) => void submitLifecycle(event)}>
-            <div className="qms-authz-modal__header"><h2>{human(lifecycleDecision)} authorization</h2><button type="button" onClick={() => setLifecycleOpen(false)}><XCircle size={20} /></button></div>
+            <div className="qms-authz-modal__header"><h2>{human(lifecycleDecision)} authorization</h2><button type="button" aria-label="Close authorization decision" onClick={() => setLifecycleOpen(false)}><XCircle size={20} /></button></div>
             <p><strong>{lifecycleAuthorization.person}</strong> · {lifecycleAuthorization.authorization}</p>
             <div className="qms-authz-decision-context">
               <span><strong>Decision authority:</strong> {actorName}</span>
@@ -1308,11 +1298,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
                 ))}
               </ul>
             ) : null}
-            <label>Effective date<input required type="date" value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} /></label>
-            {["RENEW", "REINSTATE"].includes(lifecycleDecision) ? <label>Expires<input type="date" value={lifecycleExpiry} onChange={(event) => setLifecycleExpiry(event.target.value)} /></label> : null}
-            <label>Next review due<input type="date" value={lifecycleReviewDue} onChange={(event) => setLifecycleReviewDue(event.target.value)} /></label>
-            <label>Decision reason<textarea required rows={4} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label>
-            <label>Evidence / controlled references<textarea rows={3} value={lifecycleEvidenceReferences} onChange={(event) => setLifecycleEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
+            <label>Effective date<input aria-label="Effective date" required type="date" value={lifecycleDate} onChange={(event) => setLifecycleDate(event.target.value)} /></label>
+            {["RENEW", "REINSTATE"].includes(lifecycleDecision) ? <label>Expires<input aria-label="Expires" type="date" value={lifecycleExpiry} onChange={(event) => setLifecycleExpiry(event.target.value)} /></label> : null}
+            <label>Next review due<input aria-label="Next review due" type="date" value={lifecycleReviewDue} onChange={(event) => setLifecycleReviewDue(event.target.value)} /></label>
+            <label>Decision reason<textarea aria-label="Decision reason" required rows={4} value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} /></label>
+            <label>Evidence / controlled references<textarea aria-label="Evidence / controlled references" rows={3} value={lifecycleEvidenceReferences} onChange={(event) => setLifecycleEvidenceReferences(event.target.value)} placeholder="One business reference per line" /></label>
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setLifecycleOpen(false)}>Cancel</button><button className={`qms-authz-button ${lifecycleDecision === "REVOKE" ? "qms-authz-button--danger" : ""}`} disabled={busy}>{human(lifecycleDecision)}</button></div>
           </form>
         </div>
@@ -1322,11 +1312,11 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
         <div className="qms-authz-modal" role="dialog" aria-modal="true" aria-label="Authorization policy">
           <form className="qms-authz-modal__panel" onSubmit={(event) => void saveRule(event)}>
             <div className="qms-authz-modal__header"><h2>{editingRule ? "Edit authorization policy" : "New authorization policy"}</h2><button type="button" onClick={() => setRuleOpen(false)}><XCircle size={20} /></button></div>
-            <label>Title<input required value={ruleTitle} onChange={(event) => setRuleTitle(event.target.value)} /></label>
-            {!editingRule ? <label>Code<input required value={ruleCode} onChange={(event) => setRuleCode(event.target.value)} placeholder="AUDITOR_SPECIALIST" /></label> : null}
-            {!editingRule ? <label>Type<select value={ruleType} onChange={(event) => setRuleType(event.target.value as typeof ruleType)}><option value="AUDITOR">Auditor</option><option value="LEAD_AUDITOR">Lead Auditor</option><option value="QUALITY_INSPECTOR">Quality Assurance Inspector</option><option value="AUTHORIZATION_REVIEWER">Authorization Reviewer</option><option value="CUSTOM">Custom</option></select></label> : null}
-            <label>Description<textarea rows={3} value={ruleDescription} onChange={(event) => setRuleDescription(event.target.value)} /></label>
-            <label>Required Training course codes<input value={ruleTraining} onChange={(event) => setRuleTraining(event.target.value)} placeholder="QMS-INIT, QMS-REF, QMS-ADMIN" /><small>Course recurrence and validity are controlled in Training, not here.</small></label>
+            <label>Title<input aria-label="Title" required value={ruleTitle} onChange={(event) => setRuleTitle(event.target.value)} /></label>
+            {!editingRule ? <label>Code<input aria-label="Code" required value={ruleCode} onChange={(event) => setRuleCode(event.target.value)} placeholder="AUDITOR_SPECIALIST" /></label> : null}
+            {!editingRule ? <label>Type<select aria-label="Type" value={ruleType} onChange={(event) => setRuleType(event.target.value as typeof ruleType)}><option value="AUDITOR">Auditor</option><option value="LEAD_AUDITOR">Lead Auditor</option><option value="QUALITY_INSPECTOR">Quality Assurance Inspector</option><option value="AUTHORIZATION_REVIEWER">Authorization Reviewer</option><option value="CUSTOM">Custom</option></select></label> : null}
+            <label>Description<textarea aria-label="Description" rows={3} value={ruleDescription} onChange={(event) => setRuleDescription(event.target.value)} /></label>
+            <label>Required Training course codes<input aria-label="Required Training course codes" value={ruleTraining} onChange={(event) => setRuleTraining(event.target.value)} placeholder="QMS-INIT, QMS-REF, QMS-ADMIN" /><small>Course recurrence and validity are controlled in Training, not here.</small></label>
             <label className="qms-authz-checkbox"><input type="checkbox" checked={ruleIndependence} onChange={(event) => setRuleIndependence(event.target.checked)} /> Independence required at audit assignment</label>
             {ruleType === "AUDITOR" ? <label className="qms-authz-checkbox"><input type="checkbox" checked={ruleDevelopmental} onChange={(event) => setRuleDevelopmental(event.target.checked)} /> Supervised Observer / Trainee authorization</label> : null}
             <div className="qms-authz-actions"><button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={() => setRuleOpen(false)}>Cancel</button><button className="qms-authz-button" disabled={busy}>Save policy</button></div>

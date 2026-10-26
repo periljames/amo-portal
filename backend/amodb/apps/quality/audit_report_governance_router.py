@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name
+
 import hashlib
 import mimetypes
 import uuid
@@ -209,7 +211,7 @@ def adopt_current_report(
         revision_no=(latest.revision_no + 1) if latest else 1,
         status="DRAFT",
         file_ref=str(path),
-        filename=path.name,
+        filename=download_name(audit.audit_ref or audit.title, "report", f"rev-{(latest.revision_no + 1) if latest else 1}", extension=path.suffix),
         content_type=mimetypes.guess_type(path.name)[0],
         size_bytes=path.stat().st_size,
         sha256=digest,

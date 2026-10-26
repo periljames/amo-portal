@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useEffect, useState } from "react";
 
 import {
@@ -58,7 +59,7 @@ export default function TenantEmailPreferencesPanel() {
           <p>Choose optional email classes. Account security and critical compliance escalation remain active as portal features.</p>
         </div>
       </div>
-      {loading ? <p>Loading email preferences…</p> : (
+      {loading ? <p><InlineLoading label={"Loading email preferences…"}/></p> : (
         <div className="saas-admin__form">
           <div className="saas-admin__alert saas-admin__alert--success">
             <strong>Always active:</strong> password recovery, account security, overdue compliance actions and critical escalation.

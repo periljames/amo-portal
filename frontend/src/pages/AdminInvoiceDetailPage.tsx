@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -122,7 +123,7 @@ const AdminInvoiceDetailPage: React.FC = () => {
 
         <div className="admin-page__grid">
           <Panel title="Invoice summary">
-            {loading && <p>Loading invoice…</p>}
+            {loading && <p><InlineLoading label={"Loading invoice…"}/></p>}
             {!loading && invoice && (
               <div className="form-grid">
                 <div className="form-row">

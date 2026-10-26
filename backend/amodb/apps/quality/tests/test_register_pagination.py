@@ -2,11 +2,53 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID
+import pytest
 
 from amodb.apps.accounts import models as account_models
 from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import register_pagination
 from amodb.apps.quality import service as quality_service
+
+
+def test_canonical_finding_register_read_owns_paged_url():
+    from amodb.apps.quality import car_operational_route_order  # noqa: F401
+    from amodb.apps.quality.canonical_router import router
+    from starlette.routing import Match
+    scope={"type":"http","method":"GET","path":"/api/maintenance/AMO/quality/audits/register/paged","root_path":""}
+    matched=next(route for route in router.routes if route.matches(scope)[0] == Match.FULL)
+    assert matched.endpoint is register_pagination.get_audit_register_paged
+
+
+@pytest.mark.parametrize("status,rc,cap,expected", [
+    ("OPEN", "SUBMITTED", "PENDING", "needs_review"),
+    ("CANCELLED", "PENDING", "PENDING", "needs_review"),
+    ("PENDING_VERIFICATION", "SUBMITTED", "SUBMITTED", "needs_review"),
+    ("IN_PROGRESS", "REJECTED", "ACCEPTED", "with_auditee"),
+    ("IN_PROGRESS", "ACCEPTED", "ACCEPTED", "implementation"),
+    ("PENDING_VERIFICATION", "ACCEPTED", "ACCEPTED", "effectiveness"),
+    ("CLOSED", "ACCEPTED", "ACCEPTED", "effectiveness"),
+])
+def test_finding_queues_follow_review_state_not_just_car_status(db_session, status, rc, cap, expected):
+    amo = account_models.AMO(amo_code="STAGE", name="Stages", login_slug="stages")
+    db_session.add(amo)
+    db_session.commit()
+    user = _user(db_session, amo_id=amo.id)
+    finding = _finding(db_session, amo_id=amo.id)
+    car = _car(db_session, amo_id=amo.id, requested_by_user_id=user.id, finding_id=finding.id, title="Stage test")
+    car.status = quality_models.CARStatus(status)
+    car.root_cause_status, car.capa_status = rc, cap
+    car.assigned_to_user_id = user.id
+    db_session.commit()
+    for stage in ["needs_review", "with_auditee", "implementation", "effectiveness", "closed"]:
+        result = register_pagination.get_audit_register_paged(domain=None, period=None,
+            workflow_stage=stage, limit=25, offset=0, db=db_session, current_user=user)
+        assert result.total == (1 if stage == expected else 0), stage
+        if result.rows:
+            assert result.rows[0].linked_cars[0].responsible_personnel == user.full_name
+    if status == "PENDING_VERIFICATION":
+        result = register_pagination.get_car_register_paged(program=None, scope="awaiting_effectiveness_review",
+            limit=25, offset=0, db=db_session, current_user=user)
+        assert result.total == (1 if expected == "effectiveness" else 0)
 
 
 def _user(db_session, *, amo_id: str) -> account_models.User:

@@ -184,7 +184,7 @@ export default function DocumentGovernanceDashboardPage() {
       subtitle="Your assigned document work, real control exceptions and time-bound obligations in one operational view."
       canControl={canControl}
       actions={<>
-        <button type="button" className="dc-button dc-button--primary" onClick={() => navigate(`${basePath}/library`)}><BookOpen size={15} /> Open library</button>
+        <button type="button" className={canControl ? "dc-button" : "dc-button dc-button--primary"} onClick={() => navigate(`${basePath}/library`)}><BookOpen size={15} /> Open library</button>
         <button type="button" className="dc-button" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button>
       </>}
     >
@@ -202,14 +202,15 @@ export default function DocumentGovernanceDashboardPage() {
             {myWork.length ? (
               <div className="dc-table-wrap dms-home__table-wrap">
                 <table className="dc-table dms-home__table">
-                  <thead><tr><th>Task</th><th>Document</th><th>Status</th><th>Due</th><th>Action</th></tr></thead>
+                  <caption className="sr-only">Assigned Document Control work</caption>
+                  <thead><tr><th scope="col">Task</th><th scope="col">Document</th><th scope="col">Status</th><th scope="col">Due</th><th scope="col">Action</th></tr></thead>
                   <tbody>{myWork.map((item) => (
                     <tr key={item.id}>
-                      <td><strong>{item.title}</strong><small>{workKindLabel(item.kind)}</small></td>
-                      <td><strong>{item.document.code}</strong><small>{item.document.title}</small></td>
-                      <td><DocumentControlStatus status={item.priority || item.status} kind={statusKind(item.priority || item.status)} /><small>{item.status.replaceAll("_", " ")}</small></td>
-                      <td>{formatDate(item.due_at)}</td>
-                      <td><button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>{item.action_label} <ArrowRight size={14} /></button></td>
+                      <td data-label="Task"><strong>{item.title}</strong><small>{workKindLabel(item.kind)}</small></td>
+                      <td data-label="Document"><strong>{item.document.code}</strong><small>{item.document.title}</small></td>
+                      <td data-label="Status"><DocumentControlStatus status={item.priority || item.status} kind={statusKind(item.priority || item.status)} /><small>{item.status.replaceAll("_", " ")}</small></td>
+                      <td data-label="Due">{formatDate(item.due_at)}</td>
+                      <td data-label="Action"><button type="button" className="dc-button dc-button--primary" onClick={() => navigate(item.target_path)}>{item.action_label} <ArrowRight size={14} /></button></td>
                     </tr>
                   ))}</tbody>
                 </table>

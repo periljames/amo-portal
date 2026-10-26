@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BadgeCheck, BookOpenCheck, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 
@@ -60,7 +61,7 @@ const TrainingPerson360Drawer = ({ userId, isOpen, onClose }: Props) => {
         <div className="tos-actions">
           <button type="button" disabled={loading || !userId} onClick={() => void load()}><RefreshCw size={15} /> Refresh</button>
         </div>
-        {loading ? <p>Loading canonical Training evidence…</p> : null}
+        {loading ? <p><InlineLoading label={"Loading canonical Training evidence…"}/></p> : null}
         {error ? <div className="tos-banner tos-banner--error"><AlertTriangle size={16} />{error}</div> : null}
         {data ? <>
           <section className="tos-card">

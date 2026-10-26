@@ -117,6 +117,7 @@ def main() -> None:
         default=None,
         help="Worker processes per selected family (overridable with PORTAL_WORKER_PROCESS_POOLS)",
     )
+    parser.add_argument("--single-process", action="store_true", help="Local development: keep all selected families active in one worker process")
     args = parser.parse_args()
 
     _load_env_file(args.env_file)
@@ -134,6 +135,10 @@ def main() -> None:
     unknown = selected - available
     if unknown:
         parser.error(f"Unknown worker families: {', '.join(sorted(unknown))}. Available: {', '.join(sorted(available))}")
+
+    if args.single_process:
+        _child_main(selected)
+        return
 
     context = multiprocessing.get_context("spawn")
     processes: list[multiprocessing.Process] = []

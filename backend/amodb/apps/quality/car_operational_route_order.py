@@ -10,7 +10,7 @@ from .tenant_security import resolve_tenant_context
 
 def _is_car_route(route_item) -> bool:
     path = str(getattr(route_item, "path", ""))
-    return path.startswith("/quality/cars")
+    return path.startswith("/quality/cars") or path in {"/quality/audits/register/paged", "/quality/audits/recycle-bin/paged"}
 
 
 def _is_generic_workflow_route(route_item) -> bool:
@@ -33,12 +33,13 @@ def _identity(route_item) -> tuple[str, frozenset[str]]:
 
 
 def _clone_car_routes(api_router: APIRouter) -> None:
-    """Expose the authoritative CAR engine under the canonical tenant route.
+    """Expose the CAR engine and bounded finding read under the tenant route.
 
     The legacy CAR handlers remain the single business-logic owner.  Canonical
     aliases add the tenant-path resolver so a URL for one AMO cannot be used
     with another AMO's authenticated session, then promote the exact handlers
-    ahead of the generic Quality catch-all.
+    ahead of the generic Quality catch-all. Finding detail consumes the bounded
+    register read, whose ``rows`` contract cannot be served by a generic list.
     """
 
     existing = {_identity(item) for item in api_router.routes}
@@ -76,7 +77,10 @@ def _clone_car_routes(api_router: APIRouter) -> None:
         )
         existing.add(target_identity)
 
-    car_routes = [item for item in api_router.routes if "/cars" in str(getattr(item, "path", "")) and not _is_generic_catchall(item)]
+    car_routes = [item for item in api_router.routes if (
+        "/cars" in str(getattr(item, "path", ""))
+        or str(getattr(item, "path", "")).endswith(("/audits/register/paged", "/audits/recycle-bin/paged"))
+    ) and not _is_generic_catchall(item)]
     remaining = [item for item in api_router.routes if item not in car_routes]
     insertion_index = next(
         (

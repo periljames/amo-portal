@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
 import enum
 import io
 import json
@@ -25,7 +27,8 @@ ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 def _safe_filename(value: str, fallback: str) -> str:
     import re
     candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip()).strip("._-")
-    return (candidate[:140] or fallback)
+    suffix = Path(candidate).suffix
+    return download_name(candidate or fallback, extension=suffix, fallback="evidence")
 
 
 def _basename_only(value: str, fallback: str) -> str:
@@ -77,8 +80,15 @@ def _sorted_events(events: Iterable[Any]) -> list[dict]:
 
 def _write_zip(entries: list[tuple[str, bytes]]) -> bytes:
     buffer = io.BytesIO()
+    used_names: set[str] = set()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in entries:
+            original = Path(name)
+            counter = 1
+            while name.casefold() in used_names:
+                counter += 1
+                name = str(original.with_name(f"{original.stem} ({counter}){original.suffix}")).replace("\\", "/")
+            used_names.add(name.casefold())
             info = zipfile.ZipInfo(name, date_time=ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, data)
@@ -480,7 +490,7 @@ def build_evidence_pack(
         filename = f"{label}_evidence_pack.zip"
     else:
         filename = f"{entity_type}_{entity_id}_evidence_pack.zip"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {"Content-Disposition": attachment_header(filename)}
 
     return StreamingResponse(
         iter([zip_bytes]),

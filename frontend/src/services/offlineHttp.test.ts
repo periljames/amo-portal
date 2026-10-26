@@ -7,16 +7,19 @@ import {
   portalFetch,
 } from "./offlineHttp";
 import { notePortalResponse } from "./portalConnectivity";
+import { installOfflineBrowser, offlineTestBody } from "../test/offlineBrowser";
 
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
+  installOfflineBrowser();
   notePortalResponse(new Response(null, { status: 200 }));
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("portal offline cache policy", () => {
@@ -35,6 +38,26 @@ describe("portal offline cache policy", () => {
 });
 
 describe("portal offline mutation policy", () => {
+  it.each([
+    ["/rostering/versions/id/assignments", "POST"],
+    ["/rostering/assignments/id", "PATCH"],
+    ["/work-orders/tasks/1", "PUT"],
+    ["/workforce/attendance-events", "POST"],
+  ])("retains the original %s command key after an ambiguous timeout", async (path, method) => {
+    let sentKey: string | null = null;
+    globalThis.fetch = vi.fn((_input, init) => {
+      if (init?.method === "GET") return Promise.resolve(new Response('{"ready":true}', { status: 200 }));
+      sentKey = new Headers(init?.headers).get("Idempotency-Key");
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")));
+      });
+    });
+    const body = offlineTestBody(path);
+    const failure = await portalFetch(path, { method, body, timeoutMs: 10, offline: { queueMutation: true } }).catch((error) => error);
+    expect(failure).toBeInstanceOf(OfflineQueuedError);
+    expect(failure.operation.idempotencyKey).toBe(sentKey);
+    expect(failure.operation.body).toBe(body);
+  });
   it("keeps authoritative and destructive operations live-only", () => {
     expect(isReplaySafeMutation("/rostering/assignments/ID-1", "DELETE")).toBe(false);
     expect(isReplaySafeMutation("/workforce/leave-requests/ID-1/approve", "POST")).toBe(false);

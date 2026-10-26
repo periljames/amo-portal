@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QMSAuditOut } from "../../../services/qms";
-import { meetingTimelineIssue, reconcileSetupDraft, savedTeamOptions, setupDateLabel } from "./auditSetupControls";
+import { meetingTimelineIssue, normalizePlannedAuditWindow, reconcileSetupDraft, savedTeamOptions, setupDateLabel } from "./auditSetupControls";
 
 describe("audit setup integrity", () => {
   it("retains a saved auditor outside the directory page", () => {
@@ -26,6 +26,17 @@ describe("audit setup integrity", () => {
     expect(reconcileSetupDraft({ title: "editing" }, { title: "saved" }, { title: "refetched" })).toEqual({ title: "editing" });
     expect(reconcileSetupDraft({ title: "saved" }, { title: "saved" }, { title: "refetched" })).toEqual({ title: "refetched" });
     expect(reconcileSetupDraft({ title: "previous audit" }, null, { title: "new audit" })).toEqual({ title: "new audit" });
+  });
+  it("preserves a multi-day audit ending at an earlier clock hour", () => {
+    const window = normalizePlannedAuditWindow(
+      "2026-11-12T16:00", "2026-11-13T10:00", "2026-10-12T09:00",
+    );
+    expect(window).toEqual({
+      plannedStart: "2026-11-12",
+      plannedStartTime: "16:00",
+      plannedEnd: "2026-11-13",
+      plannedEndTime: "10:00",
+    });
   });
   it("renders calendar dates without shifting them to the browser timezone", () => {
     expect(setupDateLabel("2026-09-22T09:00")).toBe("22 Sept 2026 · 09:00");

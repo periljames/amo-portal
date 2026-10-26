@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from email.utils import getaddresses
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -11,7 +12,7 @@ from amodb.apps.notifications import models as notification_models
 from amodb.database import get_db, get_read_db
 
 from . import saas_models, saas_queue, saas_services
-from .resend_adapter import send_email, verify_webhook
+from .resend_adapter import retrieve_email, send_email, verify_webhook
 from .router import require_platform_superuser
 
 
@@ -196,7 +197,16 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     message_id = str((data or {}).get("email_id") or (data or {}).get("id") or "").strip()
     svix_id = str(request.headers.get("svix-id") or "").strip()
-    occurred_at = datetime.now(timezone.utc)
+
+    event_timestamp = str(event.get("created_at") or (data or {}).get("created_at") or "").strip()
+    try:
+        occurred_at = datetime.fromisoformat(event_timestamp.replace("Z", "+00:00")) if event_timestamp else datetime.now(timezone.utc)
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        occurred_at = occurred_at.astimezone(timezone.utc)
+    except ValueError:
+        occurred_at = datetime.now(timezone.utc)
+
     matched_log_id: str | None = None
     duplicate = False
     if svix_id:
@@ -239,22 +249,116 @@ async def resend_webhook(request: Request, db: Session = Depends(get_db)):
         )
 
     if row is not None and not duplicate:
-        delivery_status = event_type.removeprefix("email.").upper() or "UNKNOWN"
         context = dict(row.context_json or {})
         delivery = context.get("_delivery") if isinstance(context.get("_delivery"), dict) else {}
-        delivery.update(
-            {
-                "status": delivery_status,
-                "last_event_at": str(event.get("created_at") or occurred_at.isoformat()),
-            }
-        )
+
+        def address_set(values: Any) -> set[str]:
+            if values is None:
+                return set()
+            raw = values if isinstance(values, (list, tuple, set)) else [values]
+            parsed = getaddresses([str(item) for item in raw])
+            return {address.strip().lower() for _name, address in parsed if address.strip()}
+
+        expected = address_set(delivery.get("effective_recipients"))
+        impacted = address_set((data or {}).get("to"))
+        delivered = address_set(delivery.get("delivered_recipients"))
+        failed = address_set(delivery.get("failed_recipients"))
+        event_at = occurred_at.isoformat()
+
+        delivery["last_event_at"] = event_at
+        delivery["webhook_signature_verified"] = True
+        if event_type == "email.sent":
+            if str(row.delivery_status or "").upper() not in {"DELIVERED", "PARTIALLY_DELIVERED"}:
+                row.delivery_status = "SENT"
+        elif event_type == "email.delivered":
+            delivered.update(impacted or expected)
+            delivery["delivered_recipients"] = sorted(delivered)
+            if not expected or expected.issubset(delivered):
+                row.delivery_status = "DELIVERED"
+                delivery["delivered_at"] = delivery.get("delivered_at") or event_at
+            else:
+                row.delivery_status = "PARTIALLY_DELIVERED"
+        elif event_type == "email.delivery_delayed":
+            if str(row.delivery_status or "").upper() != "DELIVERED":
+                row.delivery_status = "DELIVERY_DELAYED"
+        elif event_type == "email.opened":
+            delivery["opened_at"] = delivery.get("opened_at") or event_at
+            delivery["engagement_status"] = "OPENED"
+        elif event_type == "email.clicked":
+            delivery["clicked_at"] = delivery.get("clicked_at") or event_at
+            delivery["engagement_status"] = "CLICKED"
+        elif event_type in {"email.failed", "email.bounced", "email.suppressed"}:
+            failed.update(impacted or expected)
+            delivery["failed_recipients"] = sorted(failed)
+            if expected and expected.issubset(failed):
+                row.delivery_status = event_type.removeprefix("email.").upper()
+                row.status = notification_models.EmailStatus.FAILED
+            else:
+                row.delivery_status = "PARTIAL_FAILURE"
+            row.error = f"Resend delivery event: {event_type}"
+        elif event_type == "email.complained":
+            delivery["complained_at"] = delivery.get("complained_at") or event_at
+            delivery["engagement_status"] = "COMPLAINED"
+
+        try:
+            provider_snapshot = retrieve_email(
+                api_key=str(secret.get("api_key") or ""),
+                api_url=str((platform_credential.config_json or {}).get("api_base_url") or "https://api.resend.com"),
+                email_id=message_id,
+            )
+            delivery["provider_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+            delivery["provider_last_event"] = str(provider_snapshot.get("last_event") or "").strip().upper() or None
+            delivery["provider_message_id_header"] = str(provider_snapshot.get("message_id") or "").strip() or None
+            delivery.pop("provider_reconciliation_error", None)
+        except Exception as exc:
+            delivery["provider_reconciliation_error"] = str(exc)[:500]
+
+        delivery["status"] = str(row.delivery_status or "UNKNOWN")
         context["_delivery"] = delivery
         row.context_json = context
-        row.delivery_status = delivery_status
         row.last_delivery_event_at = occurred_at
-        if event_type in {"email.failed", "email.bounced", "email.complained", "email.suppressed"}:
-            row.status = notification_models.EmailStatus.FAILED
-            row.error = f"Resend delivery event: {event_type}"
+
+        if row.delivery_status == "DELIVERED" and str(context.get("purpose") or "").strip().lower() == "audit-notice":
+            from amodb.apps.quality import models as quality_models
+            from amodb.apps.quality.audit_notice_models import QualityAuditNotice, QualityAuditNoticeEvent
+
+            notice_id = str(context.get("notice_id") or "").strip()
+            notice = (
+                db.query(QualityAuditNotice)
+                .filter(QualityAuditNotice.id == notice_id, QualityAuditNotice.amo_id == row.amo_id)
+                .with_for_update()
+                .first()
+                if notice_id
+                else None
+            )
+            if notice is not None and notice.status == "GENERATED":
+                actor_user_id = str(context.get("issuer_user_id") or "").strip() or None
+                notice.status = "DELIVERED"
+                notice.delivered_by_user_id = actor_user_id
+                notice.delivered_at = occurred_at
+                notice.delivery_channel = "EMAIL"
+                notice.delivery_reference = f"Resend confirmed recipient-server delivery · {message_id}"
+                audit = (
+                    db.query(quality_models.QMSAudit)
+                    .filter(
+                        quality_models.QMSAudit.id == notice.audit_id,
+                        quality_models.QMSAudit.amo_id == notice.amo_id,
+                    )
+                    .first()
+                )
+                if audit is not None:
+                    audit.upcoming_notice_sent_at = occurred_at
+                db.add(
+                    QualityAuditNoticeEvent(
+                        amo_id=notice.amo_id,
+                        audit_id=notice.audit_id,
+                        notice_id=notice.id,
+                        event_type="DELIVERED",
+                        reason=f"Signed Resend webhook confirmed delivery for provider email {message_id}.",
+                        actor_user_id=actor_user_id,
+                        created_at=occurred_at,
+                    )
+                )
     db.commit()
     return {
         "ok": True,

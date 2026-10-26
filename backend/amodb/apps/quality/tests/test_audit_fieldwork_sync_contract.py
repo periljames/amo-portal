@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+import json
+import uuid
+from types import SimpleNamespace
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -65,6 +68,39 @@ def test_fieldwork_mutation_hash_is_stable_for_identical_replay():
     second = _payload()
     assert _mutation_hash(first) == _mutation_hash(second)
     assert len(_mutation_hash(first)) == 64
+
+
+def test_answered_governance_history_is_database_json_serializable():
+    from amodb.apps.quality.audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
+    from amodb.apps.quality.audit_checklist_execution_router import _governance_snapshot
+
+    row = QualityAuditChecklistExecutionGovernance(
+        answered_at=CAPTURED_AT, updated_at=CAPTURED_AT,
+        canonical_response_status="COMPLIANT", entity_version=1,
+    )
+    snapshot = _governance_snapshot(row)
+    persisted = json.loads(json.dumps(snapshot))
+    assert persisted["answered_at"] == CAPTURED_AT.isoformat()
+
+
+@pytest.mark.parametrize("finding", [False, True])
+def test_committed_replay_succeeds_after_fieldwork_window_closes(monkeypatch, finding):
+    from amodb.apps.quality import audit_checklist_execution_router as router
+
+    monkeypatch.setattr(router, "assert_quality_permission_any", lambda *a, **kw: None)
+    monkeypatch.setattr(router, "set_postgres_tenant_context", lambda *a, **kw: None)
+    monkeypatch.setattr(router, "_internal_fieldwork_viewer", lambda *a, **kw: None)
+    def closed(*a, **kw):
+        raise HTTPException(409, "Fieldwork is complete")
+    monkeypatch.setattr(router, "_internal_fieldwork_actor", closed)
+    monkeypatch.setattr(router, "_existing_receipt_or_none", lambda *a, **kw: SimpleNamespace(
+        committed_version=4, result_snapshot={"row": {}} if finding else {},
+    ))
+    mutate = router.create_atomic_fieldwork_finding if finding else router.mutate_live_fieldwork
+    result = mutate(uuid.uuid4(), uuid.uuid4(), _finding_payload() if finding else _payload(),
+                    SimpleNamespace(amo_id="amo", user_id="user"), object())
+    assert result["replayed"] is True
+    assert result["committed_version"] == 4
 
 
 def test_fieldwork_mutation_hash_changes_when_replayed_content_changes():

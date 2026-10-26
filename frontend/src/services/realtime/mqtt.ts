@@ -269,6 +269,9 @@ export class RealtimeMqttClient {
   }
 
   private async publishConnected(envelope: RealtimeEnvelope): Promise<void> {
+    if (envelope.amoId !== this.amoId || envelope.userId !== this.userId || this.stopped) {
+      throw new Error("The message belongs to a different account or tenant session");
+    }
     const client = this.client;
     const msgpack = this.msgpack;
     const token = this.sessionToken;
@@ -301,11 +304,13 @@ export class RealtimeMqttClient {
     if (this.flushing || !this.client || !this.client.connected || !this.sessionToken) return;
     this.flushing = true;
     try {
-      const pending = await loadOutbound();
+      const scope = { amoId: this.amoId, userId: this.userId };
+      const pending = await loadOutbound(scope);
       for (const item of pending) {
+        if (this.stopped || scope.amoId !== this.amoId || scope.userId !== this.userId) break;
         try {
           await this.publishConnected(item);
-          await removeOutbound(item.id);
+          await removeOutbound(item.id, scope);
         } catch (error) {
           console.warn("[realtime] queued MQTT publish retained for retry", error);
           this.handlers.onState("offline");

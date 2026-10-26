@@ -1,3 +1,4 @@
+import AuditStageLoading from "./AuditStageLoading";
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -50,7 +51,7 @@ type PolicyForm = {
 const emptyPolicy: PolicyForm = {
   retentionClass: "",
   retentionStart: "FOLLOW_UP_COMPLETE",
-  durationDays: "",
+  durationDays: "1827",
   indefinite: false,
   governingBasis: "",
   reviewBeforeDisposition: true,
@@ -123,8 +124,8 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       duration_days: policyForm.indefinite ? null : Number(policyForm.durationDays),
       indefinite: policyForm.indefinite,
       governing_basis: policyForm.governingBasis.trim(),
-      review_before_disposition: policyForm.reviewBeforeDisposition,
-      legal_hold_supported: policyForm.legalHoldSupported,
+      review_before_disposition: true,
+      legal_hold_supported: true,
       disposition_mode: policyForm.indefinite ? "NO_DISPOSITION" : policyForm.dispositionMode,
       approving_capability: policyForm.approvingCapability.trim(),
     }),
@@ -157,7 +158,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         manifest_id: governanceQuery.data?.manifest?.id || null,
       });
     },
-    onSuccess: () => { setHoldRelease(null); void success("Legal hold released and its reason and authority recorded."); },
+    onSuccess: () => { setHoldRelease(null); void success("Legal hold released with an append-only release event, including its reason and governing authority."); },
     onError: (cause) => failure(cause, "Legal hold release failed."),
   });
   const reviewMutation = useMutation({
@@ -178,7 +179,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const policyFormValid = policyForm.retentionClass.trim().length >= 2
     && policyForm.governingBasis.trim().length >= 8
     && policyForm.approvingCapability.trim().length >= 3
-    && (policyForm.indefinite || (Number.isSafeInteger(Number(policyForm.durationDays)) && Number(policyForm.durationDays) > 0));
+    && (policyForm.indefinite || (Number.isSafeInteger(Number(policyForm.durationDays)) && Number.isInteger(Number(policyForm.durationDays)) && Number(policyForm.durationDays) >= 1827));
   const holdFormValid = holdKey.trim().length > 0 && holdReason.trim().length >= 8 && holdBasis.trim().length >= 8;
   const canDispose = Boolean(
     canManage
@@ -190,7 +191,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     && policy.disposition_mode !== "NO_DISPOSITION"
     && !policy.indefinite
     && governance.disposition?.event_type !== "EXECUTED"
-    && (!policy.review_before_disposition || governance.disposition_review_valid === true)
+    && governance.disposition_review_valid === true
     && disposeReason.trim().length >= 8
     && disposeConfirmation.trim() === expectedConfirmation,
   );
@@ -214,7 +215,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     }
   };
 
-  if (auditQuery.isPending || (Boolean(auditId) && governanceQuery.isPending)) return <div className="qms-audit-archive qms-audit-archive--loading">Loading governed audit archive…</div>;
+  if (auditQuery.isPending || (Boolean(auditId) && governanceQuery.isPending)) return <AuditStageLoading label="archive" />;
   if (auditQuery.error || !auditQuery.data) {
     return (
       <AuditStageLoadError
@@ -255,7 +256,7 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       </header>
       {localError ? <div className="qms-audit-archive__message is-error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {notice ? <div className="qms-audit-archive__message" role="status"><CheckCircle2 size={16} /> {notice}</div> : null}
-      {!governance.archive_readiness?.ready ? <div className="qms-audit-archive__blocker" role="status"><AlertTriangle size={16} /><div><strong>Archive generation is locked</strong><ul>{governance.archive_readiness?.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>) || <li>Refresh to verify archive readiness.</li>}</ul><a href={auditSessionPath(amoCode, auditKey, "follow-up")}>Review follow-up requirements</a></div></div> : null}
+      {!governance.archive_readiness?.ready ? <div className="qms-audit-archive__blocker" role="alert"><AlertTriangle size={16} /><div><strong>Archive generation is locked</strong><ul>{governance.archive_readiness?.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>) || <li>Refresh to verify archive readiness.</li>}</ul><a href={auditSessionPath(amoCode, auditKey, "follow-up")}>Review follow-up requirements</a></div></div> : null}
 
       <div className="qms-audit-archive__grid">
         <main>
@@ -304,14 +305,14 @@ const AuditArchiveWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <article className="qms-audit-archive__card">
             <header><ShieldCheck size={19} /><div><strong>Retention policy</strong><small>Tenant configuration; duration is never hard-coded by the application.</small></div></header>
             {policy ? <dl className="qms-audit-archive__policy"><div><dt>Revision</dt><dd>{policy.revision_no}</dd></div><div><dt>Class</dt><dd>{policy.retention_class}</dd></div><div><dt>Starts</dt><dd>{policy.retention_start_event.replaceAll("_", " ")}</dd></div><div><dt>Duration</dt><dd>{policy.indefinite ? "Indefinite" : `${policy.duration_days} days`}</dd></div><div><dt>Disposition</dt><dd>{policy.disposition_mode.replaceAll("_", " ")}</dd></div><div><dt>Approval</dt><dd>{policy.approving_capability}</dd></div><div className="is-wide"><dt>Basis</dt><dd>{policy.governing_basis}</dd></div></dl> : <p className="qms-audit-archive__empty">No retention policy has been configured.</p>}
-            {canManage ? <details className="qms-audit-archive__policy-editor"><summary>{policy ? "Create policy revision" : "Configure retention policy"}</summary><label><span>Retention class</span><input value={policyForm.retentionClass} onChange={(event) => setPolicyForm((current) => ({ ...current, retentionClass: event.target.value }))} /></label><label><span>Retention starts at</span><select value={policyForm.retentionStart} onChange={(event) => setPolicyForm((current) => ({ ...current, retentionStart: event.target.value as AuditRetentionStart }))}><option value="FOLLOW_UP_COMPLETE">Assurance follow-up complete</option><option value="EXECUTION_CLOSED">Audit execution closed</option></select></label><label className="is-check"><input type="checkbox" checked={policyForm.indefinite} onChange={(event) => setPolicyForm((current) => ({ ...current, indefinite: event.target.checked, dispositionMode: event.target.checked ? "NO_DISPOSITION" : current.dispositionMode }))} /><span>Retain indefinitely</span></label>{!policyForm.indefinite ? <label><span>Duration · days</span><input type="number" min={1} value={policyForm.durationDays} onChange={(event) => setPolicyForm((current) => ({ ...current, durationDays: event.target.value }))} /></label> : null}<label><span>Disposition mode</span><select disabled={policyForm.indefinite} value={policyForm.indefinite ? "NO_DISPOSITION" : policyForm.dispositionMode} onChange={(event) => setPolicyForm((current) => ({ ...current, dispositionMode: event.target.value as AuditDispositionMode }))}><option value="NO_DISPOSITION">No disposition</option><option value="PRESERVE_METADATA_DELETE_PACKAGE">Delete package; preserve disposition metadata</option><option value="TRANSFER_PACKAGE">Transfer package to controlled archive</option></select></label><label><span>Approving capability</span><input value={policyForm.approvingCapability} onChange={(event) => setPolicyForm((current) => ({ ...current, approvingCapability: event.target.value }))} /></label><label className="is-check"><input type="checkbox" checked={policyForm.reviewBeforeDisposition} onChange={(event) => setPolicyForm((current) => ({ ...current, reviewBeforeDisposition: event.target.checked }))} /><span>Require disposition review</span></label><label className="is-check"><input type="checkbox" checked={policyForm.legalHoldSupported} onChange={(event) => setPolicyForm((current) => ({ ...current, legalHoldSupported: event.target.checked }))} /><span>Enable legal holds</span></label><label><span>Governing basis</span><textarea rows={3} value={policyForm.governingBasis} onChange={(event) => setPolicyForm((current) => ({ ...current, governingBasis: event.target.value }))} /></label><button type="button" disabled={!policyFormValid || policyMutation.isPending} onClick={() => policyMutation.mutate()}>{policyMutation.isPending ? "Recording…" : "Record immutable policy revision"}</button></details> : null}
+            {canManage ? <details className="qms-audit-archive__policy-editor"><summary>{policy ? "Create policy revision" : "Configure retention policy"}</summary><label><span>Retention class</span><input value={policyForm.retentionClass} onChange={(event) => setPolicyForm((current) => ({ ...current, retentionClass: event.target.value }))} /></label><label><span>Retention starts at</span><select value={policyForm.retentionStart} onChange={(event) => setPolicyForm((current) => ({ ...current, retentionStart: event.target.value as AuditRetentionStart }))}><option value="FOLLOW_UP_COMPLETE">Assurance follow-up complete</option><option value="EXECUTION_CLOSED">Audit execution closed</option></select></label><label className="is-check"><input type="checkbox" checked={policyForm.indefinite} onChange={(event) => setPolicyForm((current) => ({ ...current, indefinite: event.target.checked, dispositionMode: event.target.checked ? "NO_DISPOSITION" : current.dispositionMode }))} /><span>Retain indefinitely</span></label>{!policyForm.indefinite ? <label><span>Duration · days (minimum 1827)</span><input type="number" min={1827} step={1} value={policyForm.durationDays} onChange={(event) => setPolicyForm((current) => ({ ...current, durationDays: event.target.value }))} /></label> : null}<label><span>Disposition mode</span><select disabled={policyForm.indefinite} value={policyForm.indefinite ? "NO_DISPOSITION" : policyForm.dispositionMode} onChange={(event) => setPolicyForm((current) => ({ ...current, dispositionMode: event.target.value as AuditDispositionMode }))}><option value="NO_DISPOSITION">No disposition</option><option value="PRESERVE_METADATA_DELETE_PACKAGE">Delete package; preserve disposition metadata</option><option value="TRANSFER_PACKAGE">Transfer package to controlled archive</option></select></label><label><span>Approving capability</span><input value={policyForm.approvingCapability} onChange={(event) => setPolicyForm((current) => ({ ...current, approvingCapability: event.target.value }))} /></label><label className="is-check"><input type="checkbox" disabled checked={true} onChange={(event) => setPolicyForm((current) => ({ ...current, reviewBeforeDisposition: event.target.checked }))} /><span>Require disposition review</span></label><label className="is-check"><input type="checkbox" disabled checked={true} onChange={(event) => setPolicyForm((current) => ({ ...current, legalHoldSupported: event.target.checked }))} /><span>Enable legal holds</span></label><label><span>Governing basis</span><textarea rows={3} value={policyForm.governingBasis} onChange={(event) => setPolicyForm((current) => ({ ...current, governingBasis: event.target.value }))} /></label><button type="button" disabled={!policyFormValid || policyMutation.isPending} onClick={() => policyMutation.mutate()}>{policyMutation.isPending ? "Recording…" : "Record immutable policy revision"}</button></details> : null}
           </article>
 
           <article className="qms-audit-archive__card">
             <header><Scale size={19} /><div><strong>Disposition control</strong><small>Due date, hold state, approval and exact inventory are enforced server-side.</small></div></header>
             <ul className="qms-audit-archive__gates"><li data-ready={Boolean(manifest)}><span>Archive manifest</span><strong>{manifest ? "Ready" : "Missing"}</strong></li><li data-ready={governance.retention_due}><span>Retention due</span><strong>{governance.retention_due ? "Due" : "Not due"}</strong></li><li data-ready={governance.active_holds.length === 0}><span>No active hold</span><strong>{governance.active_holds.length ? `${governance.active_holds.length} hold(s)` : "Clear"}</strong></li><li data-ready={!policy?.review_before_disposition || governance.disposition_review_valid === true}><span>Disposition review</span><strong>{!policy?.review_before_disposition ? "Not required by policy" : governance.disposition_review_valid ? "Approved for this package" : governance.disposition?.event_type === "EXECUTED" ? "Executed" : "Review required"}</strong></li></ul>
             {governance.disposition ? <p className="qms-audit-archive__disposition-state"><strong>{governance.disposition.event_type}</strong> · {governance.disposition.reason}</p> : null}
-            {canManage && manifest && policy && policy.disposition_mode !== "NO_DISPOSITION" ? <div className="qms-audit-archive__disposition"><textarea rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Disposition review rationale" aria-label="Disposition review rationale" /><div><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(true)}><CheckCircle2 size={14} /> Approve review</button><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(false)}><AlertTriangle size={14} /> Reject</button></div><textarea rows={2} value={disposeReason} onChange={(event) => setDisposeReason(event.target.value)} placeholder="Execution rationale" aria-label="Disposition execution rationale" /><label><span>Type <code>{expectedConfirmation}</code> to execute</span><input value={disposeConfirmation} onChange={(event) => setDisposeConfirmation(event.target.value)} /></label><button className="is-danger" type="button" disabled={!canDispose || disposeMutation.isPending} onClick={() => disposeMutation.mutate()}><Trash2 size={14} /> {disposeMutation.isPending ? "Executing…" : "Execute disposition"}</button></div> : <p className="qms-audit-archive__empty">Current policy does not permit disposition, or no package exists.</p>}
+            {canManage && manifest && policy && policy.disposition_mode !== "NO_DISPOSITION" ? <div className="qms-audit-archive__disposition"><textarea rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Disposition review rationale" aria-label="Disposition review rationale" /><div><button type="button" disabled={!governance.retention_due || governance.active_holds.length > 0 || reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(true)}><CheckCircle2 size={14} /> Approve review</button><button type="button" disabled={reviewReason.trim().length < 8 || reviewMutation.isPending || governance.disposition?.event_type === "EXECUTED"} onClick={() => reviewMutation.mutate(false)}><AlertTriangle size={14} /> Reject</button></div><textarea rows={2} value={disposeReason} onChange={(event) => setDisposeReason(event.target.value)} placeholder="Execution rationale" aria-label="Disposition execution rationale" /><label><span>Type <code>{expectedConfirmation}</code> to execute</span><input value={disposeConfirmation} onChange={(event) => setDisposeConfirmation(event.target.value)} /></label><button className="is-danger" type="button" disabled={!canDispose || disposeMutation.isPending} onClick={() => disposeMutation.mutate()}><Trash2 size={14} /> {disposeMutation.isPending ? "Executing…" : "Execute disposition"}</button></div> : <p className="qms-audit-archive__empty">Current policy does not permit disposition, or no package exists.</p>}
           </article>
         </aside>
       </div>

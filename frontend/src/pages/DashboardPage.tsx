@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 // src/pages/DashboardPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -713,7 +714,7 @@ const DashboardPage: React.FC = () => {
         <section className="page-section">
           <h2 className="page-section__title">Key metrics</h2>
           {fleetError && <p className="error-text">{fleetError}</p>}
-          {fleetLoading && <p className="text-muted">Loading metrics…</p>}
+          {fleetLoading && <p className="text-muted"><InlineLoading label={"Loading metrics…"}/></p>}
 
           {!fleetLoading && (
             <div className="metric-grid">
@@ -823,7 +824,7 @@ const DashboardPage: React.FC = () => {
                   <h3>Upcoming maintenance due</h3>
                   {dueError && <span className="error-text">{dueError}</span>}
                 </div>
-                {dueLoading && <p className="text-muted">Loading due schedules…</p>}
+                {dueLoading && <p className="text-muted"><InlineLoading label={"Loading due schedules…"}/></p>}
                 {!dueLoading && (
                   <div className="table-responsive">
                     <table className="table table-compact">
@@ -1059,7 +1060,7 @@ const DashboardPage: React.FC = () => {
                           />
                         </label>
                       </div>
-                      {holidayLoading && <p className="text-muted">Loading holidays…</p>}
+                      {holidayLoading && <p className="text-muted"><InlineLoading label={"Loading holidays…"}/></p>}
                       {holidayError && <p className="error-text">{holidayError}</p>}
                       {!holidayLoading && holidays.length > 0 && (
                         <ul className="planning-list">
@@ -1186,7 +1187,7 @@ const DashboardPage: React.FC = () => {
           </p>
 
           {docAlertsLoading && (
-            <p className="page-section__body">Loading document alerts…</p>
+            <p className="page-section__body"><InlineLoading label={"Loading document alerts…"}/></p>
           )}
           {docAlertsError && (
             <p className="page-section__body error-text">{docAlertsError}</p>

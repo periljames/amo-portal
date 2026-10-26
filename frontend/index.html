@@ -18,9 +18,26 @@
         } catch (_) {}
       })();
     </script>
+    <style>
+      .portal-boot { --boot-bg:#f6f4ef; --boot-panel:#fffdf9; --boot-line:#dedad2; --boot-ink:#262623; color:var(--boot-ink); background:var(--boot-bg); min-height:100dvh; font:400 14px/1.5 system-ui,sans-serif; position:fixed; inset:0; overflow:hidden; }
+      html[data-color-scheme="dark"] .portal-boot { --boot-bg:#211f1c; --boot-panel:#2b2824; --boot-line:#45413b; --boot-ink:#ece8df; }
+      .portal-boot__accessible { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+      .portal-boot__bar { display:flex; align-items:center; gap:12px; height:60px; border-bottom:1px solid var(--boot-line); background:var(--boot-panel); padding:0 24px; }
+      .portal-boot__bar i { margin-left:auto; width:32px; height:32px; border-radius:50%; }
+      .portal-boot__layout { display:grid; grid-template-columns:190px minmax(0,1fr); gap:24px; padding:24px; }
+      .portal-boot aside { display:grid; align-content:start; gap:20px; padding:16px; }
+      .portal-boot main { padding:12px; min-width:0; }
+      .portal-boot i { display:block; height:14px; border-radius:5px; background:color-mix(in srgb,var(--boot-ink) 12%,var(--boot-panel)); }
+      .portal-boot__heading { width:32%; height:26px!important; margin-bottom:24px; }
+      .portal-boot__tools,.portal-boot__rows { padding:20px; border:1px solid var(--boot-line); border-radius:12px; background:var(--boot-panel); margin-bottom:16px; }
+      .portal-boot__tools { display:flex; gap:16px; }.portal-boot__tools i { width:30%; height:36px; }
+      .portal-boot__rows i { margin:24px 0; width:90%; }.portal-boot__rows i:nth-child(even) { width:65%; }
+      @media(prefers-reduced-motion:no-preference) { .portal-boot i { animation:boot-pulse 1.5s ease-in-out infinite alternate; } @keyframes boot-pulse { to { opacity:.4; } } }
+      @media(max-width:650px) { .portal-boot__layout { grid-template-columns:1fr; padding:12px; }.portal-boot aside { display:none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="portal-boot" role="status" aria-label="Opening AMO Portal"><span class="portal-boot__accessible">Opening AMO Portal</span><div class="portal-boot__bar"><img src="/portal-icon.svg" width="28" height="28" alt=""/><span>AMO Portal</span><i></i></div><div class="portal-boot__layout"><aside aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></aside><main aria-hidden="true"><i class="portal-boot__heading"></i><div class="portal-boot__tools"><i></i><i></i></div><div class="portal-boot__rows"><i></i><i></i><i></i><i></i><i></i></div></main></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

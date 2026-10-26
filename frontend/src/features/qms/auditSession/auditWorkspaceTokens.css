@@ -1,0 +1,23 @@
+/* Local aliases of the portal contract; no independent light/dark palette. */
+.qms-live-audit-focus, .audit-fieldwork-preview, .qms-audit-prepare-stage {
+  --fw-ink: var(--qms-text, var(--text-primary, #111827));
+  --fw-muted: var(--qms-muted, var(--text-secondary, #475569));
+  --fw-surface: var(--qms-panel, var(--surface-elevated, #fff));
+  --fw-canvas: var(--qms-page, var(--surface-soft, #f4f7fb));
+  --fw-line: var(--qms-line, var(--surface-border, #c4ceda));
+  --fw-accent: var(--accent-primary, #1d4ed8);
+  --fw-on-accent: var(--brand-accent-contrast, #fff);
+  --fw-success: var(--accent-success, #15803d);
+  --fw-warning: var(--accent-warning, #b45309);
+  --fw-danger: var(--accent-danger, #b91c1c);
+  --fw-accent-soft: color-mix(in srgb, var(--fw-accent) 12%, var(--fw-surface));
+  --fw-success-soft: color-mix(in srgb, var(--fw-success) 12%, var(--fw-surface));
+  --fw-warning-soft: color-mix(in srgb, var(--fw-warning) 12%, var(--fw-surface));
+  --fw-danger-soft: color-mix(in srgb, var(--fw-danger) 12%, var(--fw-surface));
+  --fw-success-line: color-mix(in srgb, var(--fw-success) 45%, var(--fw-line));
+  --fw-warning-line: color-mix(in srgb, var(--fw-warning) 45%, var(--fw-line));
+  --fw-danger-line: color-mix(in srgb, var(--fw-danger) 45%, var(--fw-line));
+  --fw-radius: var(--radius-sm, 8px);
+  --fw-motion: var(--portal-motion-fast, 120ms);
+  --fw-font: var(--font-family-sans, "Aptos", "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif);
+}

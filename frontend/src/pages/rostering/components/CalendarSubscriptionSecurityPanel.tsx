@@ -71,8 +71,11 @@ export function CalendarSubscriptionSecurityPanel() {
       refresh_interval_minutes: query.data?.refresh_interval_minutes ?? 60,
       includes: query.data?.includes ?? [],
     });
-    queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
     try {
+      // Cancel in-flight requests before removing a revoked bearer link so
+      // late GET responses cannot silently repopulate the sensitive URL.
+      await queryClient.cancelQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
+      queryClient.removeQueries({ queryKey: ROSTER_CALENDAR_LINK_QUERY_KEY, exact: true });
       await revokeCalendarSubscription();
       void queryClient.invalidateQueries({ queryKey: ROSTER_CALENDAR_STATUS_QUERY_KEY, exact: true });
     } catch (cause) {

@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useMemo, useState } from "react";
 import {
   Building2,
@@ -186,7 +187,7 @@ const DepartmentManager: React.FC<Props> = ({ departments, loading, onChanged })
         ) : null}
 
         {loading ? (
-          <div className="setup-centre__loading">Loading departments…</div>
+          <div className="setup-centre__loading"><InlineLoading label={"Loading departments…"}/></div>
         ) : departments.length ? (
           <>
             <div className="setup-department-manager__toolbar">

@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useState } from "react";
 
 import {
@@ -141,7 +142,7 @@ export function ReliabilityFormulaLifecycleControls(): React.ReactElement {
         </div>
       </div>
 
-      {loading && <div className="reliability-v2__loading" role="status">Loading formula lifecycle records…</div>}
+      {loading && <div className="reliability-v2__loading"><InlineLoading label={"Loading formula lifecycle records…"}/></div>}
       {error && <div className="reliability-v2__error" role="alert">{error}</div>}
       {notice && <div className="reliability-formula-admin__message" role="status">{notice}</div>}
 

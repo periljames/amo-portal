@@ -1,9 +1,10 @@
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
 import { apiRequest, qmsPath } from "./apiClient";
-import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 import type { ExternalAuditorFieldworkItem, ExternalAuditorFieldworkModel } from "./qmsAuditExternalAccess";
 import { qmsFieldworkDeviceId } from "./qmsChecklistExecutionGovernance";
+import { uploadTimeoutMs } from "./transferPolicy";
+import { apiBlob } from "./typedApi";
 
 export type AuditEvidenceContext = {
   location_ref?: string;
@@ -87,7 +88,7 @@ export function uploadInternalAuditEvidence(
   form.append("captured_at", options.capturedAt || new Date(file.lastModified || Date.now()).toISOString());
   return apiRequest<{ artifact: AuditEvidenceArtifact; committed_version: number; replayed: boolean }>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-items/${encodeURIComponent(checklistItemId)}/evidence`),
-    { method: "POST", body: form, timeoutMs: 90_000, offline: { queueMutation: false } },
+    { method: "POST", body: form, timeoutMs: uploadTimeoutMs(form), offline: { queueMutation: false } },
   );
 }
 
@@ -131,12 +132,7 @@ export async function uploadExternalAuditorEvidence(
 
 export async function downloadInternalAuditEvidence(amoCode: string, auditId: string, artifactId: string): Promise<Blob> {
   const path = qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/evidence/${encodeURIComponent(artifactId)}/download`);
-  const response = await fetch(`${getApiBaseUrl()}${path}`, { headers: authHeaders({ Accept: "application/octet-stream" }), credentials: "include" });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw new Error(typeof payload?.detail === "string" ? payload.detail : `Evidence download failed with status ${response.status}.`);
-  }
-  return response.blob();
+  return (await apiBlob(path, { headers: { Accept: "application/octet-stream" } })).blob;
 }
 
 export async function downloadPublicReleasedAuditEvidence(findingId: string, artifactId: string): Promise<Blob> {

@@ -8,7 +8,7 @@
  * store, so Cache Storage never receives authenticated PDF bytes.
  */
 
-const VERSION = "v11";
+const VERSION = "v16";
 const SHELL_CACHE = `amo-portal-shell-${VERSION}`;
 const ASSET_CACHE = `amo-portal-assets-${VERSION}`;
 const CACHE_PREFIXES = ["amo-portal-shell-", "amo-portal-assets-", "aerodoc-hybrid-dms-"];
@@ -19,6 +19,7 @@ const SHELL_URLS = ["/", "/portal.webmanifest", "/login-illustration-placeholder
 // Keep release warming bounded while preserving the same offline cache coverage.
 const PRECACHE_CONCURRENCY = 4;
 let qmsWarmup = null;
+let portalWarmup = null;
 let staticShellWarmup = null;
 
 async function precacheQms() {
@@ -33,6 +34,20 @@ async function precacheQms() {
     await precacheWithBoundedConcurrency(urls, shellCache, assetCache, 2);
   })().finally(() => { qmsWarmup = null; });
   return qmsWarmup;
+}
+
+async function precachePortal() {
+  if (portalWarmup) return portalWarmup;
+  portalWarmup = (async () => {
+    const response = await fetch("/portal-precache.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    const urls = [...new Set(Array.isArray(manifest.portalUrls) ? manifest.portalUrls : [])]
+      .filter((url) => typeof url === "string" && /^\/(assets|pdfjs)\/[^?#]+$/.test(url));
+    const [shellCache, assetCache] = await Promise.all([caches.open(SHELL_CACHE), caches.open(ASSET_CACHE)]);
+    await precacheWithBoundedConcurrency(urls, shellCache, assetCache, 2);
+  })().finally(() => { portalWarmup = null; });
+  return portalWarmup;
 }
 
 async function cacheReleaseUrl(url, shellCache, assetCache) {
@@ -112,6 +127,19 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "REFRESH_PORTAL_SHELL") {
+    event.waitUntil((async () => {
+      try {
+        const response = await fetch("/", { cache: "no-store" });
+        if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) throw new Error("Shell unavailable");
+        const cache = await caches.open(SHELL_CACHE);
+        await cache.put("/", response);
+        event.ports?.[0]?.postMessage({ ok: true });
+      } catch { event.ports?.[0]?.postMessage({ ok: false }); }
+    })());
+    return;
+  }
+  if (event.data?.type === "PRECACHE_PORTAL") event.waitUntil(precachePortal().catch(() => undefined));
   if (event.data?.type === "PRECACHE_QMS") event.waitUntil(precacheQms().catch(() => undefined));
   if (event.data?.type === "PREPARE_AUDIT_SHELL") {
     const port = event.ports?.[0];
@@ -123,7 +151,7 @@ self.addEventListener("message", (event) => {
         if (!manifestResponse.ok) throw new Error("The offline application manifest was not available.");
         const manifest = await manifestResponse.json();
         const required = [...new Set(Array.isArray(manifest.qmsUrls) ? manifest.qmsUrls : [])]
-          .filter((url) => typeof url === "string" && /^\\/(assets|pdfjs)\\/[^?#]+$/.test(url));
+          .filter((url) => typeof url === "string" && /^\/(assets|pdfjs)\/[^?#]+$/.test(url));
         if (!required.length) throw new Error("No QMS application files were declared for offline use.");
         const assetCache = await caches.open(ASSET_CACHE);
         const shellCache = await caches.open(SHELL_CACHE);
@@ -185,7 +213,9 @@ function isStaticAsset(request, url) {
 }
 
 async function matchShell(cache, request) {
-  return (await cache.match(request)) || (await cache.match("/"));
+  // Every SPA destination uses the same HTML. A route-specific warmup entry
+  // may predate a release that already refreshed the canonical root shell.
+  return (await cache.match("/")) || (await cache.match(request));
 }
 
 async function cachedShellNavigation(request, preloadResponsePromise, event) {
@@ -210,15 +240,30 @@ async function cachedShellNavigation(request, preloadResponsePromise, event) {
     }
   })();
   if (!fallback) return network;
-  // Weak connectivity must not strand an already-cached workspace on a blank
-  // navigation. Keep the refresh alive after delivering the offline shell.
+  // Prefer a healthy server's current HTML so a prior release cannot keep
+  // booting removed chunks. Fall back promptly on slow/disconnected networks.
   event.waitUntil(network.then(() => undefined, () => undefined));
-  return fallback;
+  let deadline;
+  try {
+    return await Promise.race([
+      network,
+      new Promise(resolve => { deadline = setTimeout(() => resolve(fallback), 350); }),
+    ]);
+  } finally { clearTimeout(deadline); }
 }
 
 async function cacheFirstAsset(request) {
   const cache = await caches.open(ASSET_CACHE);
-  const cached = await cache.match(request);
+  // Release assets are public and same-origin. A server's Vary: Origin must
+  // not distinguish a precache fetch from a module/CSS request after reload.
+  // API and controlled-document requests never enter this handler.
+  const cached = await cache.match(request, { ignoreVary: true });
+  const pathname = new URL(request.url, self.location.origin).pathname;
+  // A content hash (or PDF.js version) identifies immutable bytes. Re-fetching
+  // these on every cached navigation competes with API calls on weak links.
+  const immutable = /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.(?:m?js|css|woff2?|svg|png|webp)$/.test(pathname)
+    || /^\/pdfjs\/[^/]+\//.test(pathname);
+  if (cached && immutable) return cached;
   const networkPromise = fetch(request)
     .then(async (response) => {
       if (response.ok) await cache.put(request, response.clone());
@@ -238,7 +283,7 @@ async function cacheFirstAsset(request) {
     .filter((name) => name.startsWith("amo-portal-assets-") && name !== ASSET_CACHE)
     .sort().reverse();
   for (const name of priorNames) {
-    const fallback = await (await caches.open(name)).match(request);
+    const fallback = await (await caches.open(name)).match(request, { ignoreVary: true });
     if (fallback) return fallback;
   }
   return Response.error();

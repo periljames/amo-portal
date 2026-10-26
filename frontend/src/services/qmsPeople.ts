@@ -269,46 +269,48 @@ function jsonOptions(method: string, body: unknown): RequestInit {
 export function getQmsAuthorizationOverview(amoCode: string, signal?: AbortSignal) {
   return apiRequest<QmsAuthorizationOverview>(
     qmsPath(amoCode, "/people/authorization-control/overview"),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
 export function listQmsAuthorizationPeople(
   amoCode: string,
-  options: { search?: string; includeInactive?: boolean; limit?: number } = {},
+  options: { search?: string; includeInactive?: boolean; limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams();
   if (options.search?.trim()) params.set("search", options.search.trim());
   if (options.includeInactive) params.set("include_inactive", "true");
   if (options.limit) params.set("limit", String(options.limit));
+  if (options.offset) params.set("offset", String(options.offset));
   const suffix = params.size ? `?${params.toString()}` : "";
-  return apiRequest<{ items: QmsAuthorizationPerson[]; total: number }>(
+  return apiRequest<{ items: QmsAuthorizationPerson[]; total: number; limit: number; offset: number; has_more: boolean }>(
     qmsPath(amoCode, `/people/authorization-control/people${suffix}`),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
 export function getQmsAuthorizationPerson(amoCode: string, personKey: string, signal?: AbortSignal) {
   return apiRequest<QmsAuthorizationPersonDetail>(
     qmsPath(amoCode, `/people/authorization-control/people/${encodeURIComponent(personKey)}`),
-    { timeoutMs: 15_000, cacheTtlMs: 3_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
 export function listQmsAuthorizationCases(
   amoCode: string,
-  options: { status?: string; search?: string; limit?: number } = {},
+  options: { status?: string; search?: string; limit?: number; offset?: number } = {},
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams();
   if (options.status) params.set("status", options.status);
   if (options.search?.trim()) params.set("search", options.search.trim());
   if (options.limit) params.set("limit", String(options.limit));
+  if (options.offset) params.set("offset", String(options.offset));
   const suffix = params.size ? `?${params.toString()}` : "";
-  return apiRequest<{ items: QmsAuthorizationCaseSummary[]; total: number }>(
+  return apiRequest<{ items: QmsAuthorizationCaseSummary[]; total: number; limit: number; offset: number; has_more: boolean }>(
     qmsPath(amoCode, `/people/authorization-control/cases${suffix}`),
-    { timeoutMs: 15_000, cacheTtlMs: 3_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -343,7 +345,7 @@ export function createQmsAuthorizationCasesBatch(
 export function getQmsAuthorizationCase(amoCode: string, caseId: string, signal?: AbortSignal) {
   return apiRequest<QmsAuthorizationCaseDetail>(
     qmsPath(amoCode, `/people/authorization-control/cases/${encodeURIComponent(caseId)}`),
-    { timeoutMs: 15_000, cacheTtlMs: 1_500, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -373,7 +375,7 @@ export function decideQmsAuthorizationCase(
   amoCode: string,
   caseId: string,
   payload: {
-    decision: "APPROVE" | "REJECT" | "RETURN";
+    decision: "APPROVE" | "REJECT" | "RETURN" | "CANCEL";
     reason: string;
     effective_from?: string | null;
     expires_on?: string | null;
@@ -493,7 +495,7 @@ export function listQmsAuthorizations(
   const suffix = params.size ? `?${params.toString()}` : "";
   return apiRequest<{ items: QmsAuthorization[] }>(
     qmsPath(amoCode, `/people/authorization-control/authorizations${suffix}`),
-    { timeoutMs: 15_000, cacheTtlMs: 3_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -526,7 +528,7 @@ export function listQmsAuthorizationReviews(
   const suffix = params.size ? `?${params.toString()}` : "";
   return apiRequest<{ items: QmsAuthorizationReview[] }>(
     qmsPath(amoCode, `/people/authorization-control/reviews${suffix}`),
-    { timeoutMs: 15_000, cacheTtlMs: 3_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -564,7 +566,7 @@ export function listQmsPrivilegeRules(
   const suffix = params.size ? `?${params.toString()}` : "";
   return apiRequest<{ items: QmsPrivilegeRule[] }>(
     qmsPath(amoCode, `/people/rules${suffix}`),
-    { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 
@@ -613,7 +615,7 @@ export function updateQmsPrivilegeRule(
 export function getQmsIndependencePolicy(amoCode: string, signal?: AbortSignal) {
   return apiRequest<QmsIndependencePolicy>(
     qmsPath(amoCode, "/people/independence/policy"),
-    { timeoutMs: 15_000, cacheTtlMs: 10_000, signal },
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
   );
 }
 

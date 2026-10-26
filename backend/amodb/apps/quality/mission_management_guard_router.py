@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_write_db
 
 from .mission_models import QualityMission, QualityMissionGate
+from .mission_change_policy import mission_gate_template
+from .mission_workflow import governed, evidence_or_422, assert_current_version
 from .mission_router import (
     CAPABILITY_ADDITION_GATE_TEMPLATE,
     GatePatch,
@@ -29,6 +31,7 @@ router = APIRouter(prefix="/missions", tags=["Quality mission management"])
 
 
 class MissionPatch(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     title: str | None = Field(default=None, min_length=3, max_length=255)
     description: str | None = None
     scope: dict[str, Any] | None = None
@@ -37,6 +40,7 @@ class MissionPatch(BaseModel):
     owner_user_id: str | None = Field(default=None, max_length=36)
     sponsor_user_id: str | None = Field(default=None, max_length=36)
     target_date: date | None = None
+    expected_updated_at: datetime | None = None
 
 
 class MissionGateCreate(BaseModel):
@@ -83,7 +87,7 @@ def _assert_mission_mutable(mission: QualityMission) -> None:
 
 
 def _seed_capability_gates(db: Session, *, mission: QualityMission, amo_id: str, now) -> None:
-    for item in CAPABILITY_ADDITION_GATE_TEMPLATE:
+    for item in mission_gate_template(mission.mission_type, CAPABILITY_ADDITION_GATE_TEMPLATE):
         db.add(
             QualityMissionGate(
                 amo_id=amo_id,
@@ -131,7 +135,7 @@ def create_governed_mission(
         mission_type=payload.mission_type,
         title=payload.title.strip(),
         description=payload.description,
-        scope=payload.scope,
+        scope={**payload.scope, "change_workflow_version": 2} if mission_gate_template(payload.mission_type, CAPABILITY_ADDITION_GATE_TEMPLATE) else payload.scope,
         regulatory_basis=payload.regulatory_basis,
         risk_level=payload.risk_level,
         status="PLANNING",
@@ -148,7 +152,7 @@ def create_governed_mission(
     )
     db.add(mission)
     db.flush()
-    if payload.mission_type == "CAPABILITY_ADDITION":
+    if mission_gate_template(payload.mission_type, CAPABILITY_ADDITION_GATE_TEMPLATE):
         _seed_capability_gates(db, mission=mission, amo_id=ctx.amo_id, now=now)
 
     mission_id = str(mission.id)
@@ -168,6 +172,24 @@ def update_mission_metadata(
     mission = _load_mission(db, amo_id=ctx.amo_id, mission_id=mission_id, for_update=True)
     _assert_mission_mutable(mission)
     updates = payload.model_dump(exclude_unset=True)
+    assert_current_version(mission, updates.pop("expected_updated_at", None))
+    if any(key in updates for key in ("scope", "title", "description")):
+        if "scope" in updates and updates["scope"] is None:
+            raise HTTPException(422, "Change scope cannot be empty.")
+        try:
+            candidate = MissionCreate(mission_type=mission.mission_type, title=updates.get("title", mission.title),
+                description=updates.get("description", mission.description), scope=updates.get("scope", mission.scope))
+        except ValidationError:
+            raise HTTPException(422, "Check the change description, affected scope and Authority requirements.")
+        candidate.scope.pop("change_workflow_version", None)
+        updates["scope"] = {**candidate.scope, "change_workflow_version": 2} if governed(mission) else candidate.scope
+        if any(updates.get(key, getattr(mission, key)) != getattr(mission, key) for key in ("scope", "title", "description")):
+            for gate in mission.gates:
+                gate.status = "PENDING"
+                gate.evidence_status = "LINKED" if gate.source_id else "UNLINKED"
+                gate.passed_at = None
+                gate.passed_by_user_id = None
+            mission.status = "IN_PROGRESS"
 
     if "owner_user_id" in updates:
         updates["owner_user_id"] = _tenant_user_or_422(
@@ -268,13 +290,14 @@ def update_governed_mission_gate(
             QualityMissionGate.mission_id == mission.id,
             QualityMissionGate.id == gate_id,
         )
-        .with_for_update()
+        .with_for_update(of=QualityMissionGate)
         .first()
     )
     if not gate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission gate not found.")
 
     updates = payload.model_dump(exclude_unset=True)
+    assert_current_version(mission, updates.pop("expected_updated_at", None))
     if "owner_user_id" in updates:
         updates["owner_user_id"] = _tenant_user_or_422(
             db,
@@ -295,6 +318,14 @@ def update_governed_mission_gate(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="A Mission gate may PASS only with a VERIFIED authoritative source reference.",
             )
+        if governed(mission):
+            snapshot = updates.get("source_snapshot", gate.source_snapshot) or {}
+            note = snapshot.get("review_note")
+            if candidate_source_type != "DOCUMENT_EVIDENCE" or not isinstance(note, str) or not 10 <= len(note.strip()) <= 4000:
+                raise HTTPException(422, "Select retained evidence and describe your readiness review (10–4000 characters).")
+            asset = evidence_or_422(db, amo_id=ctx.amo_id, asset_id=candidate_source_id)
+            updates["source_snapshot"] = {**asset, "review_note": note.strip(), "reviewed_by_user_id": ctx.user_id, "reviewed_at": _utcnow().isoformat()}
+            updates["source_route"] = f"/maintenance/{ctx.amo_code}/document-control"
     if candidate_status in {"FAIL", "BLOCKED"} and not candidate_blocking_reason:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

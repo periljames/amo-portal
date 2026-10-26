@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import { useCallback, useEffect, useState } from "react";
 
 import {
@@ -61,7 +62,7 @@ const TrainingInvitationInbox = () => {
           </button>
         </div>
         {error ? <div className="card card--error"><p>{error}</p></div> : null}
-        {loading && !items.length ? <p>Loading invitations…</p> : null}
+        {loading && !items.length ? <p><InlineLoading label={"Loading invitations…"}/></p> : null}
         <div style={{ display: "grid", gap: 10 }}>
           {items.map((invitation) => (
             <article key={invitation.id} style={{ border: "1px solid #dde4ee", borderRadius: 10, padding: 12 }}>

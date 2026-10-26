@@ -131,7 +131,7 @@ export default function DocumentLifecycleHeaderActions({ tenant, basePath, manua
   const [mode, setMode] = useState<"add" | "type" | "delete" | null>(null);
 
   return <>
-    <button type="button" className="dc-button dc-button--primary" onClick={() => setMode("add")} data-testid="add-document-button">
+    <button type="button" className="dc-button" onClick={() => setMode("add")} data-testid="add-document-button">
       <FilePlus2 size={14} /> Add document
     </button>
     {manualId ? <>

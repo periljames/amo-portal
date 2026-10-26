@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1840,7 +1841,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             subtitle="Live audits already created by Run (or near-due automation). Open the workspace from here to execute fieldwork."
             eyebrow="Ready to execute"
           >
-            {plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading planned audit records…</p> : null}
+            {plannedAuditsQuery.isLoading ? <p className="qms-loading-copy"><InlineLoading label={"Loading planned audit records…"}/></p> : null}
             {!plannedAuditsQuery.isLoading && !plannedAudits.length ? (
               <EmptyState title="No planned audit records yet" description="Run a recurrence template when it is due, or schedule a requirement from Audit Programme." />
             ) : null}
@@ -1852,7 +1853,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
           subtitle="Each row is one template with a next due date and frequency. Frequency advances the next due after each Run — it does not pre-create a full year of audits. These templates are not Audit Programme line items."
           eyebrow="Off-programme / ad-hoc"
         >
-          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading ? <p className="qms-loading-copy">Loading templates…</p> : null}
+          {schedulesQuery.isLoading || plannedAuditsQuery.isLoading ? <p className="qms-loading-copy"><InlineLoading label={"Loading templates…"}/></p> : null}
           {!schedulesQuery.isLoading && !plannedAuditsQuery.isLoading && !schedules.length && !plannedAudits.length ? (
             <EmptyState
               title="No recurrence templates yet"
@@ -2423,7 +2424,7 @@ const QualityAuditPlanSchedulePage: React.FC = () => {
             ) : null}
 
             {scheduleOptionsLoading ? (
-              <p className="planner-inline-note">Loading participant directories…</p>
+              <p className="planner-inline-note"><InlineLoading label={"Loading participant directories…"}/></p>
             ) : null}
             {scheduleOptionsQuery.isError ? (
               <p className="planner-form-error">

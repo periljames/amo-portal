@@ -20,6 +20,10 @@ class EmailLogRead(BaseModel):
     error: Optional[str] = None
     context_json: Optional[dict] = None
     correlation_id: Optional[str] = None
+    provider: Optional[str] = None
+    provider_message_id: Optional[str] = None
+    delivery_status: Optional[str] = None
+    last_delivery_event_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from amodb.utils.download_names import download_name, attachment_header
+
+
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -534,7 +538,7 @@ def download_report_job(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     media_types = {".pdf": "application/pdf", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".csv": "text/csv"}
-    filename = f"training-{row.report_code.lower().replace('_', '-')}-{row.id}{path.suffix}"
+    filename = download_name("training", row.report_code.lower().replace("_", "-"), (row.completed_at or row.created_at).strftime("%Y-%m-%d-%H%M%S"), extension=path.suffix)
     return FileResponse(path, media_type=media_types.get(path.suffix.lower(), "application/octet-stream"), filename=filename)
 
 
@@ -1849,5 +1853,5 @@ def export_attendance_pdf(
     amo = db.query(account_models.AMO).filter(account_models.AMO.id == amo_id).one()
     return Response(
         content=reports.attendance_pdf(db, event=event, entries=entries, window=window, amo=amo), media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="attendance-register-{event_id}.pdf"'},
+        headers={"Content-Disposition": attachment_header(download_name("attendance", event.title, event.starts_on, extension="pdf"))},
     )

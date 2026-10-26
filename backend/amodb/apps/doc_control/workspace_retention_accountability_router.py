@@ -12,6 +12,7 @@ from amodb.apps.realtime import models as realtime_models
 from amodb.apps.realtime import schemas as realtime_schemas
 from amodb.database import get_db
 from amodb.security import get_current_active_user
+from amodb.apps.quality.amo_compliance_policy import assert_disposition_due, tenant_retention_extensions
 
 from . import retention_models as rm
 from .workspace_decision_policy import is_decision_approver, require_decision_approver
@@ -314,6 +315,7 @@ def request_disposition_accountable(
         raise HTTPException(status_code=409, detail="Disposition is blocked by legal hold")
     if row.status not in {"ACTIVE", "DUE", "REJECTED"}:
         raise HTTPException(status_code=409, detail=f"Disposition cannot be requested from {row.status}")
+    assert_disposition_due(row, extensions=tenant_retention_extensions(db, tenant.amo_id))
     approver = _assigned_approver(
         db,
         tenant=tenant,
@@ -368,6 +370,8 @@ def decide_disposition_accountable(
     now = utcnow()
     row.justification = payload.justification.strip()
     approved = payload.decision == "APPROVE"
+    if approved:
+        assert_disposition_due(row, extensions=tenant_retention_extensions(db, tenant.amo_id))
     row.status = "APPROVED" if approved else "REJECTED"
     row.approved_by_user_id = current_user.id if approved else None
     row.approved_at = now if approved else None

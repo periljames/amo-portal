@@ -135,7 +135,7 @@ class FieldworkFindingMutation(BaseModel):
     client_timestamp: datetime
     base_version: int = Field(ge=0)
     operation: Literal["CREATE_FINDING"] = "CREATE_FINDING"
-    canonical_response_status: FindingResponse
+    canonical_response_status: CanonicalResponse
     response_value: str | None = Field(default=None, max_length=64)
     severity: QMSFindingSeverity
     level: FindingLevel
@@ -695,7 +695,7 @@ def _governance_snapshot(row: QualityAuditChecklistExecutionGovernance) -> dict[
         "assessment": _assessment_dict(row),
         "entity_version": int(row.entity_version or 1),
         "answered_by_user_id": row.answered_by_user_id,
-        "answered_at": row.answered_at,
+        "answered_at": row.answered_at.isoformat() if row.answered_at else None,
         "updated_by_user_id": row.updated_by_user_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -940,13 +940,13 @@ def _internal_fieldwork_actor(db: Session, *, ctx: TenantContext, audit_id: uuid
 
 
 def _finding_classification(payload: FieldworkFindingMutation) -> tuple[FindingLevel, QMSFindingType]:
-    requested_type = QMSFindingType.OBSERVATION if payload.canonical_response_status == "OBSERVATION" else QMSFindingType.NON_CONFORMITY
+    requested_type = QMSFindingType.OBSERVATION if payload.level == FindingLevel.LEVEL_4 or payload.canonical_response_status == "OBSERVATION" else QMSFindingType.NON_CONFORMITY
     level = normalize_finding_level(payload.severity, payload.level, requested_type)
     finding_type = QMSFindingType.OBSERVATION if level == FindingLevel.LEVEL_4 else QMSFindingType.NON_CONFORMITY
     if payload.canonical_response_status == "OBSERVATION" and finding_type != QMSFindingType.OBSERVATION:
         raise HTTPException(status_code=422, detail="An OBSERVATION checklist response must use the governed Level 4 observation classification.")
-    if payload.canonical_response_status == "NONCOMPLIANT" and finding_type != QMSFindingType.NON_CONFORMITY:
-        raise HTTPException(status_code=422, detail="A NONCOMPLIANT checklist response must use a governed Level 1, 2 or 3 non-conformity classification.")
+    if finding_type == QMSFindingType.NON_CONFORMITY and payload.canonical_response_status != "NONCOMPLIANT":
+        raise HTTPException(status_code=422, detail="A Level 1, 2 or 3 non-conformity must record the source's noncompliant response.")
     return level, finding_type
 
 
@@ -1751,7 +1751,7 @@ def mutate_live_fieldwork(
 ) -> dict[str, Any]:
     assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
     payload_hash = _mutation_hash(payload)
     existing = _existing_receipt_or_none(
         db,
@@ -1767,6 +1767,7 @@ def mutate_live_fieldwork(
             "row": existing.result_snapshot,
         }
 
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
     governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
     current_version = _assert_base_version(
@@ -1858,7 +1859,7 @@ def create_atomic_fieldwork_finding(
 ) -> dict[str, Any]:
     assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
     payload_hash = _mutation_hash(payload)
     existing = _existing_receipt_or_none(
         db,
@@ -1875,6 +1876,7 @@ def create_atomic_fieldwork_finding(
             **stored,
         }
 
+    audit, _user, quality_router = _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
     published_events: list[audit_models.AuditEvent] = []
     try:
         item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)

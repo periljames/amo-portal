@@ -1029,3 +1029,47 @@ button.rel-ops__attention-item:hover {
     text-align: left;
   }
 }
+
+.rel-ops__capture {
+  padding: .2rem; border: 1px solid var(--border-subtle, #cbd5e1);
+  border-radius: .6rem; background: var(--surface, Canvas);
+}
+.rel-ops__capture > summary {
+  cursor: pointer; display: flex; justify-content: space-between; gap: .75rem;
+  align-items: center; padding: .75rem .9rem; font-weight: 750; font-size: .88rem;
+}
+.rel-ops__capture > summary span { font-weight: 450; font-size: .75rem; opacity: .7; }
+.rel-ops__capture[open] > summary { border-bottom: 1px solid var(--border-subtle, #cbd5e1); }
+.rel-ops__capture > .rel-ops__editor { padding: 1rem; }
+.rel-ops__table-wrap {
+  max-height: min(64vh, 790px); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border-subtle, #cbd5e1); border-radius: .5rem;
+}
+.rel-ops__table-wrap thead { position: sticky; top: 0; background: var(--surface, Canvas); z-index: 2; }
+.rel-ops__table-wrap th, .rel-ops__table-wrap td { font-variant-numeric: tabular-nums; }
+
+.rel-ops__pager {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+  gap: .65rem; font-size: .8rem; padding: .7rem .1rem 1rem;
+}
+.rel-ops__pager > span:first-child { margin-right: auto; }
+.rel-ops__pager label { display: flex; gap: .3rem; align-items: center; }
+.rel-ops__pager select, .rel-ops__pager button {
+  background: Canvas; color: CanvasText; font: inherit;
+  border: 1px solid var(--border-subtle, #cbd5e1);
+  border-radius: .4rem; padding: .35rem .55rem; min-height: 2.3rem;
+}
+.rel-ops__pager button:disabled { opacity: .48; }
+
+/* Dense source-control console, consistent with the analytics workspaces. */
+.rel-ops__header{margin-bottom:.2rem}
+.rel-ops__nav{display:flex;gap:.25rem;grid-template-columns:none;max-width:100%;min-width:0;padding:0 0 .65rem}
+.rel-ops__nav button{flex:0 0 auto;min-width:auto;min-height:41px;padding:.55rem .78rem;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:.5rem;color:CanvasText;background:Canvas}
+.rel-ops__nav button.is-active{border-color:#0f766e;box-shadow:inset 0 -3px 0 #0f766e;background:color-mix(in srgb,#0f766e 7%,Canvas);color:CanvasText}
+.rel-ops__nav button:hover{border-color:#0f766e;color:CanvasText}
+.rel-ops__table-wrap{max-height:min(64dvh,750px);scrollbar-gutter:stable;background:Canvas}
+.rel-ops__table-wrap th{position:sticky;top:0;z-index:2;background:Canvas}
+.rel-ops__health-list article{border-radius:.6rem}
+.rel-ops__health-list article:hover{border-color:#0f766e}
+.rel-ops__capture{border-radius:.65rem;background:Canvas}
+.rel-ops__capture summary:focus-visible,.rel-ops__nav button:focus-visible{outline:2px solid #0f766e;outline-offset:2px}

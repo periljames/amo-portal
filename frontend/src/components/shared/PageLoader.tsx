@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import WorkspaceLoading from "./WorkspaceLoading";
 import { useGlobalLoadingCount } from "../../services/loading";
 
 type PageLoaderProps = {
@@ -8,19 +8,7 @@ type PageLoaderProps = {
 };
 
 export const PageLoader: React.FC<PageLoaderProps> = ({ fullscreen = false, label = "Loading" }) => {
-  return (
-    <div className={`page-loader${fullscreen ? " page-loader--fullscreen" : ""}`} role="status" aria-live="polite">
-      <div className="page-loader__card">
-        <div className="page-loader__spinner" aria-hidden="true">
-          <LoaderCircle size={22} />
-        </div>
-        <div className="page-loader__content">
-          <div className="page-loader__title">{label}</div>
-          <div className="page-loader__subtitle">Please wait while the portal catches up.</div>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className={fullscreen ? "page-loader--fullscreen" : undefined}><WorkspaceLoading label={label} /></div>;
 };
 
 export const GlobalLoadingOverlay: React.FC = () => {
@@ -36,14 +24,10 @@ export const GlobalLoadingOverlay: React.FC = () => {
     return undefined;
   }, [count]);
 
-  return (
-    <>
-      <div className={`global-loading-bar${count > 0 ? " global-loading-bar--active" : ""}`} aria-hidden="true">
-        <span className="global-loading-bar__line" />
-      </div>
-      {visible ? <PageLoader label="Loading workspace" /> : null}
-    </>
-  );
+  // Global requests must never replace usable page content with a workspace splash.
+  return <div className={`global-loading-bar${visible ? " global-loading-bar--active" : ""}`} role={visible ? "status" : undefined} aria-label={visible ? "Updating" : undefined} aria-hidden={!visible}>
+    <span className="global-loading-bar__line" />
+  </div>;
 };
 
 export default PageLoader;

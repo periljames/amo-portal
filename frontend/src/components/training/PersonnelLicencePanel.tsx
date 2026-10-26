@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, CalendarDays, ShieldAlert } from "lucide-react";
 import { listTrainingPersonnelLicences } from "../../services/trainingWorkbookImport";
@@ -81,7 +82,7 @@ const PersonnelLicencePanel: React.FC<Props> = ({ userId, fallback }) => {
         </div>
         <BadgeCheck size={20} />
       </div>
-      {loading ? <p className="personnel-licences__state">Loading licence register…</p> : null}
+      {loading ? <p className="personnel-licences__state"><InlineLoading label={"Loading licence register…"}/></p> : null}
       {!loading && displayed.length === 0 ? <p className="personnel-licences__state">No regulatory licence is recorded for this person.</p> : null}
       {error && displayed.length === 0 ? <p className="personnel-licences__state personnel-licences__state--warning"><ShieldAlert size={15} /> {error}</p> : null}
       {displayed.length > 0 ? (

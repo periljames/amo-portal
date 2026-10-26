@@ -18,11 +18,40 @@ from .canonical_core_router import _log_qms_activity
 from .audit_preparation_models import QualityAuditPreparationRevision
 from .audit_schedule_rules import DEFAULT_END_TIME, DEFAULT_START_TIME, time_text, validate_planned_window
 from .audit_workflow_contract import build_authoritative_audit_workflow
-from .schemas import QMSFindingOut
+from .schemas import QMSFindingOut, QualityFieldworkComplete, QualityReportTrackerOut
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 
 router = APIRouter(tags=["Quality live audit session"])
+
+
+@router.post("/audits/{audit_id}/fieldwork/complete", response_model=QualityReportTrackerOut)
+def complete_occurrence_fieldwork(
+    audit_id: uuid.UUID,
+    payload: QualityFieldworkComplete,
+    request: Request,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.execute")),
+    db: Session = Depends(get_write_db),
+):
+    from .audit_checklist_execution_router import _internal_fieldwork_viewer
+    from .router import complete_audit_fieldwork
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _, user, _ = _internal_fieldwork_viewer(db, ctx=ctx, audit_id=audit_id, lock=True)
+    return complete_audit_fieldwork(audit_id=audit_id, payload=payload, request=request, db=db, current_user=user)
+
+
+@router.post("/audits/{audit_id}/findings/{finding_id}/car-invite")
+def email_released_car_invite(
+    audit_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    ctx: TenantContext = Depends(require_quality_permission("qms.audit.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    from .audit_car_invite import deliver_released_car_invite
+
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return deliver_released_car_invite(db, ctx=ctx, audit_id=audit_id, finding_id=finding_id)
 
 SESSION_STAGE_ORDER = ("setup", "prepare", "live", "closing", "follow-up", "archive")
 SESSION_STAGE_LABELS = {

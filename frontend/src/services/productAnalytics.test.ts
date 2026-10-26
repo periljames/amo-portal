@@ -18,6 +18,7 @@ describe("product analytics", () => {
     vi.restoreAllMocks();
     getTokenMock.mockReset();
     getTokenMock.mockReturnValue("test-token");
+    vi.stubGlobal("navigator", { onLine: true });
   });
 
   it("does not emit without an authenticated token", async () => {
@@ -76,13 +77,26 @@ describe("product analytics", () => {
   });
 
   it("is fail-open when the analytics endpoint is unavailable", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("analytics unavailable")));
+    const fetchMock = vi.fn().mockRejectedValue(new Error("analytics unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(emitProductEvent({
       event_type: "workflow_started",
       module: "work-orders",
       metadata: { workflow: "work-order-create" },
     })).resolves.toBe(false);
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("X-AMO-Silent-Error")).toBe("1");
+  });
+
+  it("runs the business operation offline without attempting telemetry", async () => {
+    vi.stubGlobal("navigator", { onLine: false });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const operation = vi.fn().mockResolvedValue({ savedOnDevice: true });
+    await expect(trackProductWorkflow({ module: "quality", workflow: "fieldwork", operation }))
+      .resolves.toEqual({ savedOnDevice: true });
+    expect(operation).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("preserves a successful business result while emitting start and completion", async () => {

@@ -382,7 +382,7 @@ export function getFirstAccessibleModuleRoute(
   if (assigned && assigned !== "admin" && (allowed.includes(assigned as DepartmentId) || ["planning", "production", "maintenance", "safety", "stores", "workshops"].includes(assigned))) {
     return `${base}/${assigned}`;
   }
-  if (isTenantAdmin(user)) return `${base}/admin/overview`;
+  if (isTenantAdmin(user)) return `${base}/quality`;
   // A removed or unavailable department never sends a user to someone else's home.
   // These routes are available to every authenticated tenant employee.
   return `${base}/profile`;

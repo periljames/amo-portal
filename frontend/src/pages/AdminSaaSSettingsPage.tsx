@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -70,6 +71,12 @@ const FIELD_HINTS: Record<string, string> = {
   use_tls: "true for STARTTLS",
   use_ssl: "true for implicit TLS",
   allow_self_signed: "Keep false in production",
+  from_name: "Display name recipients will see, for example Safarilink Quality",
+  from_email: "Tenant sender mailbox. Custom domains must first be verified in Resend.",
+  reply_to: "Reply destination(s). Leave blank to use active Quality Manager and Quality Officer accounts.",
+  tenant_default_sender_domain: "Verified shared domain used to derive quality.<tenant>@domain senders.",
+  verified_sender_domains: "Comma-separated custom domains already verified in Resend and approved for tenant senders.",
+  tenant_sender_domain_assignments_json: 'Platform-only JSON of tenant IDs to approved custom domains, e.g. {"ID-Q50VN737":["flysafarilink.com"]}. Each domain must be verified in Resend and listed under verified_sender_domains. Domain assignment cannot overlap tenants.',
 };
 
 export default function AdminSaaSSettingsPage() {
@@ -161,11 +168,24 @@ export default function AdminSaaSSettingsPage() {
       const value = provider.config?.[field];
       next[field] = value === undefined || value === null ? "" : String(value);
     });
+    if (setup?.scope === "TENANT" && provider.provider === "resend" && provider.scope === "PLATFORM") {
+      const platformFrom = String(provider.config?.from_email || "");
+      const defaultDomain = String(
+        provider.config?.tenant_default_sender_domain
+        || (platformFrom.includes("@") ? platformFrom.split("@").pop() : "")
+        || "",
+      ).trim().toLowerCase();
+      const rawSlug = String(setup.tenant?.login_slug || setup.tenant?.amo_code || "tenant").toLowerCase();
+      const senderSlug = rawSlug.replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
+      next.from_name = setup.tenant?.name || "";
+      next.from_email = defaultDomain && senderSlug ? `quality.${senderSlug}@${defaultDomain}` : "";
+      next.reply_to = "";
+    }
     setConfigDraft(next);
     setSecretDraft({});
     setProviderEnabled(provider.status !== "DISABLED");
     setClearSecret(false);
-  }, [provider]);
+  }, [provider, setup?.scope, setup?.tenant]);
 
   const run = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusyAction(key);
@@ -188,16 +208,27 @@ export default function AdminSaaSSettingsPage() {
       setError("A configuration-change reason is required.");
       return;
     }
+    const editableConfigFields = setup?.scope === "TENANT" && provider.provider === "resend"
+      ? ["from_name", "from_email", "reply_to"]
+      : Object.keys(configDraft);
     const config = Object.fromEntries(
-      Object.entries(configDraft)
+      editableConfigFields
+        .map((key) => [key, String(configDraft[key] ?? "")] as const)
         .filter(([, value]) => value.trim() !== "")
         .map(([key, value]) => [key, coerceField(value)]),
     );
     const secret = Object.fromEntries(
       Object.entries(secretDraft).filter(([, value]) => value.trim() !== ""),
     );
+    const tenantResend = setup?.scope === "TENANT" && provider.provider === "resend";
+    const clearConfigFields = tenantResend && provider.scope === "TENANT"
+      ? ["from_name", "from_email", "reply_to"].filter(
+          (field) => !String(configDraft[field] ?? "").trim() && Boolean(provider.config?.[field]),
+        )
+      : [];
     if (
       setup?.scope === "TENANT"
+      && provider.provider !== "resend"
       && provider.scope === "PLATFORM"
       && provider.has_secret
       && !clearSecret
@@ -218,6 +249,7 @@ export default function AdminSaaSSettingsPage() {
           reason: changeReason.trim(),
           ...(Object.keys(secret).length ? { secret } : {}),
           ...(clearSecret ? { secret: {}, clear_secret: true } : {}),
+          ...(clearConfigFields.length ? { clear_config_fields: clearConfigFields } : {}),
         },
         effectiveTenantId,
       ),
@@ -339,9 +371,12 @@ export default function AdminSaaSSettingsPage() {
   const jobs: SaaSAdminJob[] = setup?.jobs ?? [];
   const chatModels = aiModels.filter((item) => item.purpose !== "embedding");
   const embeddingModels = aiModels.filter((item) => item.purpose === "embedding");
-  const providerConfigFields = provider?.provider === "openai"
-    ? provider.config_fields.filter((field) => !["model", "default_model", "lightweight_model", "embedding_model"].includes(field))
-    : provider?.config_fields ?? [];
+  const tenantResendIdentity = setup?.scope === "TENANT" && provider?.provider === "resend";
+  const providerConfigFields = tenantResendIdentity
+    ? ["from_name", "from_email", "reply_to"]
+    : provider?.provider === "openai"
+      ? provider.config_fields.filter((field) => !["model", "default_model", "lightweight_model", "embedding_model"].includes(field))
+      : provider?.config_fields ?? [];
 
   return (
     <DepartmentLayout amoCode={amoCode} activeDepartment="admin">
@@ -393,7 +428,7 @@ export default function AdminSaaSSettingsPage() {
             <a href={checkoutLink}>Continue to secure Stripe checkout</a>
           </div>
         ) : null}
-        {loading ? <div className="saas-admin__loading">Loading current backend configuration…</div> : null}
+        {loading ? <div className="saas-admin__loading"><InlineLoading label={"Loading current backend configuration…"}/></div> : null}
 
         <nav className="saas-admin__tabs" aria-label="SaaS administration sections">
           {(["providers", "modules", "billing", "pipeline", "readiness"] as Tab[]).map((item) => (
@@ -429,15 +464,21 @@ export default function AdminSaaSSettingsPage() {
                     </div>
                     <Status value={provider.status} />
                   </div>
-                  {setup?.scope === "TENANT" && provider.scope === "PLATFORM" ? (
+                  {tenantResendIdentity ? (
+                    <div className="saas-admin__alert">
+                      Resend transport credentials remain platform-managed. This tenant controls only its sender name/address and Reply-To routing. Leave Reply-To blank to route replies to active Quality Manager and Quality Officer accounts.
+                    </div>
+                  ) : setup?.scope === "TENANT" && provider.scope === "PLATFORM" ? (
                     <div className="saas-admin__alert">
                       This tenant currently inherits the platform default. Saving creates a tenant-specific override; if the platform default contains a secret, enter new tenant credentials before saving.
                     </div>
                   ) : null}
-                  <div className="saas-admin__secret-state">
-                    <strong>{provider.has_secret ? "Encrypted secret stored" : "No secret stored"}</strong>
-                    <span>{provider.secret_fingerprint || "Secret values are never returned to the frontend."}</span>
-                  </div>
+                  {!tenantResendIdentity ? (
+                    <div className="saas-admin__secret-state">
+                      <strong>{provider.has_secret ? "Encrypted secret stored" : "No secret stored"}</strong>
+                      <span>{provider.secret_fingerprint || "Secret values are never returned to the frontend."}</span>
+                    </div>
+                  ) : null}
                   <div className="saas-admin__form-grid">
                     {providerConfigFields.map((field) => (
                       <label key={field}>
@@ -450,7 +491,7 @@ export default function AdminSaaSSettingsPage() {
                         {FIELD_HINTS[field] ? <small>{FIELD_HINTS[field]}</small> : null}
                       </label>
                     ))}
-                    {provider.secret_fields.map((field) => (
+                    {!tenantResendIdentity && provider.secret_fields.map((field) => (
                       <label key={field}>
                         <span>{field.replaceAll("_", " ")}</span>
                         <input
@@ -472,8 +513,8 @@ export default function AdminSaaSSettingsPage() {
                     </label>
                   </div>
                   <div className="saas-admin__checks">
-                    <label><input type="checkbox" checked={providerEnabled} onChange={(event) => setProviderEnabled(event.target.checked)} /> Provider enabled</label>
-                    <label><input type="checkbox" checked={clearSecret} onChange={(event) => setClearSecret(event.target.checked)} /> Clear stored secret</label>
+                    <label><input type="checkbox" checked={providerEnabled} onChange={(event) => setProviderEnabled(event.target.checked)} /> {tenantResendIdentity ? "Tenant sender identity enabled" : "Provider enabled"}</label>
+                    {!tenantResendIdentity ? <label><input type="checkbox" checked={clearSecret} onChange={(event) => setClearSecret(event.target.checked)} /> Clear stored secret</label> : null}
                   </div>
                   {provider.provider === "openai" ? (
                     <section className="saas-admin__ai-plan" aria-labelledby="tenant-ai-plan-heading">
@@ -576,11 +617,13 @@ export default function AdminSaaSSettingsPage() {
                     <button type="button" className="primary" onClick={() => void saveProvider()} disabled={busyAction !== null}>
                       {busyAction === `save:${provider.provider}` ? "Saving…" : "Save encrypted configuration"}
                     </button>
-                    <button type="button" onClick={() => void testProvider()} disabled={busyAction !== null}>
-                      {busyAction === `test:${provider.provider}`
-                        ? provider.provider === "openai" ? "Testing…" : "Queueing…"
-                        : provider.provider === "openai" ? "Test AI connection now" : "Queue backend health check"}
-                    </button>
+                    {!tenantResendIdentity ? (
+                      <button type="button" onClick={() => void testProvider()} disabled={busyAction !== null}>
+                        {busyAction === `test:${provider.provider}`
+                          ? provider.provider === "openai" ? "Testing…" : "Queueing…"
+                          : provider.provider === "openai" ? "Test AI connection now" : "Queue backend health check"}
+                      </button>
+                    ) : null}
                   </div>
                   {provider.last_health_detail ? <p className="saas-admin__health-detail">Last check: {provider.last_health_detail} {provider.last_latency_ms != null ? `(${provider.last_latency_ms} ms)` : ""}</p> : null}
                 </>

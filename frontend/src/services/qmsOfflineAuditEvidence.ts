@@ -1,4 +1,5 @@
 import { currentOfflineScope, listOfflineMutations } from "./offlinePersistence";
+import { getOrCreateDeviceStorageKey } from "./deviceStorageKey";
 import {
   listChecklistExecutionGovernance,
   type ChecklistExecutionGovernanceRow,
@@ -46,8 +47,9 @@ type StoredEntry = OfflineAuditEvidenceEntry & {
 };
 
 const DB_NAME = "amo-qms-offline-evidence";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const ENTRY_STORE = "evidence";
+const RETAINED_STORE = "retained";
 const KEY_STORE = "keys";
 const KEY_ID = "internal-audit-evidence-aes-gcm-v1";
 const MAX_LOCAL_BYTES = 50 * 1024 * 1024;
@@ -109,6 +111,10 @@ async function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(KEY_STORE)) {
         db.createObjectStore(KEY_STORE, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(RETAINED_STORE)) {
+        const retained = db.createObjectStore(RETAINED_STORE, { keyPath: ["scope", "amoCode", "auditId", "artifactId"] });
+        retained.createIndex("scope_audit", ["scope", "amoCode", "auditId"]);
+      }
     };
     request.onsuccess = () => {
       request.result.onversionchange = () => request.result.close();
@@ -119,16 +125,7 @@ async function openDb(): Promise<IDBDatabase> {
 }
 
 async function encryptionKey(db: IDBDatabase): Promise<CryptoKey> {
-  const readTx = db.transaction(KEY_STORE, "readonly");
-  const existing = await requestResult(readTx.objectStore(KEY_STORE).get(KEY_ID)) as { id: string; key: CryptoKey } | undefined;
-  await transactionDone(readTx);
-  if (existing?.key) return existing.key;
-
-  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-  const writeTx = db.transaction(KEY_STORE, "readwrite");
-  writeTx.objectStore(KEY_STORE).put({ id: KEY_ID, key, createdAt: Date.now() });
-  await transactionDone(writeTx);
-  return key;
+  return getOrCreateDeviceStorageKey(db, KEY_STORE, KEY_ID);
 }
 
 async function encryptText(key: CryptoKey, value: unknown): Promise<{ iv: string; data: string }> {
@@ -154,7 +151,7 @@ async function encryptFile(key: CryptoKey, file: File): Promise<{ iv: string; da
   return { iv: bytesToBase64(iv), data };
 }
 
-async function decryptFile(key: CryptoKey, row: StoredEntry): Promise<File> {
+async function decryptFile(key: CryptoKey, row: Pick<StoredEntry, "filename" | "contentType" | "capturedAt" | "fileIv" | "fileCiphertext">): Promise<File> {
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: base64ToBytes(row.fileIv) },
     key,
@@ -176,6 +173,65 @@ export function onOfflineAuditEvidenceChanged(listener: () => void): () => void 
   if (typeof window === "undefined") return () => undefined;
   window.addEventListener(CHANGE_EVENT, listener);
   return () => window.removeEventListener(CHANGE_EVENT, listener);
+}
+
+type RetainedEvidence = Pick<StoredEntry, "scope" | "amoCode" | "auditId" | "filename" | "contentType" | "capturedAt" | "sha256" | "sizeBytes" | "fileIv" | "fileCiphertext"> & { artifactId: string; retainedAt: number };
+
+async function retainEncryptedEvidence(row: RetainedEvidence): Promise<void> {
+  if (row.scope !== currentOfflineScope() || row.scope.startsWith("anonymous:")) return;
+  const db = await openDb();
+  try {
+    const tx = db.transaction(RETAINED_STORE, "readwrite");
+    const store = tx.objectStore(RETAINED_STORE);
+    const prior = await requestResult<RetainedEvidence[]>(store.getAll());
+    const older = prior.filter(entry => entry.scope === row.scope && !(entry.amoCode === row.amoCode && entry.auditId === row.auditId && entry.artifactId === row.artifactId)).sort((a, b) => a.retainedAt - b.retainedAt);
+    let bytes = older.reduce((sum, entry) => sum + entry.sizeBytes, row.sizeBytes);
+    while (bytes > MAX_LOCAL_BYTES && older.length) {
+      const entry = older.shift()!;
+      store.delete([entry.scope, entry.amoCode, entry.auditId, entry.artifactId]);
+      bytes -= entry.sizeBytes;
+    }
+    store.put(row);
+    await transactionDone(tx);
+  } finally { db.close(); }
+  notifyChanged();
+}
+
+export async function retainDownloadedAuditEvidence(amoCode: string, auditId: string, artifact: AuditEvidenceArtifact, blob: Blob): Promise<boolean> {
+  if (blob.size > MAX_LOCAL_BYTES) return false;
+  const scope = currentOfflineScope();
+  if (scope.startsWith("anonymous:")) throw new Error("Sign in before retaining audit evidence.");
+  const file = new File([blob], artifact.filename, { type: artifact.content_type || blob.type });
+  if (await sha256(file) !== artifact.sha256.toLowerCase()) throw new Error("The downloaded evidence does not match its recorded checksum.");
+  try {
+    const db = await openDb();
+    let encrypted: { iv: string; data: ArrayBuffer };
+    try { encrypted = await encryptFile(await encryptionKey(db), file); } finally { db.close(); }
+    await retainEncryptedEvidence({ scope, amoCode, auditId, artifactId: artifact.id, filename: artifact.filename,
+      contentType: file.type, capturedAt: artifact.created_at || new Date().toISOString(), sha256: artifact.sha256,
+      sizeBytes: file.size, fileIv: encrypted.iv, fileCiphertext: encrypted.data, retainedAt: Date.now() });
+    return true;
+  } catch { return false; }
+}
+
+export async function retainedAuditEvidenceIds(amoCode: string, auditId: string): Promise<string[]> {
+  const db = await openDb();
+  try {
+    const keys = await requestResult<IDBValidKey[]>(db.transaction(RETAINED_STORE).objectStore(RETAINED_STORE).index("scope_audit").getAllKeys([currentOfflineScope(), amoCode, auditId]));
+    return keys.map(key => String((key as IDBValidKey[])[3]));
+  } finally { db.close(); }
+}
+
+export async function readRetainedAuditEvidence(amoCode: string, auditId: string, artifact: AuditEvidenceArtifact): Promise<File | null> {
+  const scope = currentOfflineScope();
+  const db = await openDb();
+  try {
+    const row = await requestResult<RetainedEvidence | undefined>(db.transaction(RETAINED_STORE).objectStore(RETAINED_STORE).get([scope, amoCode, auditId, artifact.id]));
+    if (!row || row.scope !== scope || row.sha256 !== artifact.sha256 || currentOfflineScope() !== scope) return null;
+    const file = await decryptFile(await encryptionKey(db), row);
+    if (currentOfflineScope() !== scope || await sha256(file) !== artifact.sha256.toLowerCase()) return null;
+    return file;
+  } finally { db.close(); }
 }
 
 function publicEntry(row: StoredEntry): OfflineAuditEvidenceEntry {
@@ -500,6 +556,9 @@ export async function replayOfflineAuditEvidence(
       } else {
         item.entity_version = result.committed_version;
       }
+      // The upload queue is removed after acceptance; a bounded encrypted
+      // reading copy is independent of pending work and may be safely evicted.
+      await retainEncryptedEvidence({ ...row, artifactId: result.artifact.id, retainedAt: Date.now() }).catch(() => undefined);
       await deleteStored(row.id);
     } catch (error) {
       const status = errorStatus(error);

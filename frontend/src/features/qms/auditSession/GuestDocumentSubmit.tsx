@@ -25,7 +25,7 @@ const GuestDocumentSubmit: React.FC<Props> = ({ requestId, onSubmitted }) => {
     setSuccess(null);
     try {
       const row = await submitAuditGuestDocument(requestId, file, comment);
-      setSuccess(`${row.filename} submitted`);
+      setSuccess(`${row.filename} submitted · SHA-256 ${row.sha256}`);
       setFile(null);
       setComment("");
       await onSubmitted();

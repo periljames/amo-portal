@@ -1,3 +1,4 @@
+import InlineLoading from "../shared/InlineLoading";
 import React, { useEffect, useState } from "react";
 import { listAuditEvents, type AuditEvent } from "../../services/audit";
 
@@ -70,7 +71,7 @@ const AuditHistoryPanel: React.FC<AuditHistoryPanelProps> = ({
           Refresh
         </button>
       </div>
-      {state === "loading" && <p>Loading audit history…</p>}
+      {state === "loading" && <p><InlineLoading label={"Loading audit history…"}/></p>}
       {state === "error" && <p className="text-muted">{error}</p>}
       {state === "ready" && (
         <div className="qms-list">

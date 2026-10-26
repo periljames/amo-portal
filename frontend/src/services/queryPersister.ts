@@ -1,3 +1,4 @@
+import { optionalStorageRead } from "./storageReadDeadline";
 import type { PersistedClient, Persister } from "@tanstack/react-query-persist-client";
 import { withoutQmsAuthority } from "./qmsCachePolicy";
 
@@ -100,6 +101,15 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
     },
 
     async restoreClient(): Promise<PersistedClient | undefined> {
+      return optionalStorageRead(() => restoreClient(), undefined);
+    },
+
+    async removeClient(): Promise<void> {
+      return removeClient();
+    },
+  } satisfies Persister;
+
+  async function restoreClient(): Promise<PersistedClient | undefined> {
       const scope = currentOfflineScope();
       boundScope = scope;
       const database = await openDatabase();
@@ -130,9 +140,9 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
         }
       }
       return withoutQmsAuthority(client);
-    },
+  }
 
-    async removeClient(): Promise<void> {
+  async function removeClient(): Promise<void> {
       const scope = currentOfflineScope();
       boundScope = scope;
       memoryClients.delete(scope);
@@ -142,8 +152,7 @@ export function createPortalQueryPersister(onScopeChange?: ScopeChangeHandler): 
       const done = transactionDone(transaction);
       transaction.objectStore(STORE_NAME).delete(storageKey(scope));
       await done;
-    },
-  } satisfies Persister;
+  }
 }
 
 export async function clearAllPortalQueryCaches(): Promise<void> {

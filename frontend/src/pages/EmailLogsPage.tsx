@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -17,6 +18,7 @@ const STATUS_OPTIONS: Array<{ value: EmailLogStatus | "ALL"; label: string }> = 
   { value: "SENT", label: "Sent" },
   { value: "FAILED", label: "Failed" },
   { value: "SKIPPED_NO_PROVIDER", label: "Skipped (no provider)" },
+  { value: "SKIPPED_BY_PREFERENCE", label: "Skipped (preference)" },
 ];
 
 const statusTone = (status: EmailLogStatus): "healthy" | "degraded" | "down" | "paused" => {
@@ -26,6 +28,7 @@ const statusTone = (status: EmailLogStatus): "healthy" | "degraded" | "down" | "
     case "FAILED":
       return "down";
     case "SKIPPED_NO_PROVIDER":
+    case "SKIPPED_BY_PREFERENCE":
       return "paused";
     case "QUEUED":
     default:
@@ -198,7 +201,7 @@ const EmailLogsPage: React.FC = () => {
         </Panel>
 
         <Panel title="Email activity" className="admin-page__panel">
-          {loading && <p>Loading email logs…</p>}
+          {loading && <p><InlineLoading label={"Loading email logs…"}/></p>}
           {error && (
             <InlineAlert tone="danger" title="Error">
               <span>{error}</span>
@@ -218,7 +221,9 @@ const EmailLogsPage: React.FC = () => {
                         <th>Subject</th>
                         <th>Template</th>
                         <th>Created</th>
-                        <th>Sent</th>
+                        <th>Provider acceptance</th>
+                        <th>Delivery evidence</th>
+                        <th>Provider ID</th>
                         <th>Error</th>
                       </tr>
                     </thead>
@@ -236,6 +241,25 @@ const EmailLogsPage: React.FC = () => {
                           <td>{log.template_key}</td>
                           <td>{formatDate(log.created_at)}</td>
                           <td>{formatDate(log.sent_at)}</td>
+                          <td>
+                            <strong>{log.delivery_status === "DELIVERED" ? "DELIVERED · recipient server accepted" : log.delivery_status || "—"}</strong>
+                            <small>{log.last_delivery_event_at ? formatDate(log.last_delivery_event_at) : "Awaiting signed provider event"}</small>
+                            {log.delivery_status === "DELIVERED" ? <small>Inbox vs Junk placement is not observable from SMTP delivery confirmation.</small> : null}
+                            {(() => {
+                              const delivery = log.context_json?._delivery;
+                              if (!delivery || typeof delivery !== "object") return null;
+                              const data = delivery as Record<string, unknown>;
+                              const openedAt = typeof data.opened_at === "string" ? data.opened_at : null;
+                              const providerLast = typeof data.provider_last_event === "string" ? data.provider_last_event : null;
+                              return (
+                                <>
+                                  {providerLast ? <small>Resend reconcile: {providerLast}</small> : null}
+                                  {openedAt ? <small>Open-tracking signal: {formatDate(openedAt)} (not proof of human read)</small> : null}
+                                </>
+                              );
+                            })()}
+                          </td>
+                          <td>{log.provider_message_id || "—"}</td>
                           <td>
                             {log.error ? (
                               <details>

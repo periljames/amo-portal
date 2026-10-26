@@ -58,6 +58,7 @@ const PROVIDER_WORKSPACE_TAILS = [
   "contracts",
   "evidence",
   "monitoring",
+  "qualification",
 ] as const;
 
 const MODULES: readonly QmsModuleRoute[] = [
@@ -180,10 +181,21 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.supplier.view",
     section: "control",
     defaultView: "register",
-    validViews: ["register", "approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
+    validViews: ["register", "agreements", "approved-list", "evaluations", "supplier-audits", "supplier-findings", "expired-approvals"],
     componentType: "specialist",
     allowRecordDetails: true,
     recordRoutes: [{ allowBare: true, allowedTails: PROVIDER_WORKSPACE_TAILS }],
+  },
+  {
+    id: "provider-access",
+    segment: "external-accounts",
+    label: "Vendor Accounts & Access",
+    navigationLabel: "Vendor Accounts & Access",
+    permission: "qms.audit.manage",
+    section: "control",
+    defaultView: "register",
+    validViews: ["register"],
+    componentType: "specialist",
   },
   {
     id: "equipment-calibration",
@@ -245,6 +257,17 @@ const MODULES: readonly QmsModuleRoute[] = [
     allowRecordDetails: true,
   },
   {
+    id: "mail-identity",
+    segment: "mail-identity",
+    label: "QMS Email Notifications",
+    navigationLabel: "Mail Identity",
+    permission: "qms.settings.view",
+    section: "administration",
+    defaultView: "overview",
+    validViews: ["overview"],
+    componentType: "specialist",
+  },
+  {
     id: "settings",
     segment: "settings",
     label: "QMS Settings",
@@ -253,7 +276,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "administration",
     defaultView: "general",
     validViews: ["general", "workflows", "numbering", "notifications", "retention"],
-    componentType: "canonical",
+    componentType: "specialist",
   },
   {
     id: "aerodoc",

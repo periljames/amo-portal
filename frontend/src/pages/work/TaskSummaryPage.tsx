@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 // src/pages/work/TaskSummaryPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -210,7 +211,7 @@ const TaskSummaryPage: React.FC = () => {
 
         {error && <div className="card card--error">{error}</div>}
         {notice && <div className="card card--info">{notice}</div>}
-        {loading && <div className="card">Loading task summary…</div>}
+        {loading && <div className="card"><InlineLoading label={"Loading task summary…"}/></div>}
 
         <section className="page-section">
           <div className="page-section__grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>

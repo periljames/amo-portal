@@ -15,6 +15,7 @@ const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
+const ContractedWorkModule = lazy(() => import("./pages/maintenance/ContractedWorkModule"));
 const PublicationReaderPage = lazy(() => import("./pages/manuals/ManualReaderPage"));
 const PublicationDiffPage = lazy(() => import("./pages/manuals/ManualDiffPage"));
 const PublicationWorkflowPage = lazy(() => import("./pages/manuals/ManualWorkflowPage"));
@@ -68,7 +69,7 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   if (parts.length > 2) return false;
   const view = parts[1] || route.module.defaultView;
 
-  if (route.module.id === "calendar" || route.module.id === "evidence-vault" || route.module.id === "aerodoc") return false;
+  if (["calendar", "evidence-vault", "aerodoc", "provider-access"].includes(route.module.id)) return false;
   // Programme/programme are governed specialist Audit Operations routes owned by
   // PortalRouteSurface. Only the remaining shallow audit registers stay on the
   // generic register shortcut.
@@ -232,7 +233,7 @@ function DocumentControlRouteSurface() {
         <Route path="/maintenance/:amoCode/document-control/compliance" element={<WorkspaceRequireAuth><DocControlCompliancePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/reports" element={<WorkspaceRequireAuth><DocControlReportsPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/administration" element={<WorkspaceRequireAuth><DocControlAdministrationPage /></WorkspaceRequireAuth>} />
-        <Route path="*" element={<DocumentControlFallback />} />
+        <Route path="/maintenance/:amoCode/document-control/*" element={<DocumentControlFallback />} />
       </Routes>
     </Suspense>
   );
@@ -277,6 +278,7 @@ export const AppRouter: React.FC = () => {
     qmsRoute.kind === "unknown" &&
     !isSupportedDocumentReaderPath(location.pathname)
   ) return <QmsNotFoundRouteSurface />;
+  if (pathSegments(location.pathname)[0] === "maintenance" && pathSegments(location.pathname)[2] === "contracted-work") return <Suspense fallback={<div className="page-loading" role="status">Loading contracted maintenance…</div>}><WorkspaceRequireAuth><ContractedWorkModule /></WorkspaceRequireAuth></Suspense>
   if (isProcurementPath(location.pathname)) return <ProcurementRouteSurface />;
   if (isDocumentControlPath(location.pathname)) return <DocumentControlRouteSurface />;
   if (isSegmentPath(location.pathname, "publications")) return <PublicationsRouteSurface />;

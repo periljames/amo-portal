@@ -47,6 +47,8 @@ def main() -> None:
 
     # Import after pool isolation: these modules create/use SQLAlchemy sessions.
     from amodb.apps.quality.planner_schedule_router import start_quality_planner_scheduler, stop_quality_planner_scheduler
+    from amodb.apps.quality.provider_surveillance_jobs import scan_due_provider_reviews
+    from amodb.apps.procurement.provider_alerts import scan_provider_alerts
     from amodb.apps.reliability import advanced_scheduler as reliability_scheduler
     from amodb.jobs.portal_job_supervisor import PortalJobSupervisor
     from amodb.jobs import platform_monitor
@@ -62,6 +64,7 @@ def main() -> None:
     infra_critical_interval = _interval("PLATFORM_INFRA_CRITICAL_INTERVAL_SECONDS", 30.0)
     infra_unknown_interval = _interval("PLATFORM_INFRA_UNKNOWN_INTERVAL_SECONDS", 120.0)
     health_interval = _interval("PLATFORM_HEALTH_PROBE_INTERVAL_SECONDS", 120.0)
+    provider_review_interval = max(3600.0, _interval("QMS_PROVIDER_REVIEW_SCAN_INTERVAL_SECONDS", 21600.0))
 
     def _next_infrastructure_delay(result: dict | None) -> float:
         status = str((result or {}).get("status") or "UNKNOWN").upper()
@@ -104,6 +107,7 @@ def main() -> None:
     next_infra = time.monotonic() + _next_infrastructure_delay(initial_infrastructure)
     next_health = time.monotonic() + health_interval
     next_net = time.monotonic() + (30.0 if net_probe_enabled else float("inf"))
+    next_provider_review = time.monotonic() + 60.0
 
     try:
         while not stopping:
@@ -116,6 +120,15 @@ def main() -> None:
             if now >= next_health:
                 platform_monitor.capture_health_once(include_network=health_probe_network)
                 next_health = now + health_interval
+            if now >= next_provider_review:
+                # Reuse the existing scheduler and notification register; an
+                # unexpected tenant-specific database error does not kill workers.
+                try:
+                    scan_due_provider_reviews()
+                    scan_provider_alerts()
+                except Exception:
+                    logging.exception("Scheduled provider surveillance reminder scan failed")
+                next_provider_review = now + provider_review_interval
             if net_probe_enabled and now >= next_net:
                 probe = platform_monitor.run_adaptive_network_probe_once(prune_days=net_retention_days)
                 delay = float((probe or {}).get("next_delay_seconds") or net_probe_fallback)

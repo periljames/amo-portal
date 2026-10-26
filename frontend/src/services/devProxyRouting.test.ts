@@ -22,6 +22,7 @@ describe("development proxy routing", () => {
     expect(shouldProxyDevApi("/healthz")).toBe(true);
     expect(shouldProxyDevApi("/livez")).toBe(true);
     expect(shouldProxyDevApi("/readyz")).toBe(true);
+    expect(shouldProxyDevApi("/resilience/commands/idempotency-key?method=POST")).toBe(true);
   });
 
   it("uses separate default targets and accepts deployment-local overrides", () => {

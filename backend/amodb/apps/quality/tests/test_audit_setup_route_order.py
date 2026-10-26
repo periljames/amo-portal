@@ -6,8 +6,21 @@ from amodb.apps.quality import audit_session_route_order as _audit_session_route
 from amodb.apps.quality.canonical_router import router
 from amodb.apps.quality.audit_session_router import AuditSetupUpdate, update_audit_setup
 from amodb.apps.quality.audit_session_router import list_audit_occurrence_findings
+from amodb.apps.quality.audit_session_router import complete_occurrence_fieldwork, email_released_car_invite
 from amodb.apps.quality.schemas import QMSFindingOut
 from starlette.routing import Match
+
+
+def test_exact_fieldwork_completion_and_car_email_routes_own_their_urls():
+    audit_id = "11111111-1111-4111-8111-111111111111"
+    finding_id = "22222222-2222-4222-8222-222222222222"
+    for suffix, endpoint in (
+        ("fieldwork/complete", complete_occurrence_fieldwork),
+        (f"findings/{finding_id}/car-invite", email_released_car_invite),
+    ):
+        scope = {"type": "http", "method": "POST", "path": f"/api/maintenance/SAFARILINK/quality/audits/{audit_id}/{suffix}", "root_path": ""}
+        matched = next(route for route in router.routes if route.matches(scope)[0] == Match.FULL)
+        assert matched.endpoint is endpoint
 
 
 def _route_index(api_router, predicate) -> int:

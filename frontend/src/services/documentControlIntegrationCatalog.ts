@@ -1,3 +1,4 @@
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -53,7 +54,7 @@ export async function getDocumentIntegrationCatalog(
   sourceModule?: string,
 ): Promise<DocumentIntegrationCatalogResponse> {
   const query = sourceModule ? `?source_module=${encodeURIComponent(sourceModule)}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/integration-catalog${query}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -70,7 +71,7 @@ export async function searchDocumentIntegrationCatalog(
     limit: String(params.limit || 25),
   });
   if (params.q?.trim()) query.set("q", params.q.trim());
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/integration-catalog/search?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );

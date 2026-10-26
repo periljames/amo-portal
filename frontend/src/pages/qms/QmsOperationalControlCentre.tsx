@@ -1,3 +1,4 @@
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 import React, { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +14,7 @@ import {
 import { Link } from "react-router-dom";
 
 import { getCachedUser } from "../../services/auth";
+import { isTenantAdmin } from "../../utils/tenantAccess";
 import { getQmsOperationalDashboard } from "../../services/qmsDashboard";
 import QmsActionQueue from "./components/QmsActionQueue";
 import QmsDiagnosticsDrawer from "./components/QmsDiagnosticsDrawer";
@@ -35,7 +37,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
   const routes = useMemo(() => buildQmsOverviewRoutes(amoCode), [amoCode]);
   const currentUser = getCachedUser();
   const diagnosticsAuthorized = Boolean(
-    currentUser?.role === "QUALITY_MANAGER"
+    isTenantAdmin(currentUser) || currentUser?.role === "QUALITY_MANAGER"
     || currentUser?.role === "QUALITY_OFFICER"
     || currentUser?.role === "QUALITY_INSPECTOR",
   );
@@ -72,7 +74,6 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
         <div>
           <span className="qms-assurance-room__eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Quality assurance</span>
           <h1>Control Room</h1>
-          <p>Current Quality work, exceptions and upcoming obligations.</p>
         </div>
         <div className="qms-assurance-room__header-actions">
           <span className={`qms-assurance-room__source qms-source--${sourceStatus}`}>
@@ -92,9 +93,7 @@ const QmsOperationalControlCentre: React.FC<{ amoCode: string }> = ({ amoCode })
       </header>
 
       {dashboardQuery.isLoading && !dashboard ? (
-        <section className="qms-assurance-room__loading" role="status">
-          <RefreshCw size={18} className="is-spinning" aria-hidden="true" /> Loading current Quality work…
-        </section>
+        <WorkspaceLoading label="Loading current Quality work" />
       ) : null}
 
       {dashboardQuery.error ? (

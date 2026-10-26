@@ -1,3 +1,4 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -140,7 +141,7 @@ export default function ManualDiffPage() {
         </div>
       </section>
 
-      {loading ? <section className="manuals-pane revision-intelligence__state">Loading authoritative revision evidence…</section> : null}
+      {loading ? <section className="manuals-pane revision-intelligence__state"><InlineLoading label={"Loading authoritative revision evidence…"}/></section> : null}
       {error ? <section className="manuals-pane revision-intelligence__state revision-intelligence__state--error"><TriangleAlert size={18} /> {error}</section> : null}
 
       {!loading ? <>

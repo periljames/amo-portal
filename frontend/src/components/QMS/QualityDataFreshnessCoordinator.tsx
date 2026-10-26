@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiRequest, qmsPath } from "../../services/apiClient";
+import { apiRequest, clearQmsApiResponseCache, qmsPath } from "../../services/apiClient";
 import { auditSessionStageFromPath } from "../../features/qms/auditSession/auditSessionRoutes";
+import { auditOccurrenceResolverKey } from "../../services/qmsAuditOccurrenceResolver";
 import { replayOfflineMutations } from "../../services/offlinePersistence";
 import { startQmsAuditRealtimeStream, type QmsAuditRealtimeEvent } from "../../services/qmsAuditRealtime";
+import { realtimeQueryMarkers } from "../../services/portalRealtimeInvalidation";
+import { occurrenceQueryNeedsRefresh } from "../../services/qmsOccurrenceRefresh";
 
 const ACTIVE_REFRESH_INTERVAL_MS = 120_000;
 const FOCUS_REFRESH_THRESHOLD_MS = 30_000;
@@ -63,6 +66,7 @@ function isQualityRealtimeEvent(event: QmsAuditRealtimeEvent): boolean {
   const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata as Record<string, unknown> : {};
   const module = String(metadata.module || "").toLowerCase();
   return module === "quality"
+    || realtimeQueryMarkers({ type, entityType: String(payload.entityType || ""), metadata }).includes("qms")
     || type.startsWith("qms.")
     || type.startsWith("quality.")
     || entityType.startsWith("qms.")
@@ -105,15 +109,18 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       const candidate = root.audit && typeof root.audit === "object" ? root.audit as Record<string, unknown> : root;
       const id = typeof candidate.id === "string" ? candidate.id : typeof candidate.audit_id === "string" ? candidate.audit_id : null;
       const ref = typeof candidate.audit_ref === "string" ? candidate.audit_ref : null;
-      if (id && (id === occurrenceKey || ref?.toLowerCase() === occurrenceKey.toLowerCase())) markers.add(id);
+      if (id && (id === occurrenceKey || (ref && auditOccurrenceResolverKey(ref) === auditOccurrenceResolverKey(occurrenceKey)))) markers.add(id);
     }
     return markers;
   };
 
-  const invalidateOccurrence = (markers: Set<string>) => {
+  const invalidateOccurrence = (markers: Set<string>, events?: readonly QmsAuditRealtimeEvent[]) => {
     if (!markers.size) return Promise.resolve();
+    lastRefreshAt.current = Date.now();
+    // A query refetch must not reuse the pre-event API response for up to 30s.
+    clearQmsApiResponseCache();
     return queryClient.invalidateQueries({
-      predicate: (query) => isQualityQueryKey(query.queryKey) && queryKeyContainsAny(query.queryKey, markers),
+      predicate: (query) => isQualityQueryKey(query.queryKey) && queryKeyContainsAny(query.queryKey, markers) && occurrenceQueryNeedsRefresh(query.queryKey, events),
       refetchType: "active",
     });
   };
@@ -157,9 +164,27 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
 
   useEffect(() => {
     if (!qualityActive || !auditOccurrenceActive) return;
+    let timer: number | undefined;
+    let previousState: string | undefined;
+    let pendingEvents: QmsAuditRealtimeEvent[] = [];
+    let fullRefresh = false;
+    const scheduleRefresh = (event?: QmsAuditRealtimeEvent) => {
+      if (event) pendingEvents.push(event); else fullRefresh = true;
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        // Invalidate the request cache before refreshing the authoritative QMS occurrence.
+        clearQmsApiResponseCache();
+        const events = fullRefresh ? undefined : pendingEvents;
+        pendingEvents = []; fullRefresh = false;
+        void invalidateOccurrence(occurrenceMarkers(), events);
+      }, 250);
+    };
     const stop = startQmsAuditRealtimeStream({
       onState: (state) => {
         document.documentElement.dataset.qmsRealtimeState = state;
+        if (state === "connected" && previousState && previousState !== "connected") scheduleRefresh();
+        previousState = state;
       },
       onEvent: (event) => {
         if (!isQualityRealtimeEvent(event)) return;
@@ -167,18 +192,19 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
         if (event.event === "reset") {
           // Replay-window reset is scoped to the active Quality occurrence. It
           // must not refetch unrelated modules or every active query in the app.
-          void invalidateOccurrence(currentMarkers);
+          scheduleRefresh();
         } else {
           const eventAuditId = realtimeAuditId(event);
           // Ignore Quality events belonging to another audit. Events without an
           // audit identifier may still affect the active occurrence and are
           // therefore scoped to this occurrence only.
           if (eventAuditId && !currentMarkers.has(eventAuditId)) return;
-          void invalidateOccurrence(currentMarkers);
+          scheduleRefresh(event);
         }
       },
     });
     return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
       stop();
       delete document.documentElement.dataset.qmsRealtimeState;
     };
@@ -248,6 +274,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       }).catch(() => undefined);
     };
     const onClick = (event: MouseEvent) => {
+      // Fieldwork owns mutation receipts and realtime reconciliation. A second
+      // label-based 1.8s/6s refresh would repeat its entire request fan-out.
+      if (liveAuditActive) return;
       const element = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
       if (!element) return;
       if (!element.closest(".qms-shell, .qms-ops-page, .audit-shell-content, .quality-context-bar, .qms-occurrence-stage, .qms-live-audit-focus")) return;
@@ -263,8 +292,9 @@ const QualityDataFreshnessCoordinator: React.FC = () => {
       else refresh(true);
     }, 2_500);
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible" && navigator.onLine) refresh(false);
-    }, ACTIVE_REFRESH_INTERVAL_MS);
+      const maxAge = liveAuditActive && document.documentElement.dataset.qmsRealtimeState !== "connected" ? 15_000 : ACTIVE_REFRESH_INTERVAL_MS;
+      if (document.visibilityState === "visible" && navigator.onLine && Date.now() - lastRefreshAt.current >= maxAge) refresh(true);
+    }, liveAuditActive ? 15_000 : ACTIVE_REFRESH_INTERVAL_MS);
 
     window.addEventListener("focus", onFocus);
     window.addEventListener("online", onOnline);

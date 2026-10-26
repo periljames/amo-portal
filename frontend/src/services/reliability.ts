@@ -125,7 +125,7 @@ export async function downloadReliabilityReport(
   return downloadWithXhr({
     url: `${API_BASE}/reliability/reports/${reportId}/download`,
     headers: buildAuthHeader(),
-    fallbackFilename: `reliability-report-${reportId}.pdf`,
+    fallbackFilename: "reliability-report.pdf",
     onProgress: onProgress
       ? (loaded, total) => {
           markSessionActivity("reliability-report-download-progress");
@@ -141,7 +141,7 @@ export async function downloadFracasEvidencePack(caseId: number): Promise<Downlo
   return downloadWithXhr({
     url: `${API_BASE}/reliability/fracas/cases/${caseId}/evidence-pack`,
     headers: buildAuthHeader(),
-    fallbackFilename: `fracas-${caseId}-evidence-pack.zip`,
+    fallbackFilename: "fracas-evidence-pack.zip",
     retries: 3,
   });
 }
@@ -325,6 +325,8 @@ export function listReliabilityEvents(filters: {
   q?: string;
   limit?: number;
   offset?: number;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
 } = {}): Promise<ReliabilityEvent[]> {
   return apiRequest(`/reliability/events${queryString({
     event_type: filters.eventType,
@@ -333,6 +335,8 @@ export function listReliabilityEvents(filters: {
     q: filters.q,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    sort_key: filters.sortKey,
+    sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 20_000, persistCache: true });
 }
 
@@ -345,12 +349,18 @@ export function listReliabilityAlerts(filters: {
   severity?: ReliabilitySeverity;
   limit?: number;
   offset?: number;
+  q?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
 } = {}): Promise<ReliabilityAlert[]> {
   return apiRequest(`/reliability/alerts${queryString({
     status: filters.status,
     severity: filters.severity,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
+    sort_key: filters.sortKey,
+    sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 15_000, persistCache: true });
 }
 
@@ -363,12 +373,18 @@ export function listFracasCases(filters: {
   severity?: ReliabilitySeverity;
   limit?: number;
   offset?: number;
+  q?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
 } = {}): Promise<FracasCase[]> {
   return apiRequest(`/reliability/fracas/cases${queryString({
     status: filters.status,
     severity: filters.severity,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
+    sort_key: filters.sortKey,
+    sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 15_000, persistCache: true });
 }
 
@@ -384,11 +400,17 @@ export function listEngineTrendStatuses(filters: {
   currentStatus?: EngineTrendStatus;
   limit?: number;
   offset?: number;
+  q?: string;
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
 } = {}): Promise<EngineTrend[]> {
   return apiRequest(`/reliability/engine-trends/fleet-status${queryString({
     current_status: filters.currentStatus,
     limit: filters.limit ?? 100,
     offset: filters.offset ?? 0,
+    q: filters.q,
+    sort_key: filters.sortKey,
+    sort_dir: filters.sortDir,
   })}`, { cacheTtlMs: 30_000, persistCache: true });
 }
 

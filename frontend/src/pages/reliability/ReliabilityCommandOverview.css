@@ -1,0 +1,36 @@
+.rel-command { display:grid; gap:.85rem; margin:1rem 0; }
+.rel-command__heading,.rel-command__panel-head {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:start;gap:.6rem}
+.rel-command__heading h2 {font-size:1.22rem;letter-spacing:-.025em;margin:.1rem 0 .2rem}
+.rel-command__heading p:last-child {font-size:.83rem;color:color-mix(in srgb,CanvasText 63%,transparent);margin:0}
+.rel-command__refresh {display:inline-flex;align-items:center;gap:.4rem;background:Canvas;color:CanvasText;border:1px solid color-mix(in srgb,CanvasText 20%,transparent);border-radius:.5rem;padding:.52rem .75rem;min-height:38px;cursor:pointer}
+.rel-command__metrics {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.65rem}
+.rel-command__metric {display:grid;grid-template-columns:1fr auto;gap:.3rem;padding:.85rem;background:Canvas;color:CanvasText;text-decoration:none;border:1px solid color-mix(in srgb,CanvasText 13%,transparent);border-radius:.65rem}
+.rel-command__metric span {font-size:.75rem;color:color-mix(in srgb,CanvasText 67%,transparent);grid-column:1 / -1}
+.rel-command__metric strong {font-size:1.55rem;line-height:1.25;font-variant-numeric:tabular-nums}
+.rel-command__metric svg {align-self:end;color:#0f766e}
+.rel-command__metric:hover {border-color:#0f766e}
+.rel-command__split {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+.rel-command__panel {min-width:0;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 13%,transparent);border-radius:.72rem;padding:.9rem;overflow:hidden}
+.rel-command__panel-head {align-items:center;padding-bottom:.7rem;border-bottom:1px solid color-mix(in srgb,CanvasText 10%,transparent)}
+.rel-command__panel-head h3 {display:inline-flex;gap:.4rem;align-items:center;font-size:.95rem;margin:0}
+.rel-command__panel-head span,.rel-command__panel-head a {display:inline-flex;gap:.25rem;align-items:center;font-size:.77rem}
+.rel-command__scroll {max-height:265px;overflow:auto;overscroll-behavior:contain;margin-top:.35rem;scrollbar-gutter:stable}
+.rel-command__priority {display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.6rem;align-items:center;padding:.7rem .15rem;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent);color:CanvasText;text-decoration:none}
+.rel-command__priority:hover {background:color-mix(in srgb,CanvasText 4%,Canvas)}
+.rel-command__priority strong {display:block;font-size:.82rem}
+.rel-command__priority small {display:block;opacity:.7;font-size:.72rem}
+.rel-command__severity {font-size:.64rem;font-weight:700;border-radius:.3rem;padding:.25rem .35rem;border:1px solid #a5b4c4}
+.rel-command__table {width:100%;border-collapse:collapse;font-size:.76rem;min-width:380px;text-align:left}
+.rel-command__table th {position:sticky;top:0;background:Canvas;font-size:.69rem;letter-spacing:.02em;z-index:1}
+.rel-command__table td,.rel-command__table th {padding:.55rem .45rem;border-bottom:1px solid color-mix(in srgb,CanvasText 8%,transparent)}
+.rel-command__state {font-size:.65rem;font-weight:730;border-radius:.4rem;padding:.2rem .35rem;background:#dde6ee;color:#203d53}
+.rel-command__state--current {background:#dcfce7;color:#166534}
+.rel-command__state--stale,.rel-command__state--pending {background:#fef3c7;color:#92400e}
+.rel-command__state--missing,.rel-command__state--failed {background:#fee2e2;color:#991b1b}
+.rel-command__error {border:1px solid #b91c1c;border-radius:.55rem;padding:.7rem;display:flex;align-items:start;gap:.5rem}
+.rel-command__empty {display:flex;gap:.4rem;align-items:center;opacity:.7;font-size:.8rem}
+.rel-command__provenance {margin:0;font-size:.73rem;color:color-mix(in srgb,CanvasText 58%,transparent)}
+@media (max-width: 1450px) {.rel-command__metrics {grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width: 950px) {.rel-command__split {grid-template-columns:minmax(0,1fr)}}
+@media (max-width: 560px) {.rel-command__metrics {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media print {.rel-command__refresh {display:none}.rel-command__scroll {max-height:none;overflow:visible}}

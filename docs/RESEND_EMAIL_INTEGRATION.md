@@ -119,3 +119,89 @@ When no mapping exists, the portal sends a safe generic HTML/text notification s
 - Register the signed webhook endpoint.
 - Run the long-lived `amodb.jobs.saas_worker_safe` process so recurring authentication checks and integration jobs remain active.
 - Start in `DISABLED`, authenticate the API key, send one explicit test, use `SANDBOX`, and enable `PRODUCTION` only after all checks succeed.
+
+
+## Tenant QMS mail identities (2026-10-18)
+
+The public QMS configuration page is `/maintenance/{amoCode}/quality/mail-identity/overview`.
+Only the tenant Quality Manager or authorised AMO Administrator can save or test
+mail identities; other QMS settings viewers can inspect the safe status summary.
+The API is tenant-scoped at `/api/maintenance/{amo_code}/quality/mail-identity`.
+It never exposes or accepts platform API keys, webhook signing secrets, SMTP
+configuration, or arbitrary tenant selectors.
+
+### Venspera shared sending domain
+
+1. Add `notify.venspera.com` to the **Venspera Resend team**, publish Resend's
+   DNS records, and confirm **sending verification** in the Resend Domains
+   dashboard. Add SPF/DKIM and an appropriate DMARC policy. DNS verification
+   is an operator action; an HTTP 200 send response cannot prove it.
+2. In Platform Resend settings, set:
+   - `from_email` to `notifications@notify.venspera.com`
+   - `tenant_default_sender_domain` to `notify.venspera.com`
+   - `sending_mode` initially `SANDBOX` and an approved sandbox recipient list
+3. AMO Portal derives `quality.<tenant-login-slug>@notify.venspera.com`.
+   Tenants cannot choose another tenant's shared address. Display names and
+   reply destinations are tenant-scoped settings.
+4. A tenant's QMS sender may be suspended independently; explicit Quality
+   disable blocks QMS notices instead of falling back to the platform sender.
+   Account-security messages (including password recovery and verification)
+   retain Venspera's separate platform sender and remain unaffected.
+5. Set a public HTTPS `PORTAL_FRONTEND_BASE_URL` to avoid private
+   localhost/loopback CTA and signed audit notice QR links.
+6. Configure signed Resend webhooks. Events and provider retrieval are retained
+   as separate evidence. `ACCEPTED` means provider acceptance;
+   `DELIVERED` means recipient-server acceptance, **not Inbox placement**;
+   an open event is **not proof of human reading**.
+
+### Optional tenant-owned sender domain
+
+A tenant wishing to send as `quality@flysafarilink.com` must first provide
+evidence of authority to use that domain. Venspera then:
+
+1. Adds/verifies that exact sending domain in **its own Resend account**;
+   the tenant publishes the DNS records. Check Resend's *sending* status.
+2. Adds the domain to the platform `verified_sender_domains` list.
+3. Sets the platform-only `tenant_sender_domain_assignments_json` map, for example:
+
+```json
+{
+  "ID-Q50VN737": ["flysafarilink.com"],
+  "ID-EXAMPLE02": ["notify.anotherairline.com"]
+}
+```
+
+The map keys are **tenant IDs**, not display names. A custom domain may be
+assigned to only one tenant, must be present in the platform approved domain
+list, and is revalidated on each send. Revoking the assignment blocks
+the old custom sender immediately. A tenant's QMS page then permits an address
+on only its assigned domain.
+
+**Reply-To is independent of sender identity.** Leave it blank to resolve the
+tenant's currently active Quality Manager and Quality Officer mailboxes, or
+specify up to ten authorised mailbox addresses. Audit notice sends include
+the assigned audit team and designated audit CC addresses in Reply-To; actual
+Reply and Reply All handling is controlled by recipients' mail clients.
+An outbound address does not automatically create a mailbox. For inbound
+routing under `notify.venspera.com`, separately configure Resend inbound
+email handling or a verified forwarding/inbox service.
+
+### Acceptance checks
+
+- A Safarilink default notice sends from the Safarilink shared sender.
+- A second tenant cannot save or send from that Safarilink shared sender.
+- A tenant cannot select another tenant's custom domain even if globally
+  verified in Resend.
+- Removing a domain assignment prevents further messages from a previously
+  saved custom sender.
+- Tenant mail suspension prevents fallback through the platform account.
+- The tenant self-test only targets the signed-in manager's own email (or
+  sandbox remapped mailboxes); Resend acceptance is not mislabeled as delivery.
+- Semicolon-separated sandbox recipients resolve as separate addresses.
+- Rapid repeated notice issue and retry are idempotent with a 60-second
+  retry cooldown, preserving one controlled notice and its recipient evidence.
+- Signed per-recipient delivered/failed webhooks, replay, out-of-order events,
+  bounce and complaint results are reflected without false read/inbox claims.
+- Verify actual inbox placement independently using raw recipient message
+  headers and Resend domain/SMTP evidence; a mail server's junk decision is
+  outside the provider acceptance API.

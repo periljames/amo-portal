@@ -1,5 +1,7 @@
+import { resolveDownloadFilename, saveDownloadedFile } from "../utils/downloads";
 import { authHeaders } from "./auth";
 import { portalFetch, type PortalFetchInit } from "./offlineHttp";
+import { fetchFileDownload } from "./fileTransfers";
 
 export type StructuredApiError = Error & {
   status: number;
@@ -166,7 +168,7 @@ export async function apiBlob(
   path: string,
   init: PortalFetchInit = {},
 ): Promise<{ blob: Blob; filename?: string }> {
-  const response = await portalFetch(path, {
+  const { response, blob } = await fetchFileDownload(path, {
     credentials: "include",
     ...init,
     offline: { ...init.offline, cache: false, queueMutation: false },
@@ -174,11 +176,9 @@ export async function apiBlob(
   });
   if (!response.ok) throw await parseError(response);
   const disposition = response.headers.get("content-disposition") || "";
-  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
   return {
-    blob: await response.blob(),
-    filename: decodeURIComponent(utf8 || plain || "") || undefined,
+    blob: blob!,
+    filename: disposition ? resolveDownloadFilename(disposition, "download", response.headers.get("Content-Type")) : undefined,
   };
 }
 
@@ -196,13 +196,5 @@ export function queryString(params: Record<string, string | number | boolean | n
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  saveDownloadedFile(blob, filename);
 }

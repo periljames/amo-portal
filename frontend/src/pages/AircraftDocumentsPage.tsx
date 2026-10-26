@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 // src/pages/AircraftDocumentsPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -216,7 +217,7 @@ const AircraftDocumentsPage: React.FC = () => {
       <section className="page-section">
         <div className="card card--form" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Select aircraft</h2>
-          {aircraftLoading && <p>Loading aircraft…</p>}
+          {aircraftLoading && <p><InlineLoading label={"Loading aircraft…"}/></p>}
           {aircraftError && <div className="alert alert-error">{aircraftError}</div>}
           {!aircraftLoading && !aircraftError && (
             <div className="form-row">
@@ -241,7 +242,7 @@ const AircraftDocumentsPage: React.FC = () => {
       <section className="page-section">
         <div className="card card--form" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Document evidence</h2>
-          {documentsLoading && <p>Loading documents…</p>}
+          {documentsLoading && <p><InlineLoading label={"Loading documents…"}/></p>}
           {documentsError && <div className="alert alert-error">{documentsError}</div>}
           {validityNotice && (
             <div className="card card--warning" style={{ marginBottom: 12 }}>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from amodb.apps.resilience.offline_commands import offline_create
+
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 
 from typing import List, Optional
@@ -106,6 +108,7 @@ def suppliers_list(
 
 
 @router.post("/suppliers", response_model=schemas.SupplierRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/suppliers', schemas.SupplierRead, status_code=status.HTTP_201_CREATED)
 def supplier_create(
     amo_code: str,
     payload: schemas.SupplierCreate,
@@ -173,7 +176,8 @@ def supplier_decision(
     current_user: account_models.User = Depends(require_roles(*QUALITY_ROLES)),
 ):
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
-    supplier = service.decide_supplier(
+    from . import supplier_governance_service as governed_supplier_service
+    supplier = governed_supplier_service.decide_supplier(
         db,
         amo_id=amo_id,
         supplier_id=supplier_id,
@@ -196,6 +200,7 @@ def requisitions_list(
 
 
 @router.post("/requisitions", response_model=schemas.RequisitionRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/requisitions', schemas.RequisitionRead, status_code=status.HTTP_201_CREATED)
 def requisition_create(
     amo_code: str,
     payload: schemas.RequisitionCreate,
@@ -249,6 +254,7 @@ def rfqs_list(
 
 
 @router.post("/rfqs", response_model=schemas.RFQRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/rfqs', schemas.RFQRead, status_code=status.HTTP_201_CREATED)
 def rfq_create(
     amo_code: str,
     payload: schemas.RFQCreate,
@@ -277,6 +283,7 @@ def quotes_list(
 
 
 @router.post("/quotes", response_model=schemas.QuoteRead, status_code=status.HTTP_201_CREATED)
+@offline_create('/api/maintenance/{amo_code}/procurement/quotes', schemas.QuoteRead, status_code=status.HTTP_201_CREATED)
 def quote_create(
     amo_code: str,
     payload: schemas.QuoteCreate,
@@ -311,6 +318,14 @@ def quote_evaluate(
         payload=payload,
         actor_user_id=current_user.id,
     )
+    if payload.status == models.QuoteStatus.AWARDED:
+        db.flush()  # expose canonical ORM award status to the supplier-notification SQL
+        # Notify only after the canonical staff award transition and QMS gate.
+        from .external_procurement_router import record_internal_supplier_notice
+        record_internal_supplier_notice(
+            db, amo_id=amo_id, entity="QUOTE", internal_id=quote_id,
+            action="AWARD_NOTIFIED", actor_user_id=str(current_user.id),
+        )
     return _commit_refresh(db, quote)
 
 
@@ -395,6 +410,12 @@ def purchase_order_send(
     amo_id = _tenant(db, amo_code=amo_code, current_user=current_user)
     supplier_quality_control.assert_purchase_order_allowed(db, amo_id=amo_id, po_id=po_id)
     po = service.send_purchase_order(db, amo_id=amo_id, po_id=po_id, actor_user_id=current_user.id)
+    db.flush()  # make the issued PO state visible before notification
+    from .external_procurement_router import record_internal_supplier_notice
+    record_internal_supplier_notice(
+        db, amo_id=amo_id, entity="PO", internal_id=po_id,
+        action="PO_ISSUED", actor_user_id=str(current_user.id),
+    )
     return _commit_refresh(db, po)
 
 

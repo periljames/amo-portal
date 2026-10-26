@@ -85,6 +85,15 @@ def _load_environment(path: Path) -> dict[str, str]:
     if not env.get("DATABASE_URL") and env.get("DATABASE_WRITE_URL"):
         env["DATABASE_URL"] = env["DATABASE_WRITE_URL"]
 
+    # Keep the browser event stream aligned with the backend in this shared
+    # runtime. An absent Vite flag otherwise silently disables browser realtime
+    # even while readiness reports a connected broker. Honour explicit opt-outs.
+    env.setdefault(
+        "VITE_REALTIME_ENABLED",
+        "1" if env.get("REALTIME_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"} else "0",
+    )
+
     # Keep report generation hot. These are wait times only when queues are
     # empty; active backlogs drain without the idle delay.
     env.setdefault("TRAINING_REPORT_JOB_INTERVAL_SECONDS", "1")
@@ -165,6 +174,10 @@ def _spawn(service: Service, base_env: Mapping[str, str]) -> None:
     }
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        # Bulk/background imports and jobs must yield CPU to interactive API/UI.
+        # Child Python processes inherit this priority; production launchers are unchanged.
+        if service.name in {"jobs", "scheduler", "evidence", "ops-worker", "rostering"}:
+            kwargs["creationflags"] |= subprocess.BELOW_NORMAL_PRIORITY_CLASS
     else:
         kwargs["start_new_session"] = True
 
@@ -203,7 +216,7 @@ def _terminate_tree(service: Service) -> None:
             pass
 
 
-def _services(base_env: Mapping[str, str], include_frontend: bool, *, reload: bool = True) -> list[Service]:
+def _services(base_env: Mapping[str, str], include_frontend: bool, *, reload: bool = True, frontend_mode: str = "dev") -> list[Service]:
     python = _python_executable()
 
     api_pool = base_env.get("PORTAL_DB_POOL_SIZE", base_env.get("DB_POOL_SIZE", "20"))
@@ -236,7 +249,7 @@ def _services(base_env: Mapping[str, str], include_frontend: bool, *, reload: bo
         ),
         Service(
             "jobs",
-            [python, "-m", "amodb.jobs.portal_worker_main"],
+            [python, "-m", "amodb.jobs.portal_worker_main", "--single-process"],
             BACKEND,
         ),
         Service(
@@ -280,7 +293,7 @@ def _services(base_env: Mapping[str, str], include_frontend: bool, *, reload: bo
         services.append(
             Service(
                 "frontend",
-                [_npm_executable(), "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"],
+                [_npm_executable(), "run", frontend_mode, "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"],
                 FRONTEND,
                 port=5173,
             )
@@ -305,6 +318,7 @@ def main() -> int:
         default=".env.development",
         help="dotenv path relative to the repository root (default: .env.development)",
     )
+    parser.add_argument("--frontend-mode", choices=("dev", "preview"), default="dev", help="Use preview for shared/remote work; it builds optimized offline-capable assets before serving")
     parser.add_argument("--no-frontend", action="store_true", help="Do not start Vite")
     parser.add_argument("--no-reload", action="store_true", help="Disable file-watcher restarts for long-running development sessions")
     args = parser.parse_args()
@@ -315,7 +329,7 @@ def main() -> int:
     env_file = env_file.resolve()
 
     base_env = _load_environment(env_file)
-    services = _services(base_env, include_frontend=not args.no_frontend, reload=not args.no_reload)
+    services = _services(base_env, include_frontend=not args.no_frontend, reload=not args.no_reload, frontend_mode=args.frontend_mode)
 
     occupied = [service for service in services if service.port and _port_in_use(service.port)]
     if occupied:
@@ -324,6 +338,12 @@ def main() -> int:
             "Required development ports are already in use: " + names + "\n"
             "Stop the old dev runtime before starting the supervised runtime."
         )
+
+    if not args.no_frontend and args.frontend_mode == "preview":
+        _print("[runtime     ] Building optimized frontend for shared access...")
+        built = subprocess.run([_npm_executable(), "run", "build"], cwd=FRONTEND, env=dict(base_env), check=False)
+        if built.returncode:
+            raise SystemExit("Frontend build failed; the shared runtime was not started.")
 
     _print_topology(services, env_file)
 
@@ -334,13 +354,20 @@ def main() -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_stop)
 
+    # Let the interactive API finish importing before the other Python services
+    # compete for CPU/memory. Child services remain owned by this console.
     for service in services:
-        _spawn(service, base_env)
-        time.sleep(0.15)
+        if service.name in {"api", "frontend"}:
+            _spawn(service, base_env)
+    waiting = [service for service in services if service.name not in {"api", "frontend"}]
+    next_worker_start = 0.0
 
     try:
         while not _STOP.is_set():
             now = time.monotonic()
+            if waiting and now >= next_worker_start and _port_in_use(8080):
+                _spawn(waiting.pop(0), base_env)
+                next_worker_start = now + 2.0
             for service in services:
                 process = service.process
                 if process is None:

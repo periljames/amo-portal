@@ -42,7 +42,7 @@ function resolveExtension(contentType: string | null): string {
 }
 
 function decode5987(value: string): string {
-  const normalized = value.replace(/^UTF-8''/i, "");
+  const normalized = value.replace(/^UTF-8'[^']*'/i, "");
   try {
     return decodeURIComponent(normalized);
   } catch {
@@ -53,12 +53,12 @@ function decode5987(value: string): string {
 export function resolveDownloadFilename(disposition: string | null, fallback: string, contentType?: string | null): string {
   let filename = "";
   if (disposition) {
-    const star = disposition.match(/filename\*=(?:UTF-8''|)([^;]+)/i);
+    const star = disposition.match(/(?:^|;)\s*filename\*\s*=\s*([^;]+)/i);
     if (star?.[1]) {
       filename = decode5987(star[1].trim().replace(/^"|"$/g, ""));
     }
     if (!filename) {
-      const plain = disposition.match(/filename=("([^"]+)"|([^;]+))/i);
+      const plain = disposition.match(/(?:^|;)\s*filename\s*=\s*("([^"]+)"|([^;]+))/i);
       filename = (plain?.[2] || plain?.[3] || "").trim();
     }
   }
@@ -71,15 +71,23 @@ export function resolveDownloadFilename(disposition: string | null, fallback: st
 }
 
 export function sanitizeDownloadFilename(filename: string): string {
-  const trimmed = String(filename || "download").trim().replace(/[\\/:*?"<>|]+/g, "_");
-  const collapsed = trimmed.replace(/\s+/g, " ").replace(/^\.+/, "").slice(0, 180);
-  return collapsed || "download";
+  // Storage identifiers belong in the manifest, not the user's Downloads folder.
+  const trimmed = String(filename || "download").normalize("NFC")
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])/gi, "")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, "-");
+  const collapsed = trimmed.replace(/\s+/g, " ").replace(/[-_]{2,}/g, "-")
+    .replace(/^[\s_-]+|[\s_-]+(?=\.[^.]+$)|[.\s_-]+$/g, "")
+    .replace(/^\.+(?=\.)/, "");
+  const extension = collapsed.match(/\.[A-Za-z0-9]{1,10}$/)?.[0] || "";
+  let stem = (extension ? collapsed.slice(0, -extension.length) : collapsed).replace(/^[.\s_-]+/, "").trim() || "download";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(stem)) stem = `file-${stem}`;
+  return stem.slice(0, 180 - extension.length).trimEnd() + extension;
 }
 
 export function saveDownloadedFile(file: DownloadedFile | Blob, overrideFilename?: string): void {
   const blob = file instanceof Blob ? file : file.blob;
   const sourceFilename = file instanceof Blob ? "download" : file.filename;
-  const filename = sanitizeDownloadFilename(overrideFilename || sourceFilename || "download");
+  const filename = resolveDownloadFilename(null, overrideFilename || sourceFilename || "download", blob.type);
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

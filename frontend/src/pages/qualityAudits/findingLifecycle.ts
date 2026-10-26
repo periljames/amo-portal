@@ -9,6 +9,7 @@ import type { CAROut, QMSFindingOut } from "../../services/qms";
  */
 export type FindingLifecycleView =
   | "all"
+  | "observation"
   | "needs_review"
   | "with_auditee"
   | "implementation"
@@ -21,7 +22,8 @@ export type FindingWorkflowStage = Exclude<FindingLifecycleView, "all">;
 export const FINDING_LIFECYCLE_OPTIONS: Array<{ value: FindingLifecycleView; label: string }> = [
   { value: "all", label: "All" },
   { value: "with_auditee", label: "Awaiting response" },
-  { value: "needs_review", label: "RCA/CAP" },
+  { value: "needs_review", label: "Quality review" },
+  { value: "observation", label: "Observations" },
   { value: "implementation", label: "Implementation" },
   { value: "effectiveness", label: "Effectiveness" },
   { value: "closed", label: "Closed" },
@@ -47,9 +49,12 @@ export function primaryLinkedCar(cars: CAROut[]): CAROut | null {
 export function findingLifecycleView(finding: QMSFindingOut, cars: CAROut[]): FindingWorkflowStage {
   if (finding.closed_at) return "closed";
   const car = primaryLinkedCar(cars);
-  if (!car || car.status === "DRAFT") return "needs_review";
-  if (car.status === "CLOSED") return "closed";
+  if (!car && (finding.finding_type === "OBSERVATION" || finding.level === "LEVEL_4")) return "observation";
+  if (!car || car.status === "DRAFT" || car.status === "CANCELLED") return "needs_review";
+  if (car.status === "CLOSED") return "effectiveness";
+  if ([car.root_cause_status, car.capa_status].includes("SUBMITTED")) return "needs_review";
   if (car.status === "PENDING_VERIFICATION") return "effectiveness";
+  if ([car.root_cause_status, car.capa_status].some(value => value === "REJECTED" || value === "NEEDS_EVIDENCE")) return "with_auditee";
   if (car.status === "IN_PROGRESS") return "implementation";
   return "with_auditee";
 }
@@ -59,7 +64,8 @@ export function findingLifecycleLabel(stage: FindingLifecycleView | FindingWorkf
 }
 
 export function findingNextAction(stage: FindingLifecycleView | FindingWorkflowStage, hasLinkedCar: boolean): string {
-  if (!hasLinkedCar) return "Create corrective action";
+  if (stage === "observation") return "Review observation and supporting evidence";
+  if (!hasLinkedCar) return stage === "closed" ? "Review closed finding" : "Review finding and corrective action requirement";
   if (stage === "closed") return "Review closed corrective action";
   if (stage === "effectiveness") return "Complete effectiveness review";
   if (stage === "implementation") return "Continue implementation";

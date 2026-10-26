@@ -1,0 +1,113 @@
+# QMS workspace and data-entry review — 22 October 2026
+
+## Review findings and changes
+
+The route inventory, dispatchers, shared register, tenant shell, Quality context bar, administrator activation, and control-page forms were reviewed together. A successful route load alone is not evidence that a business workflow is correct.
+
+| Area | Finding | Result |
+| --- | --- | --- |
+| QMS navigation | Tenant administration, other departments, personal tools and Quality controls were combined in one drawer. | The active QMS app has its own grouped navigation, including for AMO administrators. Other department and administration trees are not mixed into QMS. |
+| Control navigation | The workspace bar emphasized six broad workspaces while controls required searching the drawer. Its sticky layer could cover page tools. | A visible Controls & Settings menu provides permitted control destinations. The bar wraps at narrow widths; measured scroll padding keeps focused fields below it. Competing sticky module tabs are removed. Shared registers expose their views directly. |
+| Settings | Canonical dispatch treated configuration as a record table, with generic status and search controls. | A specialist settings workspace owns overview, workflows, numbering, notifications and retention. Existing scalar policy values have typed controls; structured policy arrays retain source ownership. Unconfigured policies are not presented as fabricated settings. |
+| Administrative work | Standing administrators were permanently shown as active; delegates had a fixed 30-minute activation. | Both explicitly activate Admin View from their profile for four hours (default), until midnight in the AMO timezone, 24 hours or one week. The server enforces login-scoped activation and grant expiry. Turning off the view preserves the appointment. |
+| Exit from administration | An administrator without an operational department could be routed straight back to administration after deactivation. | The operational fallback opens Quality. |
+| Reply addresses | A text area required users to understand mailbox delimiters. | Separate email fields, + Add email and Remove controls; syntax, incomplete entries and case-insensitive duplicates are checked before submission. The existing API serialization is retained. |
+| Provider entry | Code/name constraints were delayed until server submission. | Provider code and legal-name inputs use the backend's minimum/maximum lengths. Email fields retain email semantics. |
+| Agreement metadata | Legal entities and sites were entered as newline/comma lists. | Add/remove item controls retain the existing wire format. |
+| Provider qualification | Users entered an evaluation template UUID, questionnaire JSON, manual-reference delimiters and technical-scope JSON. | Named template selector, structured questions and technical-scope fields, and individual manual-reference controls. Existing opaque identifiers and additional row properties are preserved. |
+| Qualification routing | The visible Qualification & Surveillance provider tab was absent from the outer router's allowed record tails. | The tail is registered and covered by route and browser regressions. |
+| Form feedback | Many forms waited for submission to expose basic entry mistakes. | One QMS-wide controller gives inline HTML-constraint feedback on leaving fields, updates it while correcting entries, checks whitespace-only required values and prevents invalid native form submission. Prose uses browser spell checking; emails and explicitly marked codes do not. Values are not silently autocorrected. |
+| Register presentation | Pages exposed transport language and serialized objects rather than explaining the work. | Module-specific purpose text, direct view links, responsive toolbars and readable list values; complex record details are opened in their owner. |
+
+## Page inventory and ownership
+
+All registered modules were checked against the frontend registry and dispatcher. The shared register views are covered by the browser sweep; specialist business actions retain their own contracts and permissions.
+
+| Module | Intended surface / review |
+| --- | --- |
+| My Quality Work | Assignment queue and personal tasks; shared register and source links. |
+| Calendar | Planner specialist; preserved rather than replaced by the generic register. |
+| Audits & inspections | Assurance programme, register and occurrence stages; specialist ownership retained. |
+| Findings | Assurance-owned findings and corrective-action links. |
+| CAR / CAPA | Specialist response, review, evidence and effectiveness workflows. |
+| Risk & opportunities | Register, matrix, opportunities, treatment and trend views. |
+| Change control | Proposed, pending, implemented and rejected work; creation remains governed by its source. |
+| System & processes | Process, scope, objective, risk and opportunity views. |
+| Controlled documents | Library, change, approval, distribution and obsolete views; document readers retain specialist ownership. |
+| External Providers | Provider register, agreements, qualification, evidence and oversight; entry constraints and linked controls reviewed. |
+| Vendor Accounts & Access | Separate account authority, invitations and submission reviews within QMS. |
+| Equipment & calibration | Register, deadlines, certificates, history and out-of-tolerance views. |
+| External interface | Regulator findings, customer feedback, correspondence, commitments and responses. |
+| Management review | Review meetings and action views. |
+| Reports & analytics | Executive, audit, training, finding and export views; CAR performance retains its report owner. |
+| Evidence Vault | Bounded search and retained evidence; record viewers and download ownership preserved. |
+| Mail identity | Existing sender and delivery settings with explicit Reply-To list entry. |
+| Settings | Dedicated configuration owner; excluded from generic register dispatch. |
+| AeroDoc | Optional specialist document tools; not enabled merely by adding the new menu. |
+
+## Verification scope
+
+Backend checks cover administrator activation, deactivation, concurrent-login isolation, grant limits, standing appointment retention, timezone/DST midnight behavior and tenant/platform boundaries. Frontend checks cover route metadata, navigation scope, preload selection, activation serialization and address validation.
+
+Browser verification uses isolated API fixtures for settings edits and administrator UI, so it does not create tenant records, send email or activate a real user's administrator session. The register sweep verifies rendering/navigation for every shared-register view; it does not certify domain approvals, real mail delivery or every specialist lifecycle. Production build checks and public readiness are checked separately before release.
+
+The automated register sweep covers 47 views. Additional browser checks cover settings save scope, individual email validation and duplicate detection, administrator activation/deactivation, mobile geometry, dark appearance, qualification entry and existing vendor entry points. Screenshots and logs are in the ignored `.artifacts/qms-*` files.
+
+Release verification completed: 50 backend tests, 88 frontend unit/contract tests, and 10 Chromium tests passed, including the 47-view sweep. The production build, modal-layer and heavy-route checks passed; the new shared form/settings components passed targeted ESLint. The managed frontend and backend were restarted together. Live API/database and operations readiness passed, the live OpenAPI schema exposes all four activation periods with `FOUR_HOURS` as default, and public HTML matches `/assets/index-DMJkLv2M.js` from the tested build. A pinned public Funnel ingress returned readiness HTTP 200 in approximately 1.5 seconds. Preview servers were stopped after verification. Evidence: `.artifacts/qms-ux-release-build.log`, `.artifacts/qms-ux-final-browser.log`, `.artifacts/qms-ux-unit-tests-final.log`, `.artifacts/qms-admin-view-tests.log`, and `.artifacts/qms-ux-live-release.json`.
+
+Server validation and existing approval rules remain authoritative. Browser spell checking depends on the user's installed dictionaries; it is not a server spelling service or automatic correction of legal names, codes or evidence.
+
+## Live follow-up and MOPM alignment
+
+The later authenticated review used the real `AMO_ADMIN` account with its standing tenant-administrator appointment and Quality department context. It exposed two production errors hidden by the isolated fixtures: settings queried columns absent from the canonical `payload` schema, and supplier search passed a SQL bind named `query` into a helper already using that argument name. Both errors are corrected. Settings storage now supports canonical and legacy layouts, partial updates preserve unrelated groups, and supplier selection retains tenant filtering and bounded pagination.
+
+Manual role gates in provider accounts, qualification, document review, contracted maintenance and Procurement now use the existing tenant-administrator authority helper. Frontend capabilities use the matching administrator policy. Administrators retain tenant restrictions, evidence requirements, separation of duties and provider/staff identity boundaries. This corrects role inheritance without fabricating technical qualifications or signed releases.
+
+The navigation now uses one compact Work / Assurance / Controls & settings / Reports dropdown bar with actual page destinations. The redundant assurance rail, register view strips, Settings tab strip and CAR queue strip are removed. The QMS drawer is at least 360 px on desktop and clamps to narrow screens. Live captures confirmed a 44 px menu bar and a readable 360 px drawer after its transition completed. Query workspace highlighting now requires the selected query on the exact workspace page; Missions no longer appears active on Settings. The service worker uses version 14 and prefers the refreshed canonical shell over stale route-specific HTML.
+
+MOPM functional and retention requirements, source fingerprint, regulation reference and coverage boundaries are in [mopm-portal-alignment-2026-10-22.md](mopm-portal-alignment-2026-10-22.md). This adds record/event-based retention, protected tenant extensions, separate audit-package safeguards, annual provider policy limits, contracted scope/Authority-access verification, and core duty/rest floors.
+
+The expanded backend suite passed 106 checks. The frontend suite passed 61 checks, with the final retention-preview test bringing the covered total to 62. Targeted ESLint and the production modal/heavy-route checks passed. Browser cases cover 13 scenarios, including a 47-view register sweep. During the follow-up run an exact field selector stopped matching after inline validation changed its accessible name; this was corrected to retain the named input. The cold administrator case was rerun with an explicit workspace-loading allowance. The final register sweep follows the actual dropdown links and checks the destination URL, visible QMS content and navigation for all 47 views. Earlier repeated full-page reload sweeps exceeded their aggregate time limit during compilation; individual page rendering did not fail. Final run results and release evidence are appended below.
+
+On the live authenticated site, readiness, settings, supplier search, provider-document retention policy and Document Control retention policy all returned HTTP 200. All three policy surfaces exposed the same version and 14 record classes. An attempted two-year maintenance-record extension returned HTTP 422 for the administrator; a before/after read confirmed settings were unchanged. These checks did not create a supplier, send an invitation, approve work or dispose of a business record.
+
+
+Final release verification: the 13 browser scenarios passed across the completed main run and targeted reruns, including the 47-view menu sweep. The final TypeScript build check exited 0, targeted ESLint passed, and the production release passed modal/heavy-route checks. Public and live browser HTML both use `/assets/index-0lqxucK8.js`; the public service worker is version 14. The managed frontend release is `release-639282977969734590`.
+
+Live visual captures show the 14-class retention configuration on desktop and mobile, inline rejection of a below-floor value with Save disabled, administrator invitation/account controls, the page dropdown and the 360 px drawer. The mobile main area measured 360 px wide with a 360 px scroll width. The live account's document permissions returned `quality_manager`, `quality_reviewer` and `document_controller` all true; the provider page had no alerts or failed HTTP responses. The final drawer highlights Retention and leaves Work collapsed. Public API and operations readiness returned HTTP 200 after publishing. Evidence files include `.artifacts/live-mopm-retention-desktop.png`, `.artifacts/live-mopm-floor-validation.png`, `.artifacts/live-mopm-retention-mobile.png`, `.artifacts/live-qms-admin-provider-access-verified.png`, `.artifacts/live-qms-page-menu-final.png`, `.artifacts/live-qms-drawer-final.png`, `.artifacts/mopm-register-menu-sweep.log`, `.artifacts/mopm-browser-resolved-cases.log`, and `.artifacts/mopm-publish-backend-verified.log`.
+
+The older automated browser tab stalled during the service-worker update/reload. The published interface was subsequently verified in a newly opened headed browser with a normal authenticated login. This does not establish seamless migration for every already-open cached tab; a hard refresh or reopening the portal loads the current release. No production tenant configuration was changed by the visual draft checks.
+
+## Follow-up after the incomplete-work report
+
+The live controls menu still repeated a module link and a separate “module pages” entry. It now shows one entry per module, expanding to every page including the default. Vendor Accounts & Access now uses a compact inline header instead of the dark hero banner. Its live desktop header measured 40 px; the mobile main area had no horizontal overflow.
+
+Review scheduling also lacked a common operational expiry gate. Procurement and contracted work now reject overdue or unconfirmed provider reviews through the existing shared supplier-use gate, including commercial-override attempts. List/detail deadlines and overdue totals use the effective annual/risk deadline. The review date basis is UTC throughout these calculations. Completed qualification decisions update the actual review date.
+
+Follow-up checks: 47 backend tests, 31 frontend tests, all 9 workspace browser scenarios (including 47 register views), TypeScript/production build, and modal/heavy-route checks passed. Targeted ESLint returned no errors and two existing hook-dependency warnings in the provider account page. A PostgreSQL probe exercised the real governance summary with temporary tables for current, overdue, shorter-risk, missing/future and prospective records; it rolled back without changing business records.
+
+Published entry `/assets/index-DczHqX75.js`, service worker v15, frontend release `release-639283152405244927`. The existing authenticated browser successfully installed v15 and loaded the new entry after a normal reload without clearing storage. Live public/API and operations readiness returned 200. Governance summary/list and provider access APIs returned 200 with no page errors or alerts. This tenant has zero provider records, so those live reads establish access and query execution, not expiry behavior on existing business records.
+
+Visually inspected captures: `.artifacts/live-qms-followup-menu-loaded.png`, `.artifacts/live-qms-followup-menu-mobile.png`, `.artifacts/live-qms-followup-provider-desktop.png`, `.artifacts/live-qms-followup-provider-mobile.png`. Check logs: `.artifacts/qms-followup-build.log`, `.artifacts/qms-followup-browser.log`, `.artifacts/qms-followup-unit.log`, `.artifacts/mopm-review-currency-tests-d.log`, `.artifacts/provider-review-summary-probe-final.log`.
+
+The wider MOPM alignment remains open. Shared register rendering does not demonstrate record creation, independent approval, evidence acceptance or closure for every module. The roster break/notice/night-pattern and operational handover/release boundaries listed in the requirements map remain unverified. These follow-up results must not be represented as completion of every MOPM procedure.
+
+## Both stale interface and incomplete workflows
+
+The next report confirmed both problems. Open tabs had no update notice, even when a new service worker cached a newer application. The portal now checks the actual release manifest on focus, reconnection and periodically while visible. An available update leaves unsaved work in place and offers Reload/Later. The profile also exposes an update check. An explicit reload refreshes canonical cached HTML before navigation; failed shell refreshes leave the current page open. Existing tabs predating this control need one normal refresh to acquire it.
+
+This was verified between two real published releases in the same authenticated headed browser: `/assets/index-BiSkkR7i.js` displayed the update notice while the typed verification draft remained intact. After deliberately discarding that draft, Reload loaded `/assets/index-DjEmxNuJ.js` without clearing storage or signing in again. `.artifacts/live-qms-real-update-preserves-draft.png` and `.artifacts/live-qms-change-compact-published.png` record that transition.
+
+Change Control register/new now opens governed projects with selectable change types, mandatory scope/reason fields and seeded MOPM readiness gates. The actual PostgreSQL probe discovered and fixed a gate-update `FOR UPDATE` failure caused by an eager outer join; locks now target the mission/gate tables explicitly. Approved Authority submission/acceptance requires retained, same-tenant Authority evidence and snapshots its checksum. Historical generic change writes cannot bypass the governed workflow. Physical implementation and post-implementation controls remain open, as described in the requirements map.
+
+Live inspection also found a malformed profile update button, oversized change header/summary cards, a field error becoming part of its accessible label, prior-register rows under a new page title, large empty grids, and personal to-dos obscuring assignments. Those shared defects are corrected. The published mobile change form has no horizontal overflow; inline feedback retains the exact field name and disables creation before submission. Profile/version, compact desktop/mobile and inline captures are `.artifacts/live-qms-profile-update-published.png`, `.artifacts/live-qms-change-mobile-published.png` and `.artifacts/live-qms-change-inline-published.png`.
+
+The first live 43-register sweep exposed an intermittent Audit performance HTTP 500; a direct recheck returned 200 and the backend access log contained no corresponding failed API request. The gateway previously let some transport resets escape as unhandled errors. It now retries a bodyless GET/HEAD once before response headers and returns structured transport failures; it never replays mutations or uploads and does not restart partial streams. This closes an identified error-handling gap; it does not establish the exact cause of every past network interruption.
+
+Checks passed: 42 backend unit checks, 5 PostgreSQL regression cases using rolled-back temporary tables, 11 gateway checks, 17 release/service-worker checks, and 16 browser scenarios including the 43-view fixture sweep and personal to-do lifecycle. The production build, subsequent exact-source TypeScript check and targeted ESLint passed. Logs: `.artifacts/qms-both-backend-final.log`, `.artifacts/qms-both-postgres-tests-final.log`, `.artifacts/qms-both-gateway-tests.log`, `.artifacts/qms-both-unit.log`, `.artifacts/qms-both-browser-publish.log`, `.artifacts/qms-both-personal-todos.log`, `.artifacts/qms-both-build-publish.log`, `.artifacts/qms-both-typescript-publish.log`.
+
+The published frontend is `release-639283225963510792`, entry `/assets/index-DjEmxNuJ.js`, service worker v16. A real authenticated follow-up sweep waits for each destination to finish loading; its results are appended after completion. The broader specialist workflow gaps are documented in [qms-live-gap-review-2026-10-22.md](qms-live-gap-review-2026-10-22.md), not treated as completed simply because a page returned 200.
+
+The settled live sweep completed all 43 destinations with zero register warnings and zero HTTP/page failures. Every capture/contact sheet was inspected. It also exposed a shared flex rule stretching an otherwise empty card; the final layout correction keeps the empty state at 110 px and the complete filter/empty workspace at approximately 203 px on desktop. Final mobile capture had no horizontal overflow. Root screenshots are `.artifacts/live-qms-final-compact-empty.png` and `.artifacts/live-qms-final-compact-mobile.png`; the settled sweep is `.artifacts/live-register-review-settled.json` and `live-settled-sheet-01.png` through `11.png`.
+
+Final published release: `release-639283238957681198`, JavaScript `/assets/index-BXvzM6yi.js`, stylesheet `/assets/index-Bmk_toep.css`, worker v16. The existing session loaded it through the real update notice/reload action. Release detection now compares both script and stylesheet assets, including CSS-only changes. All 18 update/worker unit checks and the two affected browser scenarios passed; the earlier 16 distinct browser scenarios remain the broader baseline. The final production build and targeted ESLint passed. Final logs are `.artifacts/qms-final-build.log`, `.artifacts/qms-final-update-tests.log`, `.artifacts/qms-final-browser.log` and `.artifacts/qms-final-eslint.log`. Public API and operations readiness returned 200 after publication.

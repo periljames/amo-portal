@@ -9,6 +9,7 @@ import { useTimeOfDayTheme } from "./hooks/useTimeOfDayTheme";
 import { useColorScheme } from "./hooks/useColorScheme";
 import PortalErrorBoundary from "./components/feedback/PortalErrorBoundary";
 import GlobalLoadingBar from "./components/feedback/GlobalLoadingBar";
+import QmsFormFeedback from "./components/forms/QmsFormFeedback";
 import PortalSessionLifecycle from "./components/auth/PortalSessionLifecycle";
 import PublicAuditAccessPage from "./pages/PublicAuditAccessPage";
 import PublicAuditVerificationPage from "./pages/PublicAuditVerificationPage";
@@ -37,6 +38,7 @@ const App: React.FC = () => {
   const isPublicCarAccess = /^\/qms\/car-access\/[^/]+\/?$/i.test(location.pathname);
   const isPublicAuditVerification = /^\/verify\/[^/]+\/?$/i.test(location.pathname);
   const isPublicQualitySurface = isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
+  const isExternalProviderSurface = /^\/(?:vendor|partner)(?:\/|$)/i.test(location.pathname);
 
   useEffect(() => { document.body.dataset.theme = theme; }, [theme]);
   void scheme;
@@ -64,7 +66,7 @@ const App: React.FC = () => {
 
       // Purpose-bound external audit, CAR response and public verification
       // routes must not be redirected into the employee login lifecycle.
-      if (isPublicQualitySurface) return;
+      if (isPublicQualitySurface || isExternalProviderSurface) return;
 
       const parts = location.pathname.split("/").filter(Boolean);
       const isLoginRoute = location.pathname === "/login" || (parts[0] === "maintenance" && parts[2] === "login");
@@ -74,7 +76,7 @@ const App: React.FC = () => {
       const shouldResume = detail.type === "expired" || detail.type === "idle-logout";
       navigate(loginTarget, { replace: true, state: { from: shouldResume ? `${location.pathname}${location.search}${location.hash}` : undefined, sessionReason: detail.type } });
     }
-  }), [isPublicQualitySurface, location.hash, location.pathname, location.search, navigate, queryClient]);
+  }), [isPublicQualitySurface, isExternalProviderSurface, location.hash, location.pathname, location.search, navigate, queryClient]);
 
   useEffect(() => {
     const preloadFromTarget = (target: EventTarget | null) => {
@@ -109,7 +111,8 @@ const App: React.FC = () => {
   return (
     <>
       <GlobalLoadingBar />
-      <PortalSessionLifecycle />
+      {/^\/maintenance\/[^/]+\/(?:quality|qms)(?:\/|$)/i.test(location.pathname) && <QmsFormFeedback />}
+      {!isExternalProviderSurface && <PortalSessionLifecycle />}
       <PortalErrorBoundary><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></PortalErrorBoundary>
     </>
   );

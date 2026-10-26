@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { apiBlob } from "./typedApi";
+import { uploadTimeoutMs } from "./transferPolicy";
 import { requirePreparationContract } from "./qmsAuditPreparationContract";
 
 export type AuditPreparationRevision = {
@@ -313,7 +314,7 @@ export function uploadAuditNoticeAttachment(
   form.append("file", file);
   return apiRequest<AuditNotice>(
     qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/notices/${encodeURIComponent(noticeId)}/attachment`),
-    { method: "POST", body: form, timeoutMs: 90_000, offline: { queueMutation: false } },
+    { method: "POST", body: form, timeoutMs: uploadTimeoutMs(form), offline: { queueMutation: false } },
   );
 }
 

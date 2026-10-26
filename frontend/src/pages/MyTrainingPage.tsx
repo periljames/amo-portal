@@ -1,3 +1,5 @@
+import InlineLoading from "../components/shared/InlineLoading";
+import { sanitizeDownloadFilename } from "../utils/downloads";
 // src/pages/MyTrainingPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -996,7 +998,7 @@ function MyTrainingPage() {
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = "my_training_status.csv";
+    a.download = sanitizeDownloadFilename("my_training_status.csv");
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1350,7 +1352,7 @@ function MyTrainingPage() {
 
         {loading ? (
           <div className="card card--info">
-            <p>Loading your training status…</p>
+            <p><InlineLoading label={"Loading your training status…"}/></p>
           </div>
         ) : null}
 
@@ -1460,9 +1462,7 @@ function MyTrainingPage() {
                     <strong>{lastRefreshedAt ? lastRefreshedAt.toLocaleString() : "—"}</strong>
                   </p>
                   {!coursesLoaded ? (
-                    <p className="text-muted" style={{ marginTop: 6, marginBottom: 0 }}>
-                      Loading course catalogue…
-                    </p>
+                    <p className="text-muted" style={{ marginTop: 6, marginBottom: 0 }}><InlineLoading label={"Loading course catalogue…"}/></p>
                   ) : null}
                 </div>
 
@@ -1746,7 +1746,7 @@ function MyTrainingPage() {
 
                 {deferralsLoading && (
                   <div className="card card--info">
-                    <p style={{ margin: 0 }}>Loading deferral requests…</p>
+                    <p style={{ margin: 0 }}><InlineLoading label={"Loading deferral requests…"}/></p>
                   </div>
                 )}
 
@@ -2207,7 +2207,7 @@ function MyTrainingPage() {
 
                 {trainingFilesLoading && (
                   <div className="card card--info">
-                    <p style={{ margin: 0 }}>Loading training files…</p>
+                    <p style={{ margin: 0 }}><InlineLoading label={"Loading training files…"}/></p>
                   </div>
                 )}
 
@@ -2526,7 +2526,7 @@ function MyTrainingPage() {
                   <div style={{ padding: 16, display: "grid", gap: 10 }}>
                     {eventLoading ? (
                       <div className="card card--info">
-                        <p style={{ margin: 0 }}>Loading event…</p>
+                        <p style={{ margin: 0 }}><InlineLoading label={"Loading event…"}/></p>
                       </div>
                     ) : null}
 

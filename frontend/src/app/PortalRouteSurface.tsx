@@ -1,3 +1,4 @@
+import WorkspaceLoading from "../components/shared/WorkspaceLoading";
 import React, { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
@@ -33,11 +34,7 @@ function pathSegments(pathname: string): string[] {
 }
 
 function LoadingRoute({ label }: { label: string }): React.ReactElement {
-  return (
-    <div className="page-loading" role="status" aria-live="polite">
-      <div className="page-loading__card">Loading {label}…</div>
-    </div>
-  );
+  return <WorkspaceLoading label={`Opening ${label}`} />;
 }
 
 function AuthenticatedSurface({

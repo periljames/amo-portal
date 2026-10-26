@@ -1,6 +1,7 @@
 # Runtime verification artifacts (do not commit)
 .artifacts/
 var/artifacts/
+backend/uploads/quality/authorizations/
 
 # Python runtime and test caches
 __pycache__/

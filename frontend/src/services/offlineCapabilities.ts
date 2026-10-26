@@ -1,3 +1,5 @@
+import { OFFLINE_CREATE_ROUTES } from "./offlineCreateRoutes";
+
 export type OfflineCapability = "draft-safe" | "live-only" | "unsupported";
 
 export type OfflineCapabilityRule = {
@@ -6,6 +8,8 @@ export type OfflineCapabilityRule = {
   path: RegExp;
   capability: OfflineCapability;
   label: string;
+  module?: string;
+  autoQueue?: boolean;
   commandRouteKey?: (path: string) => string;
   validate?: (body: Record<string, unknown>) => boolean;
 };
@@ -19,7 +23,6 @@ const CANONICAL_CHECKLIST_RESPONSES = new Set([
   "NOT_APPLICABLE",
   "NOT_VERIFIED",
 ]);
-const FIELDWORK_FINDING_RESPONSES = new Set(["NONCOMPLIANT", "OBSERVATION"]);
 const FIELDWORK_FINDING_LEVELS = new Set(["LEVEL_1", "LEVEL_2", "LEVEL_3", "LEVEL_4"]);
 const FIELDWORK_FINDING_SEVERITIES = new Set(["MINOR", "MAJOR", "CRITICAL"]);
 
@@ -28,11 +31,11 @@ function validFieldworkEnvelope(body: Record<string, unknown>, operation: string
     && body.client_mutation_id.trim().length > 8
     && typeof body.device_id === "string"
     && body.device_id.trim().length > 8
-    && Number.isFinite(Number(body.device_sequence))
+    && Number.isSafeInteger(body.device_sequence)
     && Number(body.device_sequence) >= 0
     && typeof body.client_timestamp === "string"
     && !Number.isNaN(Date.parse(body.client_timestamp))
-    && Number.isFinite(Number(body.base_version))
+    && Number.isSafeInteger(body.base_version)
     && Number(body.base_version) >= 0
     && body.operation === operation
     && typeof body.reason === "string"
@@ -48,9 +51,10 @@ function validChecklistFieldwork(body: Record<string, unknown>): boolean {
 function validChecklistFinding(body: Record<string, unknown>): boolean {
   return validFieldworkEnvelope(body, "CREATE_FINDING")
     && typeof body.canonical_response_status === "string"
-    && FIELDWORK_FINDING_RESPONSES.has(body.canonical_response_status)
+    && CANONICAL_CHECKLIST_RESPONSES.has(body.canonical_response_status)
     && typeof body.level === "string"
     && FIELDWORK_FINDING_LEVELS.has(body.level)
+    && (body.level === "LEVEL_4" || body.canonical_response_status === "NONCOMPLIANT")
     && typeof body.severity === "string"
     && FIELDWORK_FINDING_SEVERITIES.has(body.severity)
     && typeof body.description === "string"
@@ -59,6 +63,14 @@ function validChecklistFinding(body: Record<string, unknown>): boolean {
 
 /** Every mutation is classified; only reviewed, guarded drafts enter the outbox. */
 export const OFFLINE_CAPABILITY_REGISTRY: readonly OfflineCapabilityRule[] = [
+  ...OFFLINE_CREATE_ROUTES.map((route): OfflineCapabilityRule => ({
+    id: `portal-create:${route.id}`, module: route.module, method: "POST",
+    path: new RegExp(`^${route.path.split("/").map((part) => part.startsWith("{")
+      ? "[^/]+" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}/?$`),
+    capability: "draft-safe", autoQueue: true, label: route.label,
+    commandRouteKey: (path) => `portal.create:${decodeURIComponent(path)}`,
+    validate: (body) => Object.keys(body).length > 0,
+  })),
   {
     id: "qms-checklist-fieldwork-update",
     method: "POST",
@@ -87,7 +99,7 @@ export const OFFLINE_CAPABILITY_REGISTRY: readonly OfflineCapabilityRule[] = [
     path: /^\/rostering\/assignments\/([^/]+)\/?$/,
     capability: "draft-safe", label: "roster draft edit",
     commandRouteKey: (path) => `rostering.assignment.update:${path.split("/")[3]}`,
-    validate: (body) => Number.isFinite(Number(body.expected_state_revision)),
+    validate: (body) => Number.isSafeInteger(body.expected_state_revision) && Number(body.expected_state_revision) >= 0,
   },
   {
     id: "work-task-update", method: "PUT",
@@ -122,6 +134,7 @@ function jsonBody(raw: string | undefined): Record<string, unknown> {
 }
 
 function normalized(path: string): string {
+  if (/^https?:\/\//i.test(path)) path = new URL(path).pathname;
   return path.split("?")[0].replace(/\/+$/, "") || "/";
 }
 

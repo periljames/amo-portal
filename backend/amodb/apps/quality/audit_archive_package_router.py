@@ -36,6 +36,8 @@ from .audit_archive_governance_router import (
     _manifest_dict,
     _policy_dict,
     _retention_start,
+    _assert_mopm_archive_due,
+    _mopm_archive_due,
     _utcnow,
 )
 from .audit_closure_models import QualityAuditClosureState
@@ -265,10 +267,15 @@ def _archive_readiness(db: Session, *, amo_id: str, audit_id: uuid.UUID, policy)
     ).first()
     if closure is None or closure.execution_status != "CLOSED":
         blockers.append({"type": "EXECUTION", "reason": "Issue the report and close audit execution in Closing."})
-    if closure is None or closure.follow_up_status != "COMPLETE":
-        blockers.append({"type": "FOLLOW_UP", "reason": "Complete all corrective-action and effectiveness requirements in Follow-up."})
-    else:
-        blockers.extend(_follow_up_readiness(db, amo_id=amo_id, audit_id=audit_id)["blockers"])
+    # Archive commencement follows the tenant's approved retention start event.
+    # EXECUTION_CLOSED records may be archived with open CAR/CAPA obligations;
+    # archiving must never mark those obligations complete or waive their gates.
+    # FOLLOW_UP_COMPLETE policies retain the full corrective-action gate.
+    if policy is not None and policy.retention_start_event == "FOLLOW_UP_COMPLETE":
+        if closure is None or closure.follow_up_status != "COMPLETE":
+            blockers.append({"type": "FOLLOW_UP", "reason": "Complete all corrective-action and effectiveness requirements in Follow-up."})
+        else:
+            blockers.extend(_follow_up_readiness(db, amo_id=amo_id, audit_id=audit_id)["blockers"])
     if policy is not None and closure is not None and not blockers:
         try:
             _retention_start(closure, policy)
@@ -294,6 +301,7 @@ def get_archive_governance_with_package(
         QualityAuditDispositionEvent.manifest_id == manifest.id if manifest else False,
     ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
     now = _utcnow()
+    effective_due = _mopm_archive_due(db, manifest, ctx.amo_id) if manifest else None
     return {
         "policy": _policy_dict(policy),
         "archive_readiness": _archive_readiness(db, amo_id=ctx.amo_id, audit_id=audit_id, policy=policy),
@@ -322,7 +330,7 @@ def get_archive_governance_with_package(
             "reason": disposition.reason,
             "created_at": disposition.created_at,
         } if disposition else None,
-        "retention_due": bool(manifest and manifest.retention_due_at and manifest.retention_due_at <= now),
+        "retention_due": bool(effective_due and policy and not policy.indefinite and not holds and effective_due <= now),
     }
 
 
@@ -347,11 +355,15 @@ def generate_archive_manifest_with_package(
     ).first()
     if closure is None:
         raise HTTPException(status_code=409, detail="Audit closure state is required before archive generation.")
-    if closure.follow_up_status != "COMPLETE":
-        raise HTTPException(status_code=409, detail="Assurance follow-up must be complete before the audit package can be archived.")
+    if policy.retention_start_event == "FOLLOW_UP_COMPLETE" and closure.follow_up_status != "COMPLETE":
+        raise HTTPException(status_code=409, detail="This policy starts retention at follow-up completion; complete assurance follow-up before archiving.")
 
     retention_start = _retention_start(closure, policy)
     retention_due = None if policy.indefinite else retention_start + __import__("datetime").timedelta(days=int(policy.duration_days or 0))
+    if retention_due is not None:
+        from .amo_compliance_policy import _anniversary, tenant_retention_extensions
+        years = tenant_retention_extensions(db, ctx.amo_id).get("extensions_years", {}).get("QMS_AUDIT_RECORDS", 5)
+        retention_due = max(retention_due, _anniversary(retention_start, years))
     latest = db.query(QualityAuditArchiveManifest).filter(
         QualityAuditArchiveManifest.amo_id == ctx.amo_id,
         QualityAuditArchiveManifest.audit_id == audit_id,
@@ -417,7 +429,7 @@ def generate_archive_manifest_with_package(
                 source_system=item["source_system"],
                 content_hash=item["content_hash"],
                 retention_role=item["retention_role"],
-                metadata_json=item["metadata"],
+                metadata_json=jsonable_encoder(item["metadata"]),
             ))
         db.commit()
     except Exception:
@@ -482,24 +494,25 @@ def execute_package_disposition(
         raise HTTPException(status_code=404, detail="Archive manifest not found.")
     if manifest.retention_due_at is None or manifest.retention_due_at > _utcnow():
         raise HTTPException(status_code=409, detail="Archive retention is not yet due.")
+    _assert_mopm_archive_due(db, manifest=manifest, policy=policy, amo_id=ctx.amo_id, audit_id=audit_id)
     holds = _active_holds(db, amo_id=ctx.amo_id, audit_id=audit_id)
     if holds:
         raise HTTPException(status_code=409, detail={"message": "Active legal hold blocks disposition.", "holds": [hold.hold_key for hold in holds]})
-    if policy.review_before_disposition:
-        latest_review = db.query(QualityAuditDispositionEvent).filter(
-            QualityAuditDispositionEvent.amo_id == ctx.amo_id,
-            QualityAuditDispositionEvent.audit_id == audit_id,
-            QualityAuditDispositionEvent.manifest_id == manifest.id,
-            QualityAuditDispositionEvent.event_type.in_(["APPROVED", "REJECTED"]),
-        ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
-        if latest_review is None or latest_review.event_type != "APPROVED":
-            raise HTTPException(status_code=409, detail="Approved disposition review is required by policy before execution.")
-        if (
-            latest_review.inventory_sha256 != _inventory_hash(manifest)
-            or latest_review.package_sha256 != manifest.package_sha256
-            or latest_review.disposition_mode != policy.disposition_mode
-        ):
-            raise HTTPException(status_code=409, detail="The package or disposition policy changed. Review this exact archive package again before execution.")
+    # MOPM review is mandatory, including for legacy tenant policies.
+    latest_review = db.query(QualityAuditDispositionEvent).filter(
+        QualityAuditDispositionEvent.amo_id == ctx.amo_id,
+        QualityAuditDispositionEvent.audit_id == audit_id,
+        QualityAuditDispositionEvent.manifest_id == manifest.id,
+        QualityAuditDispositionEvent.event_type.in_(["APPROVED", "REJECTED"]),
+    ).order_by(QualityAuditDispositionEvent.created_at.desc()).first()
+    if latest_review is None or latest_review.event_type != "APPROVED":
+        raise HTTPException(status_code=409, detail="Approved disposition review is required by policy before execution.")
+    if (
+        latest_review.inventory_sha256 != _inventory_hash(manifest)
+        or latest_review.package_sha256 != manifest.package_sha256
+        or latest_review.disposition_mode != policy.disposition_mode
+    ):
+        raise HTTPException(status_code=409, detail="The package or disposition policy changed. Review this exact archive package again before execution.")
     if _latest_execution(db, amo_id=ctx.amo_id, audit_id=audit_id, manifest_id=manifest.id) is not None:
         raise HTTPException(status_code=409, detail="Disposition has already been executed for this manifest.")
     if not manifest.package_file_ref or not manifest.package_sha256:

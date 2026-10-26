@@ -22,6 +22,7 @@ from .schemas import CAROut, QMSAuditOut, QMSAuditRegisterRowOut, QMSFindingOut
 
 
 FindingWorkflowStage = Literal[
+    "observation",
     "needs_review",
     "with_auditee",
     "implementation",
@@ -133,30 +134,40 @@ def get_audit_register_paged(
     )
     if only_with_cars:
         query = query.filter(linked_car_exists)
+    observation = or_(func.coalesce(cast(Finding.finding_type, String), "") == "OBSERVATION", func.coalesce(cast(Finding.level, String), "") == "LEVEL_4")
     if workflow_stage:
-        car_stage_statuses = {
-            "needs_review": [models.CARStatus.DRAFT],
-            "with_auditee": [models.CARStatus.OPEN, models.CARStatus.ESCALATED],
-            "implementation": [models.CARStatus.IN_PROGRESS],
-            "effectiveness": [models.CARStatus.PENDING_VERIFICATION],
-            "closed": [models.CARStatus.CLOSED],
+        submitted = or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED")
+        returned = or_(Car.root_cause_status == "REJECTED", Car.capa_status.in_(["REJECTED", "NEEDS_EVIDENCE"]))
+        # Coalesce nullable legacy review fields before negation; SQL NULL must
+        # not silently hide an otherwise open finding from its workflow queue.
+        has_review = or_(func.coalesce(Car.root_cause_status, "") == "SUBMITTED", func.coalesce(Car.capa_status, "") == "SUBMITTED")
+        has_return = or_(func.coalesce(Car.root_cause_status, "") == "REJECTED", func.coalesce(Car.capa_status, "").in_(["REJECTED", "NEEDS_EVIDENCE"]))
+        stage_predicates = {
+            "observation": False,
+            "needs_review": or_(Car.status.in_([models.CARStatus.DRAFT, models.CARStatus.CANCELLED]), and_(Car.status.in_([models.CARStatus.OPEN, models.CARStatus.IN_PROGRESS, models.CARStatus.PENDING_VERIFICATION, models.CARStatus.ESCALATED]), submitted)),
+            "with_auditee": and_(or_(Car.status.in_([models.CARStatus.OPEN, models.CARStatus.ESCALATED]), and_(Car.status == models.CARStatus.IN_PROGRESS, returned)), ~has_review),
+            "implementation": and_(Car.status == models.CARStatus.IN_PROGRESS, ~has_review, ~has_return),
+            "effectiveness": or_(and_(Car.status == models.CARStatus.PENDING_VERIFICATION, ~has_review), Car.status == models.CARStatus.CLOSED),
+            "closed": Car.status == models.CARStatus.CLOSED,
         }
         matching_stage_car_exists = (
             db.query(Car.id)
             .filter(
                 Car.amo_id == amo_id,
                 Car.finding_id == Finding.id,
-                Car.status.in_(car_stage_statuses[workflow_stage]),
+                stage_predicates[workflow_stage],
             )
             .exists()
         )
-        if workflow_stage == "needs_review":
+        if workflow_stage == "observation":
+            query = query.filter(Finding.closed_at.is_(None), observation, ~linked_car_exists)
+        elif workflow_stage == "needs_review":
             query = query.filter(
                 Finding.closed_at.is_(None),
-                or_(~linked_car_exists, matching_stage_car_exists),
+                or_(and_(~linked_car_exists, ~observation), matching_stage_car_exists),
             )
         elif workflow_stage == "closed":
-            query = query.filter(or_(Finding.closed_at.is_not(None), matching_stage_car_exists))
+            query = query.filter(Finding.closed_at.is_not(None))
         else:
             query = query.filter(Finding.closed_at.is_(None), matching_stage_car_exists)
     if car_timing:
@@ -172,12 +183,12 @@ def get_audit_register_paged(
             Car.amo_id == amo_id,
             Car.finding_id == Finding.id,
             Car.status.in_(active_statuses),
-            Car.due_date.is_not(None),
+            func.coalesce(Car.target_closure_date, Car.due_date).is_not(None),
         ]
         if car_timing == "overdue":
-            timing_filters.append(Car.due_date < today)
+            timing_filters.append(func.coalesce(Car.target_closure_date, Car.due_date) < today)
         else:
-            timing_filters.extend((Car.due_date >= today, Car.due_date <= today + timedelta(days=due_soon_days)))
+            timing_filters.extend((func.coalesce(Car.target_closure_date, Car.due_date) >= today, func.coalesce(Car.target_closure_date, Car.due_date) <= today + timedelta(days=due_soon_days)))
         query = query.filter(db.query(Car.id).filter(*timing_filters).exists())
 
     search_value = _normalise_search(search)
@@ -271,7 +282,7 @@ def get_audit_register_paged(
             .order_by(Car.created_at.asc(), Car.id.asc())
             .all()
         )
-        for linked_car in linked_cars:
+        for linked_car in _decorate_car_register_items(db, linked_cars):
             cars_by_finding.setdefault(linked_car.finding_id, []).append(linked_car)
 
     rows = [
@@ -417,7 +428,9 @@ def get_car_register_paged(
             or_(Car.root_cause_status == "SUBMITTED", Car.capa_status == "SUBMITTED")
         )
     elif scope == "awaiting_effectiveness_review":
-        query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION)
+        query = query.filter(Car.status == models.CARStatus.PENDING_VERIFICATION,
+            func.coalesce(Car.root_cause_status, "") != "SUBMITTED",
+            func.coalesce(Car.capa_status, "") != "SUBMITTED")
     elif scope == "closed":
         query = query.filter(Car.status == models.CARStatus.CLOSED)
 
@@ -461,3 +474,63 @@ def get_car_register_paged(
             in_review=summary_review,
         ),
     )
+
+
+@router.get("/audits/recycle-bin/paged")
+def get_recycle_bin_paged(
+    domain: Optional[QMSDomain] = None,
+    record_type: Literal["all", "audit", "schedule"] = "all",
+    search: Optional[str] = Query(None, max_length=160),
+    sort: Literal["title", "recordType", "state", "detail", "deletedAt", "purgeAt", "reason", "reference"] = "deletedAt",
+    direction: Literal["asc", "desc"] = "desc",
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_read_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Page tombstones in SQL; never load all deleted records to render a page."""
+    from datetime import datetime, timezone
+    from sqlalchemy import select, union_all, literal
+    from .audit_deletion_service import RECYCLE_BIN_RETENTION_DAYS, recycle_bin_purge_at, recycle_bin_days_remaining
+
+    amo_id = str(_current_amo_id(current_user))
+    ctx = TenantContext(amo_code="", amo_id=amo_id, user_id=str(current_user.id), is_superuser=False)
+    assert_quality_permission(db, ctx, "qms.audit.view")
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=ctx.user_id)
+    Audit, Schedule = models.QMSAudit, models.QMSAuditSchedule
+    def source(model, kind, reference, state, start, end):
+        query = select(cast(model.id, String).label("id"), literal(kind).label("record_type"),
+            reference.label("reference"), model.title.label("title"), cast(state, String).label("state"),
+            cast(start, String).label("start"), cast(end, String).label("end"),
+            model.deleted_at.label("deleted_at"), func.coalesce(model.delete_reason, "").label("reason"))
+        query = query.where(model.amo_id == amo_id, model.deleted_at.is_not(None))
+        return query.where(model.domain == domain) if domain else query
+    population = union_all(
+        source(Audit, "audit", Audit.audit_ref, Audit.status, Audit.planned_start, Audit.planned_end),
+        source(Schedule, "schedule", literal("Audit schedule"), Schedule.frequency, Schedule.next_due_date, literal(None)),
+    ).subquery()
+    c = population.c
+    counts = dict(db.execute(select(c.record_type, func.count()).group_by(c.record_type)).all())
+    soon = db.scalar(select(func.count()).select_from(population).where(c.deleted_at <= datetime.now(timezone.utc)-timedelta(days=RECYCLE_BIN_RETENTION_DAYS-7))) or 0
+    predicates = []
+    if record_type != "all": predicates.append(c.record_type == record_type)
+    needle = _normalise_search(search)
+    if needle:
+        match = "%" + needle + "%"
+        predicates.append(or_(*[column.ilike(match) for column in (c.reference, c.title, c.state, c.reason, c.start, c.end)]))
+    total = int(db.scalar(select(func.count()).select_from(population).where(*predicates)) or 0)
+    ordering = {"recordType": c.record_type, "deletedAt": c.deleted_at, "purgeAt": c.deleted_at, "detail": c.start}.get(sort)
+    if ordering is None: ordering = population.c[sort]
+    ordered = ordering.asc() if direction == "asc" else ordering.desc()
+    records = db.execute(select(population).where(*predicates).order_by(ordered, c.record_type, c.id).offset(offset).limit(limit)).mappings()
+    items = []
+    for row in records:
+        purge_at = recycle_bin_purge_at(row["deleted_at"])
+        items.append({"id": row["id"], "recordType": row["record_type"], "reference": row["reference"],
+            "title": row["title"], "state": row["state"].replace("_", " ").title(),
+            "detail": f"{row['start'] or '—'} – {row['end'] or '—'}" if row["record_type"] == "audit" else f"Next due {row['start'] or '—'}",
+            "deletedAt": row["deleted_at"], "purgeAt": purge_at,
+            "daysRemaining": recycle_bin_days_remaining(row["deleted_at"]) or 0,
+            "reason": row["reason"] or "No reason provided"})
+    return {"items": items, "total": total, "limit": limit, "offset": offset,
+        "summary": {"total": sum(counts.values()), "audits": counts.get("audit", 0), "schedules": counts.get("schedule", 0), "expiringSoon": soon}}

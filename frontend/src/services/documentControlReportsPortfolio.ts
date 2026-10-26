@@ -1,3 +1,5 @@
+import { resolveDownloadFilename } from "../utils/downloads";
+import { portalFetch } from "./offlineHttp";
 import { authHeaders } from "./auth";
 import { getApiBaseUrl } from "./config";
 
@@ -135,7 +137,7 @@ export async function getReportsPortfolio(
   if (options.perPage) query.set("per_page", String(options.perPage));
 
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-portfolio${suffix}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -162,7 +164,7 @@ export async function getReportsRegister(
   if (options.page) query.set("page", String(options.page));
   if (options.perPage) query.set("per_page", String(options.perPage));
 
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-register?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
@@ -189,17 +191,16 @@ export async function exportReportsCsv(
   if (options.dateFrom) query.set("date_from", options.dateFrom);
   if (options.dateTo) query.set("date_to", options.dateTo);
 
-  const response = await fetch(
+  const response = await portalFetch(
     `${getApiBaseUrl()}/doc-control/workspace/t/${encodeURIComponent(tenant)}/reports-export.csv?${query.toString()}`,
     { headers: authHeaders(), credentials: "same-origin" },
   );
   if (!response.ok) throw await exportError(response);
   const disposition = response.headers.get("content-disposition") || "";
-  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
   const rowHeader = response.headers.get("x-document-control-export-rows");
   return {
     blob: await response.blob(),
-    filename: filenameMatch?.[1] || `document-control-${options.view}-export.csv`,
+    filename: resolveDownloadFilename(disposition, `document-control-${options.view}-export.csv`, response.headers.get("Content-Type")),
     rowCount: rowHeader && /^\d+$/.test(rowHeader) ? Number(rowHeader) : null,
   };
 }

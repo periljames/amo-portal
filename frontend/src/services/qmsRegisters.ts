@@ -22,7 +22,7 @@ export type QmsAuditRegisterPageParams = {
   auditId?: string;
   findingId?: string;
   onlyWithCars?: boolean;
-  workflowStage?: "needs_review" | "with_auditee" | "implementation" | "effectiveness" | "closed";
+  workflowStage?: "observation" | "needs_review" | "with_auditee" | "implementation" | "effectiveness" | "closed";
   carTiming?: "overdue" | "due_soon";
   dueSoonDays?: number;
   search?: string;
@@ -112,8 +112,13 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
   return apiRequest<QmsAuditRegisterPage>(path, {
     signal: params.signal,
     timeoutMs: 15_000,
-    cacheTtlMs: 10_000,
+    cacheTtlMs: 0,
     staleWhileOfflineMs: 5 * 60_000,
+  }).then(page => {
+    if (!Array.isArray(page?.rows) || typeof page.total !== "number") {
+      throw new Error("The finding register returned an incomplete record. Retry to reload it.");
+    }
+    return page;
   });
 }
 
@@ -137,7 +142,12 @@ export function qmsGetCarRegisterPage(params: QmsCarRegisterPageParams = {}): Pr
   return apiRequest<QmsCarRegisterPage>(path, {
     signal: params.signal,
     timeoutMs: 15_000,
-    cacheTtlMs: 8_000,
+    cacheTtlMs: 0,
     staleWhileOfflineMs: 5 * 60_000,
+  }).then(page => {
+    if (!Array.isArray(page?.items) || typeof page.total !== "number" || !page.summary) {
+      throw new Error("The corrective action register returned an incomplete record. Retry to reload it.");
+    }
+    return page;
   });
 }

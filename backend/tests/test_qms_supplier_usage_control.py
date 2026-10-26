@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -24,7 +25,10 @@ def _provider_db() -> Session:
                 id TEXT PRIMARY KEY,
                 amo_id TEXT NOT NULL,
                 supplier_id INTEGER NOT NULL,
-                contract_required BOOLEAN NOT NULL
+                contract_required BOOLEAN NOT NULL,
+                review_interval_days INTEGER,
+                last_reviewed_on DATE,
+                next_review_due_on DATE
             )
         """))
         connection.execute(text("""
@@ -34,9 +38,26 @@ def _provider_db() -> Session:
                 supplier_id INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 effective_on DATE,
-                expires_on DATE
+                expires_on DATE,
+                controlled_document_id TEXT,
+                controlled_document_revision TEXT,
+                signed_evidence_submission_id TEXT
             )
         """))
+        # A governed agreement is only eligible with an accepted, checksum-
+        # identical published DMS original and retained independently verified
+        # QMS evidence. Keep the SQLite fixture faithful to that join graph.
+        for statement in (
+            "CREATE TABLE manual_tenants (id TEXT PRIMARY KEY, amo_id TEXT)",
+            "CREATE TABLE manuals (id TEXT PRIMARY KEY, tenant_id TEXT, current_published_rev_id TEXT)",
+            "CREATE TABLE manual_revisions (id TEXT PRIMARY KEY, manual_id TEXT, rev_number TEXT, source_sha256 TEXT, status_enum TEXT, published_at TEXT)",
+            "CREATE TABLE external_partner_evidence_submissions (id TEXT PRIMARY KEY, amo_id TEXT, related_kind TEXT, related_id TEXT, status TEXT, sha256 TEXT, dms_evidence_asset_id TEXT, dms_retention_id TEXT, tenant_provider_id TEXT, qms_evidence_id TEXT)",
+            "CREATE TABLE document_evidence_assets (id TEXT PRIMARY KEY, tenant_id TEXT, sha256 TEXT)",
+            "CREATE TABLE document_retention_dispositions (id TEXT PRIMARY KEY, source_type TEXT, source_id TEXT, tenant_id TEXT, status TEXT)",
+            "CREATE TABLE external_tenant_providers (id TEXT PRIMARY KEY, amo_id TEXT, supplier_id INTEGER)",
+            "CREATE TABLE quality_external_provider_evidence (id TEXT PRIMARY KEY, amo_id TEXT, supplier_id INTEGER, status TEXT, valid_until DATE)",
+        ):
+            connection.execute(text(statement))
         connection.execute(
             text("""
                 INSERT INTO quality_external_provider_profiles
@@ -44,14 +65,33 @@ def _provider_db() -> Session:
                 VALUES ('profile-1', 'amo-1', 7, 1)
             """)
         )
+        connection.execute(text("UPDATE quality_external_provider_profiles SET review_interval_days=365,last_reviewed_on=:reviewed"),
+            {"reviewed":date.today()})
     return Session(engine)
+
+
+def _seed_valid_contract_original(db: Session) -> None:
+    """Prove the gate permits use only after the actual signed DMS/QMS chain."""
+    statements = (
+        "INSERT INTO manual_tenants (id,amo_id) VALUES ('manual-tenant','amo-1')",
+        "INSERT INTO manuals (id,tenant_id,current_published_rev_id) VALUES ('manual-1','manual-tenant','rev-1')",
+        "INSERT INTO manual_revisions (id,manual_id,rev_number,source_sha256,status_enum,published_at) VALUES ('rev-1','manual-1','1','verified-hash','PUBLISHED','2026-10-18')",
+        "INSERT INTO external_tenant_providers (id,amo_id,supplier_id) VALUES ('provider-1','amo-1',7)",
+        "INSERT INTO quality_external_provider_evidence (id,amo_id,supplier_id,status,valid_until) VALUES ('qms-evidence-1','amo-1',7,'VERIFIED',NULL)",
+        "INSERT INTO document_evidence_assets (id,tenant_id,sha256) VALUES ('asset-1','amo-1','verified-hash')",
+        "INSERT INTO document_retention_dispositions (id,source_type,source_id,tenant_id,status) VALUES ('retention-1','EVIDENCE_ASSET','asset-1','amo-1','ACTIVE')",
+        "INSERT INTO external_partner_evidence_submissions (id,amo_id,related_kind,related_id,status,sha256,dms_evidence_asset_id,dms_retention_id,tenant_provider_id,qms_evidence_id) VALUES ('submission-1','amo-1','CONTRACT','contract-1','ACCEPTED','verified-hash','asset-1','retention-1','provider-1','qms-evidence-1')",
+    )
+    for statement in statements:
+        db.execute(text(statement))
+    db.commit()
 
 
 def _stub_base_supplier_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         supplier_quality_control.service,
         "assert_supplier_eligible",
-        lambda *args, **kwargs: object(),
+        lambda *args, **kwargs: SimpleNamespace(id=7,approved_at=date.today()),
     )
 
 
@@ -80,12 +120,16 @@ def test_current_provider_contract_allows_supplier_use(monkeypatch: pytest.Monke
         db.execute(
             text("""
                 INSERT INTO quality_external_provider_contracts
-                    (id, amo_id, supplier_id, status, effective_on, expires_on)
-                VALUES ('contract-1', 'amo-1', 7, 'ACTIVE', :effective_on, :expires_on)
+                    (id, amo_id, supplier_id, status, effective_on, expires_on,
+                     controlled_document_id, controlled_document_revision,
+                     signed_evidence_submission_id)
+                VALUES ('contract-1', 'amo-1', 7, 'ACTIVE', :effective_on, :expires_on,
+                    'manual-1','rev-1','submission-1')
             """),
             {"effective_on": today - timedelta(days=30), "expires_on": today + timedelta(days=30)},
         )
         db.commit()
+        _seed_valid_contract_original(db)
         supplier_quality_control.assert_supplier_usage_allowed(
             db,
             amo_id="amo-1",
@@ -122,19 +166,22 @@ def test_expired_provider_contract_blocks_supplier_use(monkeypatch: pytest.Monke
         db.close()
 
 
-def test_documented_quality_override_can_cross_contract_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_commercial_override_cannot_bypass_mandatory_signed_quality_agreement(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _provider_db()
     _stub_base_supplier_gate(monkeypatch)
     try:
-        supplier_quality_control.assert_supplier_usage_allowed(
-            db,
-            amo_id="amo-1",
-            supplier_id=7,
-            categories={"PART"},
-            allow_controlled_override=True,
-            override_reference="QMS-OVR-2026-001",
-            override_reason="Aircraft-on-ground controlled exception approved through the PO Quality gate.",
-        )
+        with pytest.raises(HTTPException) as blocked:
+            supplier_quality_control.assert_supplier_usage_allowed(
+                db,
+                amo_id="amo-1",
+                supplier_id=7,
+                categories={"PART"},
+                allow_controlled_override=True,
+                override_reference="QMS-OVR-2026-001",
+                override_reason="Aircraft-on-ground controlled exception approved through the PO Quality gate.",
+            )
+        assert blocked.value.status_code == 409
+        assert "current active contract" in str(blocked.value.detail)
     finally:
         db.close()
 

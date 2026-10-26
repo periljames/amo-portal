@@ -172,7 +172,7 @@ async function sendJson<T>(
     body: JSON.stringify(body ?? {}),
     credentials: "include",
     offline: {
-      queueMutation: false,
+      queueMutation: undefined,
     },
   });
 
@@ -298,7 +298,7 @@ export async function downloadAircraftDocumentFile(
   return downloadWithXhr({
     url: `${API_BASE}/aircraft/documents/${documentId}/download`,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
-    fallbackFilename: `aircraft-document-${documentId}`,
+    fallbackFilename: "aircraft-document",
     onProgress: onProgress ? (loaded, total) => onProgress(buildSpeed(loaded, total, startedAt)) : undefined,
     retries: 2,
   });

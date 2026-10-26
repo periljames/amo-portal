@@ -5,7 +5,8 @@ export type EmailLogStatus =
   | "QUEUED"
   | "SENT"
   | "FAILED"
-  | "SKIPPED_NO_PROVIDER";
+  | "SKIPPED_NO_PROVIDER"
+  | "SKIPPED_BY_PREFERENCE";
 
 export interface EmailLog {
   id: string;
@@ -19,6 +20,10 @@ export interface EmailLog {
   error?: string | null;
   context_json?: Record<string, unknown> | null;
   correlation_id?: string | null;
+  provider?: string | null;
+  provider_message_id?: string | null;
+  delivery_status?: string | null;
+  last_delivery_event_at?: string | null;
 }
 
 type QueryVal = string | number | boolean | null | undefined;

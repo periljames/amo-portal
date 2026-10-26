@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Settings2, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -57,7 +58,7 @@ export default function DocumentControlRecordActions({
         >
           Review assigned change
         </button>
-        {reviewDialogOpen ? <div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewDialogOpen(false); }}>
+        {reviewDialogOpen ? createPortal(<div className="publications-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewDialogOpen(false); }}>
           <section className="publications-upload-dialog" role="dialog" aria-modal="true" aria-label="Assigned document review">
             <header>
               <div><h2>Assigned document review</h2><p>Only decisions granted by the effective governed responsibility are available.</p></div>
@@ -65,7 +66,7 @@ export default function DocumentControlRecordActions({
             </header>
             <DocumentControlLifecycleActions detail={detail} tenant={tenant} activeView="workflow" onChanged={() => { onChanged(); setReviewDialogOpen(false); }} />
           </section>
-        </div> : null}
+        </div>, document.body) : null}
       </>;
     }
     return <>

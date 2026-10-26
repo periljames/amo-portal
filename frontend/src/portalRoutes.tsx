@@ -1,3 +1,5 @@
+import { qmsPageLoaders } from "./app/qmsRouteLoaders";
+import WorkspaceLoading from "./components/shared/WorkspaceLoading";
 import { isTenantAdmin } from "./utils/tenantAccess";
 // src/router.tsx
 // App routing
@@ -155,6 +157,11 @@ const TechnicalRecordsPages = {
 
 
 const LoginPage = lazyDefault(() => import("./pages/LoginPage"));
+const ExternalProviderPortalPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderPortalPage"));
+const ExternalPartnerPage = lazyDefault(() => import("./features/externalPartner/ExternalPartnerPage"));
+const ExternalProviderQualityPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderQualityPage"));
+const QmsSettingsPage = lazyDefault(qmsPageLoaders.settings);
+const ExternalProviderDmsPage = lazyDefault(() => import("./pages/externalProvider/ExternalProviderDmsPage"));
 const PlatformControlPage = lazyDefault(() => import("./pages/PlatformControlPage"));
 const PlatformTenantsPage = lazyDefault(() => import("./pages/platform/PlatformTenantsPage"));
 const PlatformUsersPage = lazyDefault(() => import("./pages/platform/PlatformUsersPage"));
@@ -177,6 +184,7 @@ const AdminInvoicesPage = lazyDefault(() => import("./pages/AdminInvoicesPage"))
 const AdminInvoiceDetailPage = lazyDefault(() => import("./pages/AdminInvoiceDetailPage"));
 const EmailLogsPage = lazyDefault(() => import("./pages/EmailLogsPage"));
 const EmailServerSettingsPage = lazyDefault(() => import("./pages/EmailServerSettingsPage"));
+const QmsMailIdentityPage = lazyDefault(() => import("./pages/qms/QmsMailIdentityPage"));
 const TrainingPage = lazyDefault(() => import("./pages/MyTrainingPage"));
 const TrainingCompetencePage = lazyDefault(() => import("./pages/training/TrainingOperatingSystemPage"));
 const QmsCanonicalPage = lazyDefault(() => import("./pages/qms/QmsCanonicalPage"));
@@ -192,10 +200,10 @@ const PublicCertificateVerificationPage = lazyDefault(() => import("./pages/Publ
 const VerifyScanPage = lazyDefault(() => import("./pages/VerifyScanPage"));
 
 const QualityAuditAssuranceDashboardPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditAssuranceDashboardPage"));
-const QualityAuditsWorkspacePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditsWorkspacePage"));
-const QualityAuditPlanSchedulePage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditPlanSchedulePage"));
-const QualityAuditScopesPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditScopesPage"));
-const QualityAuditRegisterPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRegisterPage"));
+const QualityAuditsWorkspacePage = lazyDefault(qmsPageLoaders.auditWorkspace);
+const QualityAuditPlanSchedulePage = lazyDefault(qmsPageLoaders.auditPlan);
+const QualityAuditScopesPage = lazyDefault(qmsPageLoaders.auditScopes);
+const QualityAuditRegisterPage = lazyDefault(qmsPageLoaders.auditRegister);
 const QualityFindingDetailPage = lazyDefault(() => import("./pages/qualityAudits/QualityFindingDetailPage"));
 const QualityAuditRecycleBinPage = lazyDefault(() => import("./pages/qualityAudits/QualityAuditRecycleBinPage"));
 const QualityAuditScheduleDetailPage = lazyDefault(() => import("./pages/QualityAuditScheduleDetailPage"));
@@ -383,14 +391,7 @@ const RequireFeatureAccess: React.FC<{ feature: ModuleFeature; children: React.R
   return children;
 };
 
-const PageRouteLoading: React.FC<{ label?: string }> = ({ label = "Loading…" }) => (
-  <div className="page-loading" role="status" aria-live="polite">
-    <div className="page-loading__card">
-      <div className="page-loading__spinner" />
-      <div className="page-loading__label">{label}</div>
-    </div>
-  </div>
-);
+const PageRouteLoading: React.FC<{ label?: string }> = ({ label }) => <WorkspaceLoading label={label} />;
 
 type PortalRouteErrorBoundaryInnerProps = {
   children: React.ReactNode;
@@ -465,6 +466,17 @@ export const AppRouter: React.FC = () => {
 
       {/* Platform login */}
       <Route path="/login" element={<LoginPage />} />
+      {/* External principals are authenticated by a separate HttpOnly cookie,
+          never the staff JWT or employee RequireAuth hierarchy. */}
+      <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
+      <Route path="/partner/:tenant/*" element={<ExternalPartnerPage />} />
+      <Route path="/maintenance/:amoCode/quality/external-accounts/*"
+        element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
+
+      {/* Document Control retains authority for external originals, legal hold,
+          and disposition; this route is not subject to unrelated QMS audit roles. */}
+      <Route path="/maintenance/:amoCode/doc-control/provider-evidence"
+        element={<RequireAuth><ExternalProviderDmsPage /></RequireAuth>} />
 
       {/* Platform superuser control plane */}
       <Route
@@ -846,6 +858,14 @@ export const AppRouter: React.FC = () => {
       <Route path="/maintenance/:amoCode/quality/aerodoc/compliance" element={<RequireAuth><RequireQmsPermission permission="qms.document.view"><AeroDocComplianceHealthPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/aerodoc/audit-mode" element={<RequireAuth><RequireQmsPermission permission="qms.audit.execute"><AeroDocAuditModePage /></RequireQmsPermission></RequireAuth>} />
 
+      <Route path="/maintenance/:amoCode/quality/mail-identity/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsMailIdentityPage /></RequireQmsPermission></RequireAuth>} />
+      <Route path="/maintenance/:amoCode/quality/settings/*" element={<RequireAuth><RequireQmsPermission permission="qms.settings.view"><QmsSettingsPage /></RequireQmsPermission></RequireAuth>} />
+
+      {/* Provider scope is a governed cross-functional read surface. Technical
+          and Safety managers may inspect supplier qualification without the
+          broader QMS dashboard capability or any Quality decision rights. */}
+      <Route path="/maintenance/:amoCode/quality/suppliers/*"
+        element={<RequireAuth><RequireQmsPermission permission="qms.supplier.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
       <Route path="/maintenance/:amoCode/quality/*" element={<RequireAuth><RequireQmsPermission permission="qms.dashboard.view"><QmsCanonicalPage /></RequireQmsPermission></RequireAuth>} />
 
       <Route path="/maintenance/:amoCode/reliability/*" element={<RequireAuth><ReliabilityWorkspacePage /></RequireAuth>} />

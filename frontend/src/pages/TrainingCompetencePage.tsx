@@ -1,3 +1,5 @@
+import InlineLoading from "../components/shared/InlineLoading";
+import { sanitizeDownloadFilename } from "../utils/downloads";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarClock, CheckSquare, ClipboardSignature, Download, ExternalLink, FileSpreadsheet, GraduationCap, RefreshCw, ScanLine, Search, ShieldCheck, Upload, Users } from "lucide-react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -239,7 +241,7 @@ function downloadTextFile(content: string, filename: string, contentType = "text
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = sanitizeDownloadFilename(filename);
   link.click();
   window.URL.revokeObjectURL(url);
 }
@@ -1519,7 +1521,7 @@ const TrainingCompetencePage: React.FC<TrainingCompetencePageProps> = ({ embedde
           </div>
         </section>
 
-        {loading ? <section className="tc-panel"><p className="tc-empty">Loading training data…</p></section> : null}
+        {loading ? <section className="tc-panel"><p className="tc-empty"><InlineLoading label={"Loading training data…"}/></p></section> : null}
 
         {!loading && tab === "overview" ? (
           <div className="tc-content-grid">

@@ -182,6 +182,10 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                 <header className={styles.header}>
                   <h1 className={styles.title}>{title}</h1>
                   <p className={styles.subtitle}>{subtitle}</p>
+                  <nav className={styles.switchRow} aria-label="Sign in options">
+                    <span>Staff & QMS</span>
+                    <a href="/vendor/login" className={styles.switchBtn}>Vendor sign in</a>
+                  </nav>
                 </header>
 
                 <form className={styles.form} onSubmit={onSubmit} noValidate autoComplete="on">
@@ -345,6 +349,11 @@ const LoginLayout: React.FC<LoginLayoutProps> = ({
                       ) : null}
                     </div>
                   ) : null}
+                  <div className={styles.switchRow}>
+                    <a href="/vendor/login" className={styles.switchBtn}>
+                      External provider or vendor sign in
+                    </a>
+                  </div>
                 </form>
               </section>
 

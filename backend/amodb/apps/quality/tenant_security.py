@@ -144,6 +144,15 @@ _QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
 }
 
+# Appointed technical/Safety managers may inspect provider qualification and
+# record their own departmental decision through the separate role-guarded API,
+# but receive no blanket Quality approval or audit-edit privilege.
+for _review_role in (
+    "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER",
+    "WORKSHOP_MANAGER", "SAFETY_MANAGER",
+):
+    _QUALITY_ROLE_PERMISSIONS.setdefault(_review_role,set()).add("qms.supplier.view")
+
 _QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"] = {"qms.*"}
 
 # The Accountable Executive has governed oversight visibility, not Quality

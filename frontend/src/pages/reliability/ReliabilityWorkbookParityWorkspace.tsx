@@ -1,7 +1,7 @@
+import InlineLoading from "../../components/shared/InlineLoading";
 import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { listWorkbookCatalog } from "./reliabilityWorkbookParityApi";
 import { ReliabilityManagementReports } from "./ReliabilityManagementReports";
 import { ReliabilityMappingParity, ReliabilityStatisticalAlerts } from "./ReliabilityWorkbookGovernance";
@@ -24,6 +24,8 @@ const SECTIONS: Array<{ id: WorkspaceSection; label: string; description: string
 
 function sectionFromPath(pathname: string): WorkspaceSection {
   const route = pathname.split("/reliability/")[1]?.split("/")[0] || "workbook-registers";
+  if (["workbook-imports", "workbook-csv"].includes(route)) return "mapping";
+  if (route === "management-reports") return "reports";
   return SECTIONS.find((item) => item.route === route)?.id || "registers";
 }
 
@@ -32,6 +34,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const basePath = `/maintenance/${encodeURIComponent(amoCode)}/reliability`;
+  const detailRoute = location.pathname.split("/reliability/")[1]?.split("/")[0] || "workbook-registers";
   const [section, setSection] = useState<WorkspaceSection>(() => sectionFromPath(location.pathname));
   const [catalog, setCatalog] = useState<WorkbookFieldDefinition[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<WorkbookDatasetCode>("AU");
@@ -66,8 +69,7 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
   };
 
   return <ReliabilityWorkbenchProvider>
-    <DepartmentLayout amoCode={amoCode} activeDepartment="reliability">
-      <main className="rel-wp" data-testid="reliability-workbook-parity">
+    <main className="rel-wp" data-testid="reliability-workbook-parity">
         <header className="rel-wp__header">
           <div>
             <p className="rel-wp__eyebrow">Controlled Reliability programme data</p>
@@ -90,16 +92,33 @@ const ReliabilityWorkbookParityWorkspace: React.FC = () => {
           </button>)}
         </nav>
 
-        {loading && <div className="rel-wp__loading" role="status">Loading controlled workbook definitions…</div>}
+        {loading && <div className="rel-wp__loading"><InlineLoading label={"Loading controlled workbook definitions…"}/></div>}
         {error && <div className="rel-wp__error" role="alert">{error}</div>}
         {!loading && !error && <>
           {section === "registers" && <ReliabilityWorkbookRegisters catalog={catalog} selectedDataset={selectedDataset} onDatasetChange={setSelectedDataset} />}
           {section === "alerts" && <ReliabilityStatisticalAlerts catalog={catalog} />}
-          {section === "mapping" && <div className="rel-wp__stack"><ReliabilityStructuredCsvImport catalog={catalog} /><ReliabilityMappingParity catalog={catalog} /><ReliabilityWorkbookImports catalog={catalog} /></div>}
-          {section === "reports" && <div className="rel-wp__stack"><ReliabilityManagementReports /><ReliabilityWorkbookReports /></div>}
+          {section === "mapping" && <>
+            <nav className="rel-wp__task-nav" aria-label="Data intake task">
+              {[["workbook-mapping", "Field mapping"], ["workbook-imports", "Workbook intake"],
+                ["workbook-csv", "CSV staging"]].map(([route, title]) =>
+                <Link key={route} className={detailRoute === route ? "is-active" : ""}
+                  to={basePath + "/" + route}>{title}</Link>)}
+            </nav>
+            {detailRoute === "workbook-imports" ? <ReliabilityWorkbookImports catalog={catalog} /> :
+              detailRoute === "workbook-csv" ? <ReliabilityStructuredCsvImport catalog={catalog} /> :
+              <ReliabilityMappingParity catalog={catalog} />}
+          </>}
+          {section === "reports" && <>
+            <nav className="rel-wp__task-nav" aria-label="Report preparation task">
+              <Link className={detailRoute === "workbook-reports" ? "is-active" : ""}
+                to={basePath + "/workbook-reports"}>Report layouts</Link>
+              <Link className={detailRoute === "management-reports" ? "is-active" : ""}
+                to={basePath + "/management-reports"}>Management reports</Link>
+            </nav>
+            {detailRoute === "management-reports" ? <ReliabilityManagementReports /> : <ReliabilityWorkbookReports />}
+          </>}
         </>}
-      </main>
-    </DepartmentLayout>
+    </main>
   </ReliabilityWorkbenchProvider>;
 };
 

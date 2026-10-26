@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 // src/pages/ehm/EhmUploadsPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -117,7 +118,7 @@ const EhmUploadsPage: React.FC = () => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "ehm-uploads-demo.csv";
+    link.download = sanitizeDownloadFilename("ehm-uploads-demo.csv");
     link.click();
     URL.revokeObjectURL(link.href);
   };

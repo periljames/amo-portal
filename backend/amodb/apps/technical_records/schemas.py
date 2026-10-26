@@ -122,7 +122,7 @@ class AirworthinessItemCreate(BaseModel):
 class TechnicalRecordSettingsRead(BaseModel):
     utilisation_manual_only: bool
     ad_sb_use_hours_cycles: bool
-    record_retention_years: int
+    record_retention_years: int = Field(ge=3, le=100)
     allow_manual_maintenance_records: bool
 
     class Config:

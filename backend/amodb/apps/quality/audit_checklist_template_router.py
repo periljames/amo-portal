@@ -4,11 +4,13 @@ import hashlib
 import json
 import re
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.apps.accounts import models as account_models
@@ -25,14 +27,14 @@ from amodb.database import get_read_db, get_write_db
 
 from . import models
 from .audit_checklist_response_policy import normalise_response_options
-from .audit_checklist_upload_parser import MAX_UPLOAD_BYTES, draft_from_upload
+from .audit_checklist_upload_parser import MAX_UPLOAD_BYTES, CHECKLIST_PARSER_VERSION, draft_from_upload
 from .audit_checklist_template_models import (
     QualityAuditChecklistBinding,
     QualityAuditChecklistMemory,
     QualityAuditChecklistTemplate,
     QualityAuditChecklistTemplateRevision,
 )
-from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
+from .tenant_security import TenantContext, assert_quality_permission, has_quality_permission, require_quality_permission, set_postgres_tenant_context, write_tenant_context
 
 
 router = APIRouter(tags=["Quality audit checklist template governance"])
@@ -117,7 +119,7 @@ class ChecklistBindingCreate(BaseModel):
 class CurrentDocumentChecklistBindingCreate(BaseModel):
     reason: str = Field(min_length=8, max_length=4000)
     allow_existing_items: bool = False
-    response_type: str = Field(min_length=2, max_length=64)
+    response_type: str = Field(default="SOURCE", min_length=2, max_length=64)
     response_options: list[ChecklistResponseOption] = Field(default_factory=list, max_length=12)
 
 
@@ -360,48 +362,25 @@ def _checklist_items_from_revision(
     document: manual_models.Manual,
     revision: manual_models.ManualRevision,
 ) -> list[dict[str, Any]]:
-    sections = db.query(manual_models.ManualSection).filter(
-        manual_models.ManualSection.revision_id == revision.id,
-    ).order_by(manual_models.ManualSection.order_index.asc(), manual_models.ManualSection.id.asc()).all()
-    section_ids = [row.id for row in sections]
-    blocks = db.query(manual_models.ManualBlock).filter(
-        manual_models.ManualBlock.section_id.in_(section_ids or ["-"]),
-    ).order_by(manual_models.ManualBlock.section_id.asc(), manual_models.ManualBlock.order_index.asc()).all()
-    section_by_id = {row.id: row for row in sections}
-    candidates: list[tuple[str, str]] = []
-    for block in blocks:
-        section = section_by_id.get(block.section_id)
-        for raw in str(block.text_plain or "").splitlines():
-            prompt = re.sub(r"\s+", " ", raw).strip(" \t\r\n•☐□")
-            if len(prompt) < 6 or len(prompt) > 4000:
-                continue
-            upper = prompt.upper()
-            if upper.startswith(("ISSUE NO", "REVISION NO", "PAGE ", "THIS PAGE IS INTENTIONALLY")):
-                continue
-            candidates.append((str(section.heading if section else "Checklist"), prompt))
-    # Preserve order but remove repeated page headers and duplicate questions.
-    unique: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for section, prompt in candidates:
-        key = re.sub(r"[^A-Z0-9]+", "", prompt.upper())
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append((section, prompt))
-    if not unique:
-        unique = [("Checklist", f"Complete and retain the attached {document.code} · {document.title} checklist as objective audit evidence.")]
-    return [
-        ChecklistTemplateItem(
-            section=section[:128],
-            checklist_ref=document.code[:128],
-            requirement_ref=document.code[:255],
-            manual_source_ref=f"{document.code} Rev {revision.rev_number}",
-            prompt=prompt,
-            expected_evidence="Record the response and objective evidence against this checklist item.",
-            sort_order=index,
-        ).model_dump()
-        for index, (section, prompt) in enumerate(unique[:500], start=1)
-    ]
+    source = Path(str(getattr(revision, "source_storage_path", "") or ""))
+    if not source.is_file():
+        raise HTTPException(status_code=409, detail={"code": "CHECKLIST_SOURCE_UNAVAILABLE", "message": "The original uploaded checklist is unavailable. Restore its controlled source before selecting this checklist."})
+    filename = str(revision.source_filename or source.name)
+    try:
+        if source.stat().st_size > MAX_UPLOAD_BYTES:
+            raise ValueError("The checklist source exceeds the 10 MB import limit.")
+        data = source.read_bytes()
+        expected_hash = str(revision.source_sha256 or "").strip().lower()
+        if expected_hash and hashlib.sha256(data).hexdigest() != expected_hash:
+            raise HTTPException(409, detail="The uploaded checklist no longer matches its controlled revision checksum.")
+        parsed = draft_from_upload(data, filename)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail={"code": "CHECKLIST_SOURCE_EXTRACTION_FAILED", "message": str(error)}) from error
+    return [ChecklistTemplateItem.model_validate({
+        **item,
+        "manual_source_ref": f"{document.code} Rev {revision.rev_number}",
+        "sort_order": index,
+    }).model_dump() for index, item in enumerate(parsed["items"], 1)]
 
 
 def _source_reference(document: manual_models.Manual, revision: manual_models.ManualRevision, source_system: str = "DOCUMENT_CONTROL") -> dict[str, Any]:
@@ -543,6 +522,12 @@ def _issued_template_for_document(
     response_type_override: str | None = None,
     response_options_override: list[dict[str, Any]] | None = None,
 ) -> tuple[QualityAuditChecklistTemplate, QualityAuditChecklistTemplateRevision]:
+    source_items = None
+    if response_type_override == "SOURCE":
+        source_items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+        if not all(item.get("response_options") for item in source_items):
+            raise HTTPException(422, detail="The uploaded source response columns could not be mapped unambiguously. Review the source and choose an explicit response vocabulary.")
+        response_type_override = None
     template = db.query(QualityAuditChecklistTemplate).filter(
         QualityAuditChecklistTemplate.amo_id == ctx.amo_id,
         QualityAuditChecklistTemplate.canonical_document_id == document.id,
@@ -579,12 +564,18 @@ def _issued_template_for_document(
         and latest.status == "ISSUED"
         and any(
             isinstance(item, dict) and str(item.get("revision_id")) == str(revision.id)
+            and item.get("checklist_parser") in {CHECKLIST_PARSER_VERSION, "REVIEWED_ITEMS_V1"}
             for item in list(latest.source_references or [])
         )
     )
-    if latest_matches_source and not response_type_override:
+    if latest_matches_source and source_items is not None:
+        latest_matches_source = len(latest.items or []) == len(source_items) and all(
+            existing.get("response_options") == source.get("response_options")
+            for existing, source in zip(latest.items, source_items)
+        )
+    if latest_matches_source and not response_type_override and not items_override:
         return template, latest
-    if latest_matches_source and response_type_override:
+    if latest_matches_source and response_type_override and not items_override:
         latest_items = list(latest.items or [])
         latest_type = str(latest_items[0].get("response_type") or "") if latest_items else ""
         latest_options = list(latest_items[0].get("response_options") or []) if latest_items else []
@@ -592,7 +583,7 @@ def _issued_template_for_document(
         if latest_type == response_type_override and latest_options == requested_options:
             return template, latest
 
-    raw_items = items_override or _checklist_items_from_revision(db, document=document, revision=revision)
+    raw_items = items_override or source_items or _checklist_items_from_revision(db, document=document, revision=revision)
     if response_type_override:
         governed_options = normalise_response_options(response_type_override, response_options_override)
         raw_items = [
@@ -604,7 +595,8 @@ def _issued_template_for_document(
             for item in raw_items
         ]
     items = _normalised_items([ChecklistTemplateItem.model_validate(item) for item in raw_items])
-    sources = [_source_reference(document, revision, source_system)]
+    sources = [{**_source_reference(document, revision, source_system),
+                "checklist_parser": "REVIEWED_ITEMS_V1" if items_override else CHECKLIST_PARSER_VERSION}]
     issued = QualityAuditChecklistTemplateRevision(
         amo_id=ctx.amo_id,
         template_id=template.id,
@@ -1018,6 +1010,143 @@ def issue_checklist_revision(
     return _revision_dict(row)
 
 
+class ChecklistSourceRebuild(BaseModel):
+    preview_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str = Field(min_length=8, max_length=2000)
+
+
+def _source_rebuild_plan(db: Session, *, ctx: TenantContext, audit: models.QMSAudit):
+    bindings = db.query(QualityAuditChecklistBinding).filter(
+        QualityAuditChecklistBinding.amo_id == ctx.amo_id, QualityAuditChecklistBinding.audit_id == audit.id,
+    ).order_by(QualityAuditChecklistBinding.applied_at.asc()).all()
+    plans = []
+    for binding in bindings:
+        reference = next((value for value in list(binding.source_references or [])
+            if isinstance(value, dict) and value.get("source_system") == "DOCUMENT_CONTROL"), None)
+        if not reference or reference.get("checklist_parser") in {CHECKLIST_PARSER_VERSION, "REVIEWED_ITEMS_V1"}:
+            continue
+        document = db.query(manual_models.Manual).filter(manual_models.Manual.id == reference.get("document_id")).first()
+        revision = db.query(manual_models.ManualRevision).filter(
+            manual_models.ManualRevision.id == reference.get("revision_id"),
+            manual_models.ManualRevision.manual_id == reference.get("document_id"),
+        ).first()
+        tenant = _manual_tenant(db, ctx.amo_id)
+        if document is None or revision is None or tenant is None or document.tenant_id != tenant.id:
+            raise HTTPException(409, detail="The bound checklist source cannot be established in this AMO.")
+        profile = db.query(doc_control_models.DocumentControlProfile).filter(
+            doc_control_models.DocumentControlProfile.tenant_id == ctx.amo_id,
+            doc_control_models.DocumentControlProfile.manual_id == document.id,
+        ).first()
+        if not can_read_manual(_active_user(db, ctx), profile):
+            raise HTTPException(403, detail="The controlled checklist source is restricted.")
+        parsed = _checklist_items_from_revision(db, document=document, revision=revision)
+        plans.append((binding, document, revision, parsed))
+    return plans
+
+
+def _checklist_rebuild_blocker(db: Session, *, amo_id: str, audit_id: uuid.UUID) -> str | None:
+    from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance, QualityAuditFieldworkMutationReceipt
+    from .audit_evidence_models import QualityAuditEvidenceArtifact
+    rows = db.query(models.QualityAuditChecklistItem).filter(
+        models.QualityAuditChecklistItem.amo_id == amo_id, models.QualityAuditChecklistItem.audit_id == audit_id,
+    ).all()
+    if any(row.response_status != "PENDING" or row.objective_evidence or row.finding_id or row.completed_at for row in rows):
+        return "Recorded answers, evidence or findings exist. Reconcile them through a reviewed checklist revision; automatic replacement is unavailable."
+    for model in (QualityAuditChecklistExecutionGovernance, QualityAuditFieldworkMutationReceipt, QualityAuditEvidenceArtifact):
+        if db.query(model).filter(model.amo_id == amo_id, model.audit_id == audit_id).first() is not None:
+            return "Fieldwork or evidence has already been recorded. Existing audit history must be preserved."
+    return None
+
+
+def _source_preview(plans):
+    documents = [{"binding_id": str(binding.id), "document_code": document.code,
+        "filename": revision.source_filename, "revision_id": str(revision.id),
+        "previous_count": len(binding.instantiated_item_ids or []), "question_count": len(items),
+        "items": items} for binding, document, revision, items in plans]
+    # Generated item ids are deliberately excluded: this token identifies source
+    # wording, order and the original binding, rather than a parser invocation.
+    stable = [{**document, "binding_sha256": binding.content_sha256,
+        "items": [{key: value for key, value in item.items() if key != "item_id"} for item in document["items"]]}
+        for document, (binding, _, _, _) in zip(documents, plans)]
+    digest = hashlib.sha256(json.dumps(stable, sort_keys=True, default=str).encode()).hexdigest()
+    return documents, digest
+
+
+@router.get("/audits/{audit_id}/checklist-bindings/source-review")
+def review_checklist_source(audit_id: uuid.UUID, ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")), db: Session = Depends(get_write_db)):
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    plans = _source_rebuild_plan(db, ctx=ctx, audit=audit)
+    documents, digest = _source_preview(plans)
+    blocker = _checklist_rebuild_blocker(db, amo_id=ctx.amo_id, audit_id=audit.id)
+    if audit.actual_end is not None or str(getattr(audit.status, "value", audit.status)).upper() == "CLOSED":
+        blocker = "This audit is closed or fieldwork is complete."
+    return {"documents": documents, "preview_sha256": digest, "can_rebuild": bool(plans) and blocker is None,
+        "can_manage": has_quality_permission(db, ctx, "qms.audit.manage"), "blocker": blocker}
+
+
+@router.post("/audits/{audit_id}/checklist-bindings/rebuild-source")
+def rebuild_checklist_from_source(audit_id: uuid.UUID, payload: ChecklistSourceRebuild, ctx: TenantContext = Depends(write_tenant_context), db: Session = Depends(get_write_db)):
+    from .audit_preparation_models import QualityAuditPreparationRevision, QualityAuditPreparationEvent
+    from .audit_preparation_router import _capture_sources
+    from amodb.apps.audit import services as audit_services
+    assert_quality_permission(db, ctx, "qms.audit.manage")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    audit = _audit(db, amo_id=ctx.amo_id, audit_id=audit_id, lock=True)
+    _assert_checklist_can_change(audit)
+    # The execution writer locks checklist rows, so take the same locks before
+    # checking for recorded work; no answer may commit between check and replace.
+    db.query(models.QualityAuditChecklistItem).filter(
+        models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
+        models.QualityAuditChecklistItem.audit_id == audit.id,
+    ).order_by(models.QualityAuditChecklistItem.id.asc()).with_for_update().all()
+    blocker = _checklist_rebuild_blocker(db, amo_id=ctx.amo_id, audit_id=audit.id)
+    if blocker:
+        raise HTTPException(409, detail=blocker)
+    plans = _source_rebuild_plan(db, ctx=ctx, audit=audit)
+    _, digest = _source_preview(plans)
+    if not plans or digest != payload.preview_sha256:
+        raise HTTPException(409, detail="The checklist source changed. Reload the source preview before rebuilding.")
+    before = [_binding_dict(binding) for binding, _, _, _ in plans]
+    rebuilt = []
+    for binding, document, source, items in plans:
+        ids = [uuid.UUID(str(value)) for value in binding.instantiated_item_ids or []]
+        for row in db.query(models.QualityAuditChecklistItem).filter(
+            models.QualityAuditChecklistItem.amo_id == ctx.amo_id,
+            models.QualityAuditChecklistItem.audit_id == audit.id,
+            models.QualityAuditChecklistItem.id.in_(ids),
+        ).with_for_update().all():
+            db.delete(row)
+        db.delete(binding)
+        db.flush()
+        template, revision = _issued_template_for_document(db, ctx=ctx, audit=audit, document=document, revision=source, items_override=items)
+        rebuilt.append(_instantiate_binding(db, ctx=ctx, audit=audit, template=template, revision=revision,
+            reason=payload.reason, allow_existing_items=True))
+    db.flush()
+    latest = db.query(QualityAuditPreparationRevision).filter(
+        QualityAuditPreparationRevision.amo_id == ctx.amo_id, QualityAuditPreparationRevision.audit_id == audit.id,
+    ).order_by(QualityAuditPreparationRevision.revision_no.desc()).with_for_update().first()
+    captured = _capture_sources(db, amo_id=ctx.amo_id, audit=audit)
+    if latest is not None and latest.status == "DRAFT":
+        for key, value in captured.items():
+            setattr(latest, key, value)
+        preparation = latest
+    else:
+        preparation = QualityAuditPreparationRevision(amo_id=ctx.amo_id, audit_id=audit.id,
+            revision_no=latest.revision_no + 1 if latest else 1, status="DRAFT", **captured,
+            change_reason=payload.reason, supersedes_revision_id=str(latest.id) if latest else None, created_by_user_id=ctx.user_id)
+        db.add(preparation)
+    db.flush()
+    db.add(QualityAuditPreparationEvent(amo_id=ctx.amo_id, audit_id=audit.id, revision_id=preparation.id,
+        event_type="CREATED", reason=payload.reason, actor_user_id=ctx.user_id))
+    audit_services.log_event(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, entity_type="QMSAudit",
+        entity_id=str(audit.id), action="CHECKLIST_SOURCE_REBUILT", before=jsonable_encoder({"bindings": before}),
+        after=jsonable_encoder({"bindings": [_binding_dict(binding) for binding in rebuilt]}), metadata={"parser": CHECKLIST_PARSER_VERSION}, critical=True)
+    db.commit()
+    return {"question_count": sum(len(binding.instantiated_item_ids) for binding in rebuilt),
+        "preparation_revision_id": str(preparation.id), "requires_preparation_issue": True}
+
+
 @router.get("/audits/{audit_id}/checklist-bindings")
 def list_checklist_bindings(
     audit_id: uuid.UUID,
@@ -1179,10 +1308,11 @@ def bind_current_dms_checklist(
     if revision is None:
         raise HTTPException(status_code=409, detail="This DMS document has no current effective revision. Complete Document Control approval first.")
     try:
-        normalise_response_options(
-            payload.response_type,
-            [item.model_dump() for item in payload.response_options],
-        )
+        if payload.response_type != "SOURCE":
+            normalise_response_options(
+                payload.response_type,
+                [item.model_dump() for item in payload.response_options],
+            )
     except ValueError as exc:
         raise HTTPException(
             status_code=422,

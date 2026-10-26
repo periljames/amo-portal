@@ -64,10 +64,13 @@ function readStoredScale(storageKey: string): PortalTextScale {
 function applyScale(scale: PortalTextScale): void {
   if (typeof document === "undefined") return;
   const option = SCALE_OPTIONS.find((candidate) => candidate.id === scale) || SCALE_OPTIONS[0];
-  document.documentElement.dataset.portalTextScale = option.id;
-  document.body.dataset.portalTextScale = option.id;
-  document.documentElement.style.setProperty("--portal-text-scale", String(option.multiplier));
-  document.body.style.setProperty("--portal-text-scale", String(option.multiplier));
+  for (const element of [document.documentElement, document.body]) {
+    if (element.dataset.portalTextScale !== option.id) element.dataset.portalTextScale = option.id;
+    const multiplier = String(option.multiplier);
+    if (element.style.getPropertyValue("--portal-text-scale") !== multiplier) {
+      element.style.setProperty("--portal-text-scale", multiplier);
+    }
+  }
 }
 
 const PortalTextScalePreferenceScope: React.FC<PortalTextScalePreferenceScopeProps> = ({ storageKey }) => {

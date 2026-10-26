@@ -1,3 +1,4 @@
+import { sanitizeDownloadFilename } from "../../utils/downloads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -76,7 +77,7 @@ function downloadCsv(filename: string, headings: string[], rows: unknown[][]): v
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -123,7 +124,7 @@ function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = sanitizeDownloadFilename(filename);
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

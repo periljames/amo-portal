@@ -18,6 +18,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
+from .utils.download_headers import DownloadFilenameMiddleware
+
 from .database import (
     Base,
     engine,
@@ -26,7 +28,7 @@ from .database import (
     dispose_engines,
     probe_database,
 )
-from .database_resilience import database_circuit
+from .database_resilience import database_circuit, is_database_disconnect
 from .db_capacity import connection_budget, validate_connection_budget
 from .query_metrics import begin_counting, end_counting, query_count
 from .security import (
@@ -39,6 +41,18 @@ from .security import (
 from .apps.accounts import models as accounts_models
 
 from .apps.accounts.router_public import router as accounts_public_router
+from .apps.procurement.external_auth_router import router as external_provider_router, quality_router as external_provider_quality_router
+from .apps.procurement.external_partner_router import router as external_partner_router, quality_router as external_partner_quality_router
+from .apps.quality.provider_qualification_router import router as external_qualification_router
+from .apps.quality.provider_oversight_router import router as external_provider_oversight_router
+from .apps.procurement.external_provider_documents_router import (
+    partner_documents_router, staff_documents_router,
+)
+from .apps.procurement.external_procurement_router import (
+    partner_router as partner_commerce_router, staff_router as staff_commerce_router,
+)
+from .apps.procurement.external_contracted_work_router import (partner_router as partner_maintenance_work_router, staff_router as staff_maintenance_work_router)
+from .apps.procurement.provider_alerts_router import router as staff_provider_alerts_router, partner_router as partner_alert_preferences_router
 from .apps.accounts.router_admin import router as accounts_admin_router
 from .apps.accounts.router_modules_admin import router as accounts_modules_router
 from .apps.accounts.router_amo_assets import router as accounts_amo_assets_router
@@ -116,6 +130,8 @@ def _allowed_origins() -> List[str]:
 
 
 app = FastAPI(title="AMO Portal API", version="1.0.0")
+
+app.add_middleware(DownloadFilenameMiddleware)
 app.state.is_shutting_down = False
 cors_origins = _allowed_origins()
 cors_origin_regex = (os.getenv("CORS_ALLOWED_ORIGIN_REGEX") or "").strip()
@@ -469,6 +485,10 @@ async def meter_api_calls(request: Request, call_next):
         status_code = 503
         response = _pool_timeout_response()
     except OperationalError as exc:
+        # SQL errors such as deadlocks and missing module tables do not prove
+        # that the shared database is unavailable.
+        if not exc.connection_invalidated and not is_database_disconnect(exc.orig):
+            raise
         timeout_error = True
         status_code = 503
         if database_circuit.mark_failure(exc):
@@ -555,7 +575,7 @@ def health():
     return {"status": "ok"}
 
 @app.get("/livez", tags=["health"])
-def livez():
+async def livez():
     """Process liveness only; never claims that PostgreSQL is ready."""
     return {"status": "alive", "process": True}
 
@@ -636,7 +656,10 @@ def _readiness_response() -> JSONResponse:
     jobs_ok = not job_runtime["enabled"] or (
         job_runtime["running"] and bool(worker_families) and all(worker_families.values())
     )
-    healthy = db_ok and migrations_ok and jobs_ok
+    # Background worker families report their own faults. Routing the entire
+    # API out of service for one stopped worker prevents healthy modules and
+    # offline replay from recovering.
+    healthy = db_ok and migrations_ok
     circuit = database_circuit.snapshot()
     payload = {
         "status": "ok" if healthy else "degraded",
@@ -650,6 +673,7 @@ def _readiness_response() -> JSONResponse:
         "retryable": not healthy,
         "broker": realtime_gateway.health(),
         "jobs": job_runtime,
+        "jobs_ready": jobs_ok,
         "database_circuit": circuit,
         "connection_budget": connection_budget().payload(),
     }
@@ -713,6 +737,21 @@ apply_module_access_boundary(technical_records_router, "technical_records")
 apply_module_access_boundary(aerodoc_router, "documents")
 
 app.include_router(accounts_public_router)
+# External principals have isolated opaque-cookie sessions; never staff JWTs.
+app.include_router(external_provider_router)
+app.include_router(external_provider_quality_router)
+app.include_router(external_partner_router)
+app.include_router(external_partner_quality_router)
+app.include_router(external_qualification_router)
+app.include_router(external_provider_oversight_router, dependencies=[Depends(require_module_access("quality"))])
+app.include_router(partner_documents_router)
+app.include_router(staff_documents_router)
+app.include_router(partner_commerce_router)
+app.include_router(staff_commerce_router, dependencies=[Depends(require_any_module_access("procurement", "finance_inventory"))])
+app.include_router(partner_maintenance_work_router)
+app.include_router(partner_alert_preferences_router)
+app.include_router(staff_provider_alerts_router, dependencies=[Depends(require_any_module_access("quality", "procurement", "maintenance", "stores"))])
+app.include_router(staff_maintenance_work_router, dependencies=[Depends(require_any_module_access("maintenance", "quality", "stores", "documents"))])
 app.include_router(platform_router)
 app.include_router(training_workbook_support_router)
 app.include_router(ai_router)

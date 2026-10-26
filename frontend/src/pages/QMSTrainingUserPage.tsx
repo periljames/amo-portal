@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import type { ColDef, FirstDataRenderedEvent, GridReadyEvent, GridSizeChangedEvent, ICellRendererParams } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { ArrowLeft, CalendarDays, Clock3, FolderOpen, GraduationCap, Package, ShieldCheck, Download, FileImage, FileText, Plus, X } from "lucide-react";
@@ -1318,7 +1319,7 @@ const QMSTrainingUserPage: React.FC = () => {
       <div className="training-module training-module--qms training-profile-page">
         {state === "loading" && (
           <div className="card card--info">
-            <p>Loading training profile...</p>
+            <p><InlineLoading label={"Loading training profile..."}/></p>
           </div>
         )}
 
@@ -1843,7 +1844,7 @@ const QMSTrainingUserPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="training-file-viewer__body">
-                        {viewerLoading ? <p className="text-muted">Loading attachment...</p> : null}
+                        {viewerLoading ? <p className="text-muted"><InlineLoading label={"Loading attachment..."}/></p> : null}
                         {viewerBlobUrl && ((viewerFile.content_type || "").includes("pdf") || viewerFile.original_filename.toLowerCase().endsWith(".pdf")) ? (
                           <iframe title={viewerFile.original_filename} src={viewerBlobUrl} style={{ width: "100%", height: "78vh", border: "none" }} />
                         ) : viewerBlobUrl ? (

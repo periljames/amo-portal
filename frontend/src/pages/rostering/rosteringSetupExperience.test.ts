@@ -44,6 +44,10 @@ const depthSource = readFileSync(
   new URL("../../styles/theme-depth.css", import.meta.url),
   "utf8",
 );
+const paletteSource = readFileSync(
+  new URL("../../styles/tokens.css", import.meta.url),
+  "utf8",
+);
 const layoutSafetySource = readFileSync(
   new URL("../../styles/foundations/layout-safety.css", import.meta.url),
   "utf8",
@@ -116,7 +120,10 @@ describe("rostering setup experience", () => {
   });
 
   it("adds portal-wide dark surface separation without changing status colours", () => {
-    expect(depthSource).toContain("--surface-elevated: rgba(43, 45, 49, 0.94)");
+    // Semantic surfaces are defined once in tokens.css, not duplicated as a
+    // stale literal in the last-loaded depth stylesheet.
+    expect(paletteSource).toMatch(/--surface-elevated:\s*#[0-9a-f]{6}/i);
+    expect(depthSource).toContain("Palette and shared elevation tokens are owned by tokens.css.");
     expect(depthSource).toContain("graphite translucency");
     expect(depthSource).toContain(".wr-panel");
     expect(depthSource).toContain(".qms-panel");

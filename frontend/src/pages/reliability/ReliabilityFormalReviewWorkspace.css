@@ -183,3 +183,8 @@
   .rfw-effectivity-input { min-width: 100%; }
   .rfw-editor-row { grid-template-columns: 1fr; }
 }
+
+.rfw-create-drawer { margin: 0 0 1rem; border-radius: .6rem; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
+.rfw-create-drawer > summary { cursor: pointer; font-size: .9rem; font-weight: 720; padding: .85rem 1rem; background: Canvas; }
+.rfw-create-drawer[open] > summary { border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); }
+.rfw-create-drawer .rfw-create { margin: 0; border: 0; }

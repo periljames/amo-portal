@@ -1,3 +1,5 @@
+import Pagination from "../../components/shared/Pagination";
+import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 // src/pages/qms/QmsModuleWorkspacePage.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -81,6 +83,7 @@ type ModuleMeta = {
 type QmsSourceError = { label: string; message: string; type?: string };
 
 type QmsModuleResponse = {
+  total?: number;
   module?: string;
   view?: string;
   table?: string;
@@ -787,24 +790,6 @@ function ModuleNavigation({ amoCode, activeKey }: { amoCode: string; activeKey: 
   );
 }
 
-function ActionTabs({ amoCode, module, currentPath }: { amoCode: string; module: ModuleMeta; currentPath: string }): React.ReactElement {
-  const actions = [module.primary, ...module.actions];
-  return (
-    <div className="qms-ops-action-tabs" role="tablist" aria-label={`${module.shortTitle} views`}>
-      {actions.map((action) => {
-        const url = routeToUrl(amoCode, action.path);
-        const active = currentPath === url || currentPath.startsWith(`${url}/`);
-        return (
-          <NavLink key={`${action.label}-${action.path}`} to={url} className={`qms-ops-action-tab qms-ops-action-tab--${action.tone || "default"}${active ? " is-active" : ""}`}>
-            <span>{action.label}</span>
-            <ArrowRight size={14} />
-          </NavLink>
-        );
-      })}
-    </div>
-  );
-}
-
 function LifecycleRunway({ amoCode, steps }: { amoCode: string; steps: LifecycleStep[] }): React.ReactElement {
   return (
     <div className="qms-ops-runway" aria-label="Workflow runway">
@@ -945,12 +930,7 @@ function CreateRecordPanel({ amoCode, module, view, onCreated }: { amoCode: stri
 }
 
 function LoadingPanel({ label }: { label: string }): React.ReactElement {
-  return (
-    <div className="qms-ops-loading-card">
-      <RefreshCw size={18} />
-      <span>{label}</span>
-    </div>
-  );
+  return <WorkspaceLoading label={label} compact />;
 }
 
 function SourceErrorsNotice({ errors }: { errors?: QmsSourceError[] }): React.ReactElement | null {
@@ -1552,7 +1532,7 @@ function WorkspacePanel({
   onStatusChange: (value: string) => void;
   onPageSizeChange: (value: number) => void;
   onRetry: () => void;
-  onPage: (direction: "next" | "prev") => void;
+  onPage: (direction: "next" | "prev" | number) => void;
   calendarDateKey: string;
   onCalendarDateChange: (value: string) => void;
 }): React.ReactElement {
@@ -1592,7 +1572,6 @@ function WorkspacePanel({
           <div><span>Trace</span><strong>{data?.trace_id || "—"}</strong></div>
           <ModuleBadge mode={module.mode} />
         </div>
-        <ActionTabs amoCode={amoCode} module={module} currentPath={window.location.pathname} />
         <div className="qms-ops-filter-bar">
           <label className="qms-ops-search"><Search size={16} /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search this QMS view" /></label>
           <label><span>Status</span><select value={statusFilter} onChange={(event) => onStatusChange(event.target.value)}><option value="">All</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label>
@@ -1611,11 +1590,7 @@ function WorkspacePanel({
             {state !== "loading" && !error ? <RecordTable amoCode={amoCode} module={module} rows={rows} response={data} /> : null}
           </>
         )}
-        <div className="qms-ops-pagination">
-          <Button variant="secondary" size="sm" disabled={offset <= 0 || state === "loading"} onClick={() => onPage("prev")}>Previous</Button>
-          <span>{data?.elapsed_ms != null ? `${data.elapsed_ms} ms backend` : "Backend timing pending"}</span>
-          <Button variant="secondary" size="sm" disabled={!data?.has_more || state === "loading"} onClick={() => onPage("next")}>Next</Button>
-        </div>
+        <Pagination label={module.sourceLabel} page={currentPage} pageSize={limit} visibleCount={rows.length} total={data?.total ?? (data?.has_more ? undefined : offset+rows.length)} hasNext={Boolean(data?.has_more)} busy={state === "loading"} onPageChange={onPage} />
       </SectionCard>
 
       <SectionCard title="Workflow runway" subtitle="Stepwise work pans horizontally. Pick the next task without scrolling through dead content." variant="subtle">
@@ -1649,9 +1624,6 @@ function CockpitWorkspace({ amoCode, dashboard, loading }: { amoCode: string; da
           <Link to={routeToUrl(amoCode, "documents/library")}><FileText size={16} /> Draft documents <strong>{counterValue(dashboard, "draft_documents")}</strong></Link>
           <Link to={routeToUrl(amoCode, "training-competence/overdue")}><Users size={16} /> Expired training <strong>{counterValue(dashboard, "training_expired_records")}</strong></Link>
         </div>
-      </SectionCard>
-      <SectionCard title="Direct actions" subtitle="No separate Quality and QMS surfaces." variant="subtle">
-        <ActionTabs amoCode={amoCode} module={MODULE_BY_KEY.cockpit} currentPath={window.location.pathname} />
       </SectionCard>
     </div>
   );
@@ -1809,8 +1781,8 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
     void loadModule({ force: true });
   };
 
-  const page = (direction: "next" | "prev") => {
-    const nextOffset = direction === "next" ? (moduleData?.next_offset ?? offset + pageSize) : Math.max(0, offset - pageSize);
+  const page = (direction: "next" | "prev" | number) => {
+    const nextOffset = typeof direction === "number" ? (direction-1)*pageSize : direction === "next" ? (moduleData?.next_offset ?? offset + pageSize) : Math.max(0, offset - pageSize);
     setParam("offset", String(nextOffset));
   };
 

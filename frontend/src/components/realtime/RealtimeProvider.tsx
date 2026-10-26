@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { getApiBaseUrl } from "../../services/config";
-import { clearQmsApiResponseCache } from "../../services/apiClient";
+import { clearApiResponseCache } from "../../services/apiClient";
+import { queryMatchesRealtimeMarkers, realtimeQueryMarkers } from "../../services/portalRealtimeInvalidation";
 import { getCachedUser, getContext, getToken, onSessionEvent } from "../../services/auth";
 import { playNotificationChirp, pushDesktopNotification } from "../../services/notificationPreferences";
 import { fetchHealthz, fetchServerTime, RealtimeHttpError } from "../../services/realtime/api";
@@ -102,27 +103,36 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const ctx = getContext();
   const cachedUser = getCachedUser();
   const isPlatformUser = Boolean(cachedUser?.is_superuser && !cachedUser?.amo_id);
-  const lastEventKey = `amo:last-event-id:${ctx.amoCode || "unknown"}`;
+  const lastEventKey = `amo:last-event-id:${cachedUser?.id || "anonymous"}:${ctx.amoCode || "unknown"}`;
   const lastPortalActivityRef = useRef(Date.now());
   const presenceStateRef = useRef<"online" | "away">("online");
   const presenceAuthRejectedRef = useRef(false);
   const qmsInvalidateTimerRef = useRef<number | null>(null);
+  const pendingInvalidationMarkers = useRef(new Set<string>());
+  const deliveredEventIds = useRef(new Set<string>());
+  useEffect(() => {
+    deliveredEventIds.current.clear();
+    pendingInvalidationMarkers.current.clear();
+    setActivity([]);
+  }, [lastEventKey]);
 
   const isStale = !isOnline || (status === "offline" && !lastGoodServerTime);
 
-  const scheduleQmsInvalidate = useCallback(() => {
+  const schedulePortalInvalidate = useCallback((markers: string[]) => {
+    markers.forEach((marker) => pendingInvalidationMarkers.current.add(marker));
     if (qmsInvalidateTimerRef.current != null) return;
     qmsInvalidateTimerRef.current = window.setTimeout(() => {
       qmsInvalidateTimerRef.current = null;
-      clearQmsApiResponseCache();
+      const changed = [...pendingInvalidationMarkers.current];
+      pendingInvalidationMarkers.current.clear();
+      clearApiResponseCache();
       void queryClient.invalidateQueries({
         predicate: (query) => {
-          const marker = query.queryKey.map((part) => String(part)).join(":").toLowerCase();
-          return ["qms", "quality", "audit", "finding", "car", "training"].some((value) => marker.includes(value));
+          return queryMatchesRealtimeMarkers(query.queryKey, changed);
         },
         refetchType: "active",
       });
-    }, 1_200);
+    }, 250);
   }, [queryClient]);
 
   const serverNow = useCallback(() => {
@@ -186,7 +196,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const cursor = transportCursor?.trim() || event.id?.trim();
     if (!cursor) return;
 
-    window.localStorage.setItem(lastEventKey, cursor);
+    try { window.localStorage.setItem(lastEventKey, cursor); } catch { /* A blocked cursor store must not suppress live updates. */ }
+    if (deliveredEventIds.current.has(event.id)) return;
+    deliveredEventIds.current.add(event.id);
+    if (deliveredEventIds.current.size > MAX_ACTIVITY) {
+      deliveredEventIds.current.delete(deliveredEventIds.current.values().next().value!);
+    }
     setStatus("live");
     setLastUpdated(new Date(Date.parse(event.timestamp) || Date.now()));
     setStaleSeconds(0);
@@ -194,7 +209,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     playNotificationChirp();
     void pushDesktopNotification("Realtime event", `${event.type} ${event.action}`);
     queryClient.invalidateQueries({ queryKey: ["activity-history", ctx.amoCode || "unknown", ctx.department || "quality"] });
-    const invalidatesQms = /qms|quality|audit|finding|car|capa|training/i.test(`${event.type} ${event.entityType} ${event.action}`);
+    const markers = realtimeQueryMarkers(event);
+    const invalidatesQms = markers.includes("qms");
     if (invalidatesQms) {
       // Bridge to Quality audit workspaces so they do not open a second /api/events stream.
       publishQmsRealtimeEvent({ id: event.id, event: event.type, data: event });
@@ -203,9 +219,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const onAuditOccurrence = /\/(?:quality|qms)\/audits\/[^/]+\/(?:setup|prepare|live|closing|follow-up|archive)/i.test(
         window.location.pathname,
       );
-      if (!onAuditOccurrence) scheduleQmsInvalidate();
+      if (!onAuditOccurrence) schedulePortalInvalidate(markers);
+    } else {
+      if (markers.length) schedulePortalInvalidate(markers);
     }
-  }, [ctx.amoCode, ctx.department, lastEventKey, queryClient, scheduleQmsInvalidate]);
+  }, [ctx.amoCode, ctx.department, lastEventKey, queryClient, schedulePortalInvalidate]);
 
   const connectSse = useCallback(() => {
     controllerRef.current?.abort();
@@ -228,7 +246,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    const persisted = typeof window !== "undefined" ? window.localStorage.getItem(lastEventKey) : null;
+    let persisted: string | null = null;
+    try { persisted = window.localStorage.getItem(lastEventKey); } catch { /* Replay can reconnect without a stored cursor. */ }
     setStatus("syncing");
     publishQmsRealtimeState("reconnecting");
     const controller = new AbortController();
@@ -267,7 +286,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             buffer = buffer.slice(splitIndex + 2);
             const parsedBlock = parseSseBlock(block);
             if (parsedBlock?.event === "reset") {
-              window.localStorage.removeItem(lastEventKey);
+              try { window.localStorage.removeItem(lastEventKey); } catch { /* Optional cursor storage. */ }
+              clearApiResponseCache();
+              void queryClient.invalidateQueries({ refetchType: "active" });
               let resetPayload: unknown = { type: "reset" };
               try { resetPayload = JSON.parse(parsedBlock.data); } catch { /* keep default */ }
               publishQmsRealtimeEvent({ event: "reset", data: resetPayload });

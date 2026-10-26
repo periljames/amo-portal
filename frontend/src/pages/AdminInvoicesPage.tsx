@@ -1,3 +1,4 @@
+import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -166,7 +167,7 @@ const AdminInvoicesPage: React.FC = () => {
           <Panel title="Invoice filters" subtitle="Pick the tenant and refresh the list.">
             {currentUser?.is_superuser && (
               <>
-                {loadingAmos && <p>Loading AMOs…</p>}
+                {loadingAmos && <p><InlineLoading label={"Loading AMOs…"}/></p>}
                 {amoError && (
                   <InlineAlert tone="danger" title="Error">
                     <span>{amoError}</span>
@@ -212,7 +213,7 @@ const AdminInvoicesPage: React.FC = () => {
                 <span>{error}</span>
               </InlineAlert>
             )}
-            {loading && <p>Loading invoices…</p>}
+            {loading && <p><InlineLoading label={"Loading invoices…"}/></p>}
             {!loading && invoices.length === 0 && (
               <p className="text-muted">No invoices available.</p>
             )}
