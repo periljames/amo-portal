@@ -64,6 +64,18 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Quality review could not be saved."); }
     finally { setBusy(null); }
   };
+  // A newly issued CAR may not yet have an RCA document, and older
+  // API/mocked responses may omit newly added projection fields.
+  // Keep the record readable without treating a partial response as an
+  // approved investigation or silently substituting a fabricated RCA.
+  const investigation = data?.submitted_snapshot?.investigation ?? data?.draft?.investigation;
+  const causes = (investigation?.investigations ?? []).flatMap(method => method.nodes ?? [])
+    .filter(node => node.entry_type === "CAUSAL_CONCLUSION");
+  const actions = data?.actions ?? [];
+  const retained = data?.retained_responses ?? [];
+  const events = data?.action_events ?? [];
+  const revisions = data?.history ?? [];
+
   return <section className="case-section car-rca-internal" aria-label="Structured CAR investigation and Quality action review">
     <h3>Structured investigation and corrective action assurance</h3>
     {loading && <p role="status">Loading documented investigation…</p>}
@@ -72,8 +84,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
       <p>Investigation revision {data.revision}. Submitted revision: {data.submitted_revision ?? "not yet submitted"}.
         {data.submitted_at ? ` Submitted ${new Date(data.submitted_at).toLocaleString()}.` : ""}
         Proposed causes are not automatically accepted by Quality.</p>
-      {data.revision ? <CarRcaWorkbench
-        value={data.submitted_snapshot?.investigation || data.draft.investigation}
+      {data.revision && investigation ? <CarRcaWorkbench
+        value={investigation}
         disabled onChange={() => undefined} onSave={() => undefined}
         saveState="Controlled record — reviewer read only" /> :
         <p>Only legacy free-text RCA is available for this CAR. No new structured analysis has been recorded.</p>}
@@ -94,11 +106,9 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
         </div>
         <label className="car-rca-field">Action description<textarea rows={3} maxLength={8000} value={newAction.description}
           onChange={event => setNewAction(current => ({ ...current, description: event.target.value }))}/></label>
-        {data.draft.investigation.investigations.flatMap(method => method.nodes)
-          .filter(node => node.entry_type === "CAUSAL_CONCLUSION").length > 0 &&
+        {causes.length > 0 &&
           <fieldset><legend>Documented causes addressed</legend>
-            {data.draft.investigation.investigations.flatMap(method => method.nodes)
-              .filter(node => node.entry_type === "CAUSAL_CONCLUSION").map(cause => <label key={cause.id} className="car-rca-check">
+            {causes.map(cause => <label key={cause.id} className="car-rca-check">
                 <input type="checkbox" checked={newAction.cause_node_ids.includes(cause.id)}
                   onChange={event => setNewAction(current => ({
                     ...current, cause_node_ids: event.target.checked
@@ -111,9 +121,9 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
           onClick={() => void submitInternalAction()}>{creating ? "Recording…" : "Create governed action"}</button>
       </div>}
       <div className="car-rca-table-scroll"><table>
-        <caption>Individually governed corrective and preventive actions — {data.actions.length}</caption>
+        <caption>Individually governed corrective and preventive actions — {actions.length}</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
-        <tbody>{data.actions.map(action => <tr key={action.id}>
+        <tbody>{actions.map(action => <tr key={action.id}>
           <td><strong>{action.action_number} · {action.kind}</strong><p>{action.description}</p></td>
           <td>{action.external_owner_name || action.owner_user_id || "Unassigned"}<p>{action.target_date || "No due date"}</p></td>
           <td>{action.state.replaceAll("_", " ")}{action.completion_note && <p>{action.completion_note}</p>}</td>
@@ -132,10 +142,10 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
             </div>}
           </td></tr>)}</tbody>
       </table></div>
-      {data.retained_responses.length > 0 && <details>
-        <summary>Retained recalled CAR responses ({data.retained_responses.length})</summary>
+      {retained.length > 0 && <details>
+        <summary>Retained recalled CAR responses ({retained.length})</summary>
         <p>These revisions remain in the audit history but are excluded from the active Quality review queue.</p>
-        <ol>{data.retained_responses.map(record => <li key={record.id}>
+        <ol>{retained.map(record => <li key={record.id}>
           <strong>Original submission: {record.submitted_at ? new Date(record.submitted_at).toLocaleString() : "Unknown date"}</strong>
           <p>{record.reason}</p>
           <details><summary>View retained original fields</summary>
@@ -143,17 +153,17 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
           </details>
         </li>)}</ol>
       </details>}
-      {data.action_events.length > 0 && <details>
-        <summary>Attributable action implementation and Quality decisions ({data.action_events.length})</summary>
-        <ol>{data.action_events.map(event => <li key={event.id}>
+      {events.length > 0 && <details>
+        <summary>Attributable action implementation and Quality decisions ({events.length})</summary>
+        <ol>{events.map(event => <li key={event.id}>
           <strong>{event.previous_state || "NEW"} → {event.next_state}</strong>
           <p>{event.actor_kind}: {event.actor_ref || "Unattributed"} · {new Date(event.created_at).toLocaleString()}</p>
           <p>{event.reason}</p>
         </li>)}</ol>
       </details>}
-      {data.history.length > 0 && <details>
-        <summary>Attributed investigation revisions ({data.history.length})</summary>
-        <ol>{data.history.map(event => <li key={event.id}><strong>{event.event_type} · r{event.revision}</strong>
+      {revisions.length > 0 && <details>
+        <summary>Attributed investigation revisions ({revisions.length})</summary>
+        <ol>{revisions.map(event => <li key={event.id}><strong>{event.event_type} · r{event.revision}</strong>
           <p>{event.actor_kind}: {event.actor_ref || "unattributed"} · {new Date(event.created_at).toLocaleString()}</p>
           <p>{event.reason}</p></li>)}</ol>
       </details>}
