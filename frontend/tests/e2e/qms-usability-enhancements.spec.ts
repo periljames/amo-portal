@@ -269,7 +269,9 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   const workPages = page.getByRole("navigation", { name: "Work pages" });
   await expect(workPages.getByRole("link", { name: "Control Room", exact: true })).toBeVisible();
   await expect(workPages.getByRole("link", { name: "Missions", exact: true })).toBeVisible();
-  await expect(workPages.locator("summary").filter({ hasText: "People & authorizations" })).toBeVisible();
+  const peopleLink = workPages.getByRole("link", { name: "People & authorizations", exact: true });
+  await expect(peopleLink).toBeVisible();
+  await expect(peopleLink).toHaveAttribute("href", /\/maintenance\/tenant-a\/quality\/people(?:\/|\?|$)/);
   await page.keyboard.press("Escape");
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Assurance pages", exact: true })).toBeVisible();
