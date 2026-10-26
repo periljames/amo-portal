@@ -7,13 +7,14 @@ const EMPTY: CarRcaActionCreate = {
   external_owner_name: null, target_date: null, priority: "MEDIUM",
 };
 
-export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds }: {
+export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds, attachments = [] }: {
   token: string;
   actions: CarRcaAction[];
   disabled: boolean;
   canProgress?: boolean;
   onChanged: () => Promise<void>;
   causeIds: Array<{ id: string; statement: string }>;
+  attachments?: Array<{ id: string; filename: string }>;
 }) {
   const [draft, setDraft] = useState<CarRcaActionCreate>(EMPTY);
   const [editingActionId, setEditingActionId] = useState<string | null>(null);
@@ -75,7 +76,15 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
           <button type="button" disabled={Boolean(busy)} onClick={() => { setActiveId(activeId === action.id ? null : action.id); setNote(action.completion_note || ""); setProof(action.evidence_references.join("\n")); }}>Record progress</button>}
           {activeId === action.id && canProgress && <div className="car-rca-action-progress">
             <label className="car-rca-field">Completion declaration<textarea value={note} disabled={Boolean(busy)} onChange={e => setNote(e.target.value)} rows={2}/></label>
-            <label className="car-rca-field">Evidence references, one per line<textarea value={proof} disabled={Boolean(busy)} onChange={e => setProof(e.target.value)} rows={2}/></label>
+            <label className="car-rca-field">Evidence references, one per line
+              <textarea value={proof} disabled={Boolean(busy)} onChange={e => setProof(e.target.value)} rows={2}/>
+              {attachments.length > 0 && <select value="" disabled={Boolean(busy)}
+                aria-label="Link existing CAR file to implementation evidence"
+                onChange={e => e.target.value && setProof(value => [...new Set([...value.split("\n").map(x => x.trim()).filter(Boolean), e.target.value])].join("\n"))}>
+                <option value="">Link uploaded CAR evidence…</option>
+                {attachments.map(file => <option key={file.id} value={`CAR-ATTACHMENT:${file.id}`}>{file.filename}</option>)}
+              </select>}
+            </label>
             <button type="button" disabled={Boolean(busy)} onClick={() => void progress(action.id, "IN_PROGRESS")}>Save in progress</button>
             <button type="button" disabled={Boolean(busy) || !note.trim() || !proof.trim()} onClick={() => void progress(action.id, "SUBMITTED")}>Submit implementation evidence</button>
           </div>}</td>
@@ -101,8 +110,15 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
         </div>
       </div>
       <label className="car-rca-field">What specifically changes?<textarea value={draft.description} maxLength={8000} rows={3} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}/></label>
-      <label className="car-rca-field">Supporting evidence references (one per line)<textarea value={draft.evidence_references.join("\n")} rows={2}
-        onChange={e => setDraft(d => ({ ...d, evidence_references: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) }))}/></label>
+      <label className="car-rca-field">Supporting evidence references (one per line)
+        <textarea value={draft.evidence_references.join("\n")} rows={2}
+          onChange={e => setDraft(d => ({ ...d, evidence_references: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) }))}/>
+        {attachments.length > 0 && <select value="" aria-label="Link uploaded CAR evidence to action"
+          onChange={e => e.target.value && setDraft(current => ({ ...current, evidence_references: [...new Set([...current.evidence_references, e.target.value])] }))}>
+          <option value="">Link uploaded CAR evidence…</option>
+          {attachments.map(file => <option key={file.id} value={`CAR-ATTACHMENT:${file.id}`}>{file.filename}</option>)}
+        </select>}
+      </label>
       <button type="button" disabled={Boolean(busy) || draft.description.trim().length < 5 || !draft.external_owner_name?.trim() || !draft.target_date} onClick={() => void create()}>
         {busy === "create" ? "Saving action…" : editingActionId ? "Save revised action" : "Add corrective action"}
       </button>
