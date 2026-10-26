@@ -204,10 +204,10 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
   const pareto = (Array.isArray(current?.context?.frequencies) ? current.context.frequencies : []) as Array<{ category: string; count: number; source_ref: string }>;
   const orderedPareto = [...pareto].sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
   const total = orderedPareto.reduce((n, item) => n + countOf(item.count), 0);
-  const cumulative = orderedPareto.reduce<Array<{ category: string; count: number; source_ref: string; percentage: number }>>((rows, item) => {
-    const running = (rows.length ? rows[rows.length - 1].percentage * total / 100 : 0) + countOf(item.count);
-    return [...rows, { ...item, count: countOf(item.count), percentage: total ? Math.round(running / total * 10000) / 100 : 0 }];
-  }, []);
+  const cumulative = orderedPareto.map((item, index) => {
+    const running = orderedPareto.slice(0, index + 1).reduce((sum, row) => sum + countOf(row.count), 0);
+    return { ...item, count: countOf(item.count), percentage: total ? Math.round(running / total * 10000) / 100 : 0 };
+  });
   const causes = nodes.filter(item => item.entry_type !== "RULED_OUT");
   const fishboneGroups = [...new Set([...CATEGORIES, ...causes.map(node => node.category)])]
     .filter(group => causes.some(node => node.category === group));
