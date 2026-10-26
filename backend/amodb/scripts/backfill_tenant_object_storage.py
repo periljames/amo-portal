@@ -108,10 +108,20 @@ def migrate_one(db: Session, *, source: Source, tenant_id: str, row, apply: bool
               "size_bytes": size, "sha256": digest}
     if not apply:
         return result
+    operation_id = f"legacy-backfill:{source.kind}:{row.id}"
+    from amodb.apps.platform.storage_quota_models import TenantStorageReservation
+    earlier = db.query(TenantStorageReservation).filter(
+        TenantStorageReservation.tenant_id == tenant_id,
+        TenantStorageReservation.idempotency_key == operation_id,
+    ).one_or_none()
+    # An interrupted backfill may return an already-finalized, immutable S3
+    # receipt. Never delete that established object if this run's verification
+    # fails; it can still be referenced by another committed record.
+    was_committed = earlier is not None and earlier.state == "FINALIZED"
     persisted = storage_quota_upload.put_local_file(
         db, tenant_id=tenant_id, key=key, path=source_file,
         content_type=getattr(row, source.mime_column, None),
-        operation_id=f"legacy-backfill:{source.kind}:{row.id}",
+        operation_id=operation_id,
     )
     # Read independently via the public adapter before changing legal references.
     try:
@@ -122,10 +132,11 @@ def migrate_one(db: Session, *, source: Source, tenant_id: str, row, apply: bool
         setattr(row, source.column, persisted.uri)
         db.flush()
     except Exception:
-        try:
-            shared_storage.delete(persisted.uri)
-        except Exception:
-            pass
+        if not was_committed:
+            try:
+                shared_storage.delete(persisted.uri)
+            except Exception:
+                pass
         raise
     result["status"] = "MIGRATED_AND_VERIFIED"
     result["object_uri"] = persisted.uri
