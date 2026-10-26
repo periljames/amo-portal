@@ -293,15 +293,17 @@ export default function PdfReaderCore(props: PdfReaderCoreProps) {
               liveReaderFingerprint,
               liveReaderUrl,
               live.reader_size_bytes || props.sourceByteLength,
-            ).then(async () => {
+            ).then(() => {
               if (!active || generationRef.current !== generation) return;
               setOfflineState("AVAILABLE");
               setOfflineError("");
-              // The full immutable PDF is now encrypted in IndexedDB. Switch the
-              // live reader to client-local bytes without changing revision
-              // identity. PdfReaderCoreV4 preserves the active page/zoom across
-              // this source handoff.
-              await mount(live, true, true);
+              // The complete encrypted copy is ready for a future opening or
+              // offline restart. Keep this session on its existing immutable
+              // source: swapping remote PDF bytes for a blob mid-session causes
+              // PDF.js to reopen, interrupting keyboard page jumps (especially
+              // 2,000-page publications) and can lose the user's visible page.
+              // Initial openings with a verified existing copy already select
+              // local bytes in chooseSource() without interrupting a reader.
             }).catch(() => {
               if (!active || generationRef.current !== generation) return;
               // Background warming is opportunistic. Range streaming remains
