@@ -333,7 +333,14 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await expect(implementation.getByText("IN PROGRESS")).toBeVisible({ timeout: 30_000 });
     await implementation.getByRole("button", { name: "Record progress" }).click();
     await implementation.getByRole("button", { name: "Submit implementation evidence" }).click();
-    await expect(implementation.getByText("SUBMITTED")).toBeVisible({ timeout: 30_000 });
+    // Prove the actual action state, not the unrelated success-notification text.
+    await expect(implementation.getByRole("cell", { name: /^SUBMITTED\b/ })).toBeVisible({ timeout: 30_000 });
+    const submittedActionRead = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/investigation`);
+    expect(submittedActionRead.status, JSON.stringify(submittedActionRead.body)).toBe(200);
+    const submittedAction = (submittedActionRead.body as { actions: Array<{ id: string; state: string; evidence_references: string[] }> })
+      .actions.find(action => action.id === corrective!.id);
+    expect(submittedAction?.state).toBe("SUBMITTED");
+    expect(submittedAction?.evidence_references).toContain("CAR-SAMPLE:rework:effectiveness-observation");
 
     const verifiedAction = await authenticatedRequest(internalPage, "PATCH",
       `${apiCarPath}/corrective-actions/${corrective!.id}/review`, {
