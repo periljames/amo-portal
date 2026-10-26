@@ -165,7 +165,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const currentResponse = useMemo(() => {
     const authoritative = inviteQuery.data;
     if (!authoritative?.submitted_at) return latestResponse;
-    if (!currentResponse?.submitted_at) return authoritative;
+    if (!latestResponse?.submitted_at) return authoritative;
     const inviteTime = Date.parse(authoritative.submitted_at);
     const responseTime = Date.parse(latestResponse.submitted_at);
     return Number.isFinite(inviteTime) && (!Number.isFinite(responseTime) || inviteTime > responseTime)
