@@ -12,10 +12,10 @@ BEGIN
 END $$;
 
 ALTER ROLE venspera_runtime NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-DO $
+DO $$
 BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO venspera_runtime', current_database());
-END $;
+END $$;
 GRANT USAGE ON SCHEMA public TO venspera_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO venspera_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO venspera_runtime;
