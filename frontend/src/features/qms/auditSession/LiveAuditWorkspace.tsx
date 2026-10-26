@@ -1080,7 +1080,6 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   setDetailOpen(false);
                   requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-detail-item="${selected.checklist_item_id}"]`)?.focus());
                 }} aria-label="Close question details">Close details <X size={15} /></button>
-                <button type="button" className="qms-live-audit-focus__close-details" onClick={() => setDetailOpen(false)} aria-label="Close question details">Close details <X size={15} /></button>
                 <span className="qms-live-audit-focus__question-position">QUESTION {itemNumberById.get(selected.checklist_item_id) || selectedIndex + 1} / {items.length}</span>
               </div>
               <h3 className="qms-live-audit-focus__question-prompt">{selected.prompt}</h3>
