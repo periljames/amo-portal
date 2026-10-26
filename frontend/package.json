@@ -4,6 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "audit:offline": "node scripts/audit-offline-capabilities.mjs",
+    "test:offline-browser": "playwright test --config playwright.offline.config.ts",
+    "test:offline-assets": "playwright test --config playwright.offline-assets.config.ts",
+    "test:sync": "vitest run src/services/deviceStorageKey.test.ts src/services/qmsOfflineFieldworkProjection.test.ts src/services/offlineCapabilities.test.ts src/services/offlineHttp.test.ts src/services/offlineHttp.clientTimezone.test.ts src/services/offlinePersistence.test.ts src/services/offlineStorage.test.ts src/services/portalOfflineSync.test.ts src/services/portalRealtimeInvalidation.test.ts src/services/portalConnectivity.test.ts src/services/apiClientNetworking.test.ts src/services/apiClientLatency.contract.test.ts tests/edgeProxyRouting.test.ts src/services/portalRequestEligibility.test.ts src/services/realtime/queue.test.ts src/services/realtime/reliability.test.ts src/services/devProxyRouting.test.ts",
     "dev": "vite",
     "build": "npm run check:modals && tsc -b && vite build && npm run check:heavy-route-chunks",
     "lint": "eslint .",
@@ -20,11 +24,12 @@
     "test:aircraft-architecture": "vitest run src/services/dailyUtilisation.test.ts",
     "test:unit": "vitest run src/utils/verificationScan.test.ts",
     "test:quality": "vitest run src/services/qmsAuditHubActions.test.ts src/services/qmsDashboard.test.ts src/services/qmsAuditProgrammeReadiness.test.ts src/services/assuranceCockpit.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/QmsOverviewPage.hub.test.ts src/pages/qms/qmsAuditProgrammeApproval.test.ts src/pages/qms/qmsAuditProgrammeDisplay.test.ts src/pages/qms/qmsAuditProgrammeGridLifecycle.test.ts src/pages/qms/qmsAuditProgrammePlanning.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/pages/qms/routes/qmsWorkspaceRegistry.test.ts src/components/Layout/qmsSidebarNavigation.test.ts src/components/feedback/toastPolicy.test.ts src/pages/qualityAudits/auditDashboardModel.test.ts src/pages/qualityAudits/auditScopeModel.test.ts src/features/qms/auditSession/auditSetupModel.test.ts src/pages/qms/planner/qmsPlannerModel.test.ts src/pages/qms/planner/qmsPlannerClock.test.ts src/app/routeGuards.qmsRoles.test.ts src/app/portalRouteManifest.test.ts src/services/apiClientLatency.contract.test.ts src/services/portalRequestEligibility.test.ts",
-    "test:qms-offline": "vitest run src/app/qmsRouteLoaders.test.ts src/services/qmsCachePolicy.test.ts src/services/portalServiceWorker.test.ts src/services/offlineHttp.test.ts src/services/qmsAuditOfflinePack.test.ts src/features/qms/auditSession/auditSetupControls.test.ts",
+    "test:qms-offline": "vitest run src/services/deviceStorageKey.test.ts src/services/qmsOfflineFieldworkProjection.test.ts src/services/qmsOfflineAuditEvidence.test.ts src/app/qmsRouteLoaders.test.ts src/services/qmsCachePolicy.test.ts src/services/portalServiceWorker.test.ts src/services/offlineHttp.test.ts src/services/offlinePersistence.test.ts src/services/portalConnectivity.test.ts src/services/qmsAuditOfflinePack.test.ts src/features/qms/auditSession/auditSetupControls.test.ts",
     "test:qms-planner": "vitest run src/pages/qms/planner/qmsPlannerModel.test.ts src/pages/qms/planner/qmsPlannerClock.test.ts",
     "test:qms-overview": "vitest run src/services/qmsDashboard.test.ts src/services/assuranceCockpit.test.ts src/pages/qms/qmsOverviewModel.test.ts src/pages/qms/QmsOverviewPage.hub.test.ts src/pages/qms/routes/qmsRouteRegistry.test.ts src/pages/qms/routes/qmsWorkspaceRegistry.test.ts",
     "test:tenant-shell": "vitest run src/app/portalRouteManifest.test.ts src/services/adminProfileMode.test.ts src/services/departmentHome.test.ts && npm run check:css",
-    "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts src/services/devProxyRouting.test.ts src/services/apiClientLatency.contract.test.ts tests/edgeProxyRouting.test.ts src/services/portalRequestEligibility.test.ts"
+    "test:platform": "vitest run src/services/platformControl.test.ts src/services/saasSettings.test.ts src/services/messaging.test.ts src/services/realtime/reliability.test.ts src/services/devProxyRouting.test.ts src/services/apiClientLatency.contract.test.ts src/services/portalRequestEligibility.test.ts",
+    "start:shared": "npm run build && vite preview --host 0.0.0.0 --port 5173 --strictPort"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -72,6 +77,7 @@
     "eslint": "9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "fake-indexeddb": "^6.2.6",
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.36.0",
