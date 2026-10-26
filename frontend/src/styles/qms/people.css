@@ -885,3 +885,9 @@ body[data-color-scheme="dark"] .qms-authz-pill--bad,
   color: #fecaca;
   background: color-mix(in srgb, #ef4444 14%, var(--qms-authz-surface));
 }
+
+/* The People heading remains legible when the shared assurance workspace
+   cascade is also loaded after this module. */
+.qms-surface-root.qms-people .qms-authz-header .qms-authz-page-heading {
+  font-size: clamp(28px, 2.25vw, 34px);
+}
