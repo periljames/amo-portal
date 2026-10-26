@@ -191,6 +191,12 @@ def finalize(db: Session, *, tenant_id: str, reservation_id: str,
         c not in "0123456789abcdef" for c in checksum_sha256.lower()
     ):
         raise ValueError("Invalid retained object URI or SHA-256")
+    # Enforce binding between the reservation's canonical tenant key and the
+    # actual S3 bucket/prefix. A syntactically valid foreign URI is not proof
+    # that the object belongs to this tenant.
+    from amodb import storage
+    if storage.shared_storage_enabled() and storage_uri != storage.expected_s3_uri(reservation.object_key):
+        raise ValueError("Stored object URI does not match the reserved key and bucket")
     existing = db.query(TenantStorageObject).filter(
         TenantStorageObject.tenant_id == tenant_id,
         TenantStorageObject.object_key == reservation.object_key,
