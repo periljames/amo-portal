@@ -40,6 +40,22 @@ def _finalized_replay(db, reservation, *, digest: str):
             status_code=409,
             detail="Upload replay conflicts with previously finalized object content",
         )
+    # An immutable database receipt is not proof that S3 still retains the
+    # object. Retries must not report success after remote deletion/drift.
+    try:
+        if storage.shared_storage_enabled() and obj.storage_uri != storage.expected_s3_uri(obj.object_key):
+            raise ValueError("Finalized object references a foreign bucket or key")
+        retained_bytes = storage.retained_object_size(obj.storage_uri)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Finalized upload is unavailable in object storage; physical reconciliation required",
+        ) from exc
+    if int(retained_bytes) != int(obj.size_bytes):
+        raise HTTPException(
+            status_code=409,
+            detail="Finalized upload byte count differs from physically retained object",
+        )
     return storage.StoredObject(
         uri=obj.storage_uri, key=obj.object_key, backend="s3",
         size_bytes=int(obj.size_bytes),
