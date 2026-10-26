@@ -127,7 +127,8 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const responsesQuery = useQuery({
     queryKey: ["qms-car-control-responses", carId],
     queryFn: () => qmsListCarResponses(carId, false, amoCode),
-    staleTime: 10_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const attachmentsQuery = useQuery({
     queryKey: ["qms-car-control-attachments", carId],
@@ -137,7 +138,8 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const inviteQuery = useQuery({
     queryKey: ["qms-car-control-source", carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   useEffect(() => {
@@ -155,6 +157,21 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     if (explicitlyLatest) return explicitlyLatest;
     return [...responses].sort((left, right) => right.submitted_at.localeCompare(left.submitted_at))[0] ?? null;
   }, [responses]);
+  // The response register and governed CAR record are separately refreshed
+  // resources. After a responsible manager resubmits, one may still expose the
+  // previously accepted/rejected response. Display the newest submitted
+  // response by its server timestamp; never silently show an older RCA while
+  // the CAR itself already acknowledges a newer submission.
+  const currentResponse = useMemo(() => {
+    const authoritative = inviteQuery.data;
+    if (!authoritative?.submitted_at) return latestResponse;
+    if (!currentResponse?.submitted_at) return authoritative;
+    const inviteTime = Date.parse(authoritative.submitted_at);
+    const responseTime = Date.parse(latestResponse.submitted_at);
+    return Number.isFinite(inviteTime) && (!Number.isFinite(responseTime) || inviteTime > responseTime)
+      ? authoritative
+      : latestResponse;
+  }, [latestResponse, inviteQuery.data]);
   const nextMilestone = useMemo(
     () => [...control.milestones]
       .sort((left, right) => left.phase_order - right.phase_order)
@@ -277,12 +294,12 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       ["CAR", "Current due", control.profile?.current_due_date || control.car.target_closure_date || control.car.due_date || ""],
       ["CAR", "Health", `${control.health.state} ${control.health.risk_score}/100`],
       ["CAR", "Next required action", control.health.next_action],
-      ["Response", "Responder", personDisplay(latestResponse?.submitted_by_name || source?.submitted_by_name, "")],
-      ["Response", "Submitted", latestResponse?.submitted_at || source?.submitted_at || ""],
-      ["Response", "Immediate / containment action", latestResponse?.containment_action || source?.containment_action || ""],
-      ["Response", "Root cause", latestResponse?.root_cause || source?.root_cause || ""],
-      ["Response", "Corrective action", latestResponse?.corrective_action || source?.corrective_action || ""],
-      ["Response", "Preventive / systemic action", latestResponse?.preventive_action || source?.preventive_action || ""],
+      ["Response", "Responder", personDisplay(currentResponse?.submitted_by_name || source?.submitted_by_name, "")],
+      ["Response", "Submitted", currentResponse?.submitted_at || source?.submitted_at || ""],
+      ["Response", "Immediate / containment action", currentResponse?.containment_action || source?.containment_action || ""],
+      ["Response", "Root cause", currentResponse?.root_cause || source?.root_cause || ""],
+      ["Response", "Corrective action", currentResponse?.corrective_action || source?.corrective_action || ""],
+      ["Response", "Preventive / systemic action", currentResponse?.preventive_action || source?.preventive_action || ""],
       ["Review", "RCA status", source?.root_cause_status || ""],
       ["Review", "RCA review note", source?.root_cause_review_note || ""],
       ["Review", "CAP status", source?.capa_status || ""],
@@ -329,7 +346,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       return;
     }
     popup.opener = null;
-    const response = latestResponse || source;
+    const response = currentResponse || source;
     const milestoneRows = control.milestones.map((item) => `<tr><td>${item.phase_order}. ${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.original_due_date))}</td><td>${escapeHtml(formatDate(item.current_due_date))}</td><td>${escapeHtml(item.evidence_ref || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("");
     const dependencyRows = control.dependencies.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.dependency_type))}</td><td>${escapeHtml(humanize(item.risk_level))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.due_date))}</td><td>${item.blocks_closure ? "Yes" : "No"}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.mitigation_plan || "")}</td></tr>`).join("");
     const extensionRows = control.deadline_changes.map((item) => `<tr><td>${escapeHtml(formatDate(item.previous_due_date))}</td><td>${escapeHtml(formatDate(item.requested_due_date))}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(item.impact_statement || "")}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.review_note || "")}</td></tr>`).join("");
@@ -398,13 +415,13 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <section className="card" aria-labelledby="car-response-heading">
         <div className="card__header"><div><h2 id="car-response-heading">Corrective action response</h2><p>Auditee/responsible-manager submission retained separately from Quality review and staged governance.</p></div><button className="btn btn--small" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${carId}`)}>Open CAR review</button></div>
         {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted"><InlineLoading label={"Loading response history…"}/></p> : null}
-        {latestResponse || inviteQuery.data ? (
+        {currentResponse || inviteQuery.data ? (
           <div className="stack">
-            <div className="stats-grid"><div><span className="muted">Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted">Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted">RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted">CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
-            <div><strong>Immediate / containment action</strong><p>{latestResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
-            <div><strong>Root cause analysis</strong><p>{latestResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
-            <div><strong>Corrective action</strong><p>{latestResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
-            <div><strong>Preventive / long-term systemic action</strong><p>{latestResponse?.preventive_action || inviteQuery.data?.preventive_action || "Not submitted."}</p></div>
+            <div className="stats-grid"><div><span className="muted">Responder</span><strong>{personDisplay(currentResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted">Submitted</span><strong>{formatDateTime(currentResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted">RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted">CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
+            <div><strong>Immediate / containment action</strong><p>{currentResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
+            <div><strong>Root cause analysis</strong><p>{currentResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
+            <div><strong>Corrective action</strong><p>{currentResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
+            <div><strong>Preventive / long-term systemic action</strong><p>{currentResponse?.preventive_action || inviteQuery.data?.preventive_action || "Not submitted."}</p></div>
             {(inviteQuery.data?.root_cause_review_note || inviteQuery.data?.capa_review_note) ? <div className="alert"><strong>Quality review comments</strong><div>RCA: {inviteQuery.data?.root_cause_review_note || "—"}</div><div>CAP: {inviteQuery.data?.capa_review_note || "—"}</div></div> : null}
           </div>
         ) : <p className="muted">No auditee/responsible-manager response has been submitted.</p>}
