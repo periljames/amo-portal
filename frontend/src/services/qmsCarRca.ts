@@ -90,7 +90,12 @@ export const emptyCarRca = (problem_statement = ""): CarRcaDocument => ({
 const publicPath = (token: string, path: string) => `/quality/cars/invite/${encodeURIComponent(token)}${path}`;
 
 export class CarRcaRequestError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = "CarRcaRequestError"; }
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "CarRcaRequestError";
+  }
 }
 
 async function publicRcaRequest<T>(token: string, path: string, method: "GET" | "PUT" | "POST" | "PATCH" = "GET", body?: unknown): Promise<T> {
