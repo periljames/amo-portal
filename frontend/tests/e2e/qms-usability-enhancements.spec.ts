@@ -196,6 +196,27 @@ async function prepare(page: Page, state: TestState): Promise<void> {
       return;
     }
 
+    // CAR details now load independently governed RCA and Pareto resources.
+    // Mock their actual response contracts rather than the generic register
+    // response, which otherwise crashes on missing investigation fields.
+    if (/\\/quality\\/cars\\/[^/]+\\/investigation(?:\\?.*)?$/.test(parsed.pathname)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        car_id: "rel-car-7", revision: 0,
+        draft: { form: {}, investigation: {
+          version: 1, problem_statement: "", investigations: [], conclusion: "",
+          supported_cause_ids: [], conclusion_evidence_references: [],
+          evidence_notes: "", effectiveness_proposal: null,
+        } },
+        submitted_revision: null, submitted_snapshot: null, submitted_at: null,
+        actions: [], action_events: [], retained_responses: [], history: [],
+      }) });
+      return;
+    }
+    if (/\\/quality\\/cars\\/[^/]+\\/pareto-snapshots(?:\\?.*)?$/.test(parsed.pathname)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+
     if (url.includes("/api/maintenance/tenant-a/quality/")) {
       state.qualityReads += 1;
       await route.fulfill({
