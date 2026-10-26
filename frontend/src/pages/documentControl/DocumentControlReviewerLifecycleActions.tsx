@@ -145,11 +145,6 @@ export default function DocumentControlReviewerLifecycleActions({
         ? "The reviewed revision ID and source checksum will be appended to the decision by the server."
         : "This revision has no retained source checksum; supporting controlled evidence is required before approval."}
     </div>
-    {actions.some((action) => action.action === "APPROVE_ACCOUNTABLE_MANAGER") ? (
-      <label className="wide"><span>Effective date and time</span>
-        <input type="datetime-local" required value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
-      </label>
-    ) : null}
     {error ? <div className="dc-form__error">{error}</div> : null}
 
   </div>;
