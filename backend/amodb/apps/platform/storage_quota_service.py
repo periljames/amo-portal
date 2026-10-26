@@ -265,10 +265,79 @@ def reconcile(db: Session, *, tenant_id: str, actor_id: str | None = None):
         TenantStorageReservation.state == "RESERVED",
     ).scalar() or 0)
     mismatch = (active_bytes != int(account.used_bytes) or pending_bytes != int(account.reserved_bytes))
-    account.integrity_state = "DRIFT" if mismatch else "OK"
+    # A database-only recount cannot repair missing/corrupted physical objects.
+    # Only a subsequent successful physical audit may clear REMOTE_DRIFT.
+    account.integrity_state = "DRIFT" if mismatch else (
+        "REMOTE_DRIFT" if account.integrity_state == "REMOTE_DRIFT" else "OK"
+    )
     account.last_reconciled_at = _now()
     _event(db, account, "RECONCILIATION_CHECKED", actor_id,
            metadata={"object_bytes": active_bytes, "pending_bytes": pending_bytes, "drift": mismatch})
     db.flush()
     return {**_snapshot(account), "observed_object_bytes": active_bytes,
             "observed_pending_bytes": pending_bytes, "drift": mismatch}
+
+
+def audit_retained_objects(db: Session, *, tenant_id: str, actor_id: str | None = None,
+                           max_objects: int = 1000, verify_checksums: bool = False):
+    """Bounded full-tenant physical S3 audit; never report partial scans as clean.
+
+    Physical verification checks that each committed ledger URI belongs to the
+    configured bucket/prefix, and that its actual retained bytes match the
+    ledger. Optional checksum mode reads the whole object and is deliberately
+    capped at 100 objects to avoid unbounded network/disk cost.
+    """
+    from amodb import storage
+
+    if not storage.shared_storage_enabled():
+        raise ValueError("A physical storage audit requires the configured S3 backend")
+    if type(max_objects) is not int or not 1 <= max_objects <= 1000:
+        raise ValueError("Physical audit limit must be between 1 and 1000 objects")
+    if type(verify_checksums) is not bool:
+        raise ValueError("verify_checksums must be a boolean")
+    if verify_checksums and max_objects > 100:
+        raise ValueError("Full checksum audits are limited to 100 objects per run")
+
+    account = _locked(db, tenant_id, allow_drift=True)
+    objects = db.query(TenantStorageObject).filter(
+        TenantStorageObject.tenant_id == tenant_id, TenantStorageObject.state == "ACTIVE",
+    ).order_by(TenantStorageObject.id).limit(max_objects + 1).all()
+    if len(objects) > max_objects:
+        raise ValueError("Physical audit would be incomplete: active object count exceeds the requested limit")
+
+    failures = []
+    for obj in objects:
+        try:
+            expected_uri = storage.expected_s3_uri(obj.object_key)
+            if obj.storage_uri != expected_uri:
+                raise ValueError("Object location differs from configured bucket or immutable key")
+            if verify_checksums:
+                retained = storage.materialize(obj.storage_uri, expected_sha256=obj.checksum_sha256)
+                actual_size = retained.stat().st_size
+            else:
+                actual_size = storage.retained_object_size(obj.storage_uri)
+            if int(actual_size) != int(obj.size_bytes):
+                raise ValueError("Retained physical byte size does not match the object ledger")
+        except Exception as exc:
+            # Never conceal remote permission/network errors as successful
+            # reconciliation; do not log credentials or raw storage URIs.
+            failures.append({"object_id": str(obj.id), "reason": type(exc).__name__})
+
+    active_bytes = sum(int(obj.size_bytes) for obj in objects)
+    pending_bytes = int(db.query(func.coalesce(func.sum(TenantStorageReservation.size_bytes), 0)).filter(
+        TenantStorageReservation.tenant_id == tenant_id,
+        TenantStorageReservation.state == "RESERVED",
+    ).scalar() or 0)
+    ledger_drift = active_bytes != int(account.used_bytes) or pending_bytes != int(account.reserved_bytes)
+    account.integrity_state = "REMOTE_DRIFT" if failures else ("DRIFT" if ledger_drift else "OK")
+    account.last_reconciled_at = _now()
+    _event(db, account, "PHYSICAL_STORAGE_AUDIT", actor_id, metadata={
+        "checked_objects": len(objects), "checksum_verified": verify_checksums,
+        "failures": len(failures), "ledger_drift": ledger_drift,
+    })
+    db.flush()
+    return {
+        **_snapshot(account), "checked_objects": len(objects),
+        "physically_verified": not failures, "checksum_verified": verify_checksums,
+        "ledger_drift": ledger_drift, "failures": failures[:20],
+    }
