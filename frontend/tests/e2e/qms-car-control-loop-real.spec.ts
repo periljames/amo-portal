@@ -156,11 +156,11 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByLabel("Reason").fill("Implementation evidence requires an additional controlled observation cycle before effectiveness can be confirmed.");
     await internalPage.getByLabel("Impact statement").fill("Quality will retain weekly oversight; no unsafe condition is being accepted during the controlled extension.");
     await internalPage.getByRole("button", { name: "Request deadline change" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Deadline change submitted", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Deadline change submitted" })).toContainText("Deadline change submitted", { timeout: 30_000 });
     const deadlineSection = internalPage.getByRole("heading", { name: "Controlled deadline changes" }).locator("xpath=ancestor::section[1]");
     await deadlineSection.getByPlaceholder("Decision note").fill("Approved because the added observation cycle strengthens effectiveness evidence while weekly Quality oversight controls the risk.");
     await deadlineSection.getByRole("button", { name: "Approve" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Deadline change approved", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Deadline change approved" })).toContainText("Deadline change approved", { timeout: 30_000 });
 
     const dependencySection = internalPage.getByRole("heading", { name: "Dependencies & blockers" }).locator("xpath=ancestor::section[1]");
     await dependencySection.getByLabel("Dependency title").fill("Independent effectiveness observation");
@@ -171,10 +171,10 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await dependencySection.getByLabel("Mitigation").fill("Quality Manager tracks the observation as a closure blocker until objective evidence is recorded.");
     await dependencySection.getByLabel("Blocks CAR closure").check();
     await dependencySection.getByRole("button", { name: "Add dependency" }).click();
-    await expect(internalPage.getByRole("status")).toContainText("Dependency recorded", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Dependency recorded" })).toContainText("Dependency recorded", { timeout: 30_000 });
     const dependencyRow = dependencySection.getByRole("row", { name: /Independent effectiveness observation/ });
     await dependencyRow.getByRole("combobox").selectOption("RESOLVED");
-    await expect(internalPage.getByRole("status")).toContainText("Dependency status updated", { timeout: 30_000 });
+    await expect(internalPage.getByRole("status").filter({ hasText: "Dependency status updated" })).toContainText("Dependency status updated", { timeout: 30_000 });
 
     const lifecycle = internalPage.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");
     const stages = [
@@ -190,7 +190,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       await row.getByPlaceholder("Evidence reference").fill(`car-evidence:stage-${index + 1}`);
       await row.getByPlaceholder("Control note").fill(`${stage} independently reviewed and accepted by Quality.`);
       await row.getByRole("button", { name: "Save" }).click();
-      await expect(internalPage.getByRole("status")).toContainText(`${stage} updated`, { timeout: 30_000 });
+      await expect(internalPage.getByRole("status").filter({ hasText: `${stage} updated` })).toContainText(`${stage} updated`, { timeout: 30_000 });
     }
 
     const accepted = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
