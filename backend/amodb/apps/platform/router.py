@@ -212,6 +212,37 @@ def reconcile_tenant_storage_quota(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/tenants/{tenant_id}/storage-quota/verify-objects")
+def verify_tenant_retained_objects(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    """Operator-triggered physical audit; refuses incomplete large scans."""
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        result = storage_quota_service.audit_retained_objects(
+            db, tenant_id=tenant_id, actor_id=_actor_id(user),
+            max_objects=payload.get("max_objects", 1000),
+            verify_checksums=payload.get("verify_checksums", False),
+        )
+        services.audit(
+            db, actor_user_id=_actor_id(user), action="tenant.storage_objects.physically_verified",
+            tenant_id=tenant_id, reason=_reason(payload),
+            details={"checked_objects": result["checked_objects"],
+                     "physically_verified": result["physically_verified"],
+                     "checksum_verified": result["checksum_verified"],
+                     "ledger_drift": result["ledger_drift"]},
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/tenants/{tenant_id}/activation-checklist")
 def tenant_activation_checklist(
     tenant_id: str,
