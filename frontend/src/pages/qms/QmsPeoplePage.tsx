@@ -790,7 +790,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           </article> : null}
 
           <article className="qms-authz-card qms-authz-detail">
-            {!selfServiceOnly && selectedPersonKey ? <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button> : null}
+            {!selfServiceOnly && selectedPersonKey ? <div className="qms-authz-mobile-person-actions">
+              <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button>
+              {canPrepare ? <button type="button" className="qms-authz-button qms-authz-mobile-nominate" onClick={() => setNominateOpen(true)}>Nominate</button> : null}
+            </div> : null}
             {personQuery.isPending && activePersonKey ? <p><InlineLoading label={"Loading person…"}/></p> : personDetail ? (
               <>
                 <SectionTitle title={personDetail.person.name} subtitle={[personDetail.person.home_role ? human(personDetail.person.home_role) : null, personDetail.person.department].filter(Boolean).join(" · ")} />
