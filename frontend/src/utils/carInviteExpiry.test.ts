@@ -21,7 +21,7 @@ describe("CAR invitation expiry local-time controls", () => {
     const original = "2026-11-01T12:00:00Z";
     const displayed = formatInviteExpiryLocal(original);
     expect(displayed).toBe("2026-11-01T07:00");
-    expect(parseInviteExpiryLocal(displayed, original)).toBe(original);
+    expect(parseInviteExpiryLocal(displayed, original)).toBe(new Date(original).toISOString());
   });
 
   it("preserves the original instant in an ambiguous autumn DST fold", () => {
