@@ -425,7 +425,7 @@ async function prepare(page: Page, role = "QUALITY_MANAGER"): Promise<void> {
   await page.route("http://127.0.0.1:8080/**", fulfil);
 }
 
-test("QMS root presents the assurance Control Room and six-workspace operating model", async ({ page }) => {
+test("QMS root presents the assurance Control Room and compact navigable workspaces", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 950 });
   await prepare(page);
   await page.goto("/maintenance/tenant-a/quality", { waitUntil: "domcontentloaded" });
@@ -449,16 +449,25 @@ test("QMS root presents the assurance Control Room and six-workspace operating m
   );
   await expect(controlRoom.getByRole("navigation", { name: "Continuous assurance" })).toHaveCount(0);
 
-  const contextBar = page.locator(".quality-context-bar");
-  for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
+  const contextBar = page.getByRole("navigation", { name: "QMS page menus" });
+  await expect(contextBar).toBeVisible();
+  for (const label of ["Work", "Assurance", "Controls & settings", "Reports"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
+  await contextBar.getByRole("button", { name: "Work", exact: true }).click();
+  const workPages = page.getByRole("navigation", { name: "Work pages", exact: true });
+  await expect(workPages.getByRole("link", { name: "Control Room", exact: true })).toBeVisible();
+  await expect(workPages.getByRole("link", { name: "Missions", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const diagnostics = controlRoom.locator("details.qms-assurance-room__diagnostics");
   await expect(diagnostics).not.toHaveAttribute("open", "");
 
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
-  // Assurance now owns the canonical audit dashboard, not the retired workspace query.
+  const assurancePages = page.getByRole("navigation", { name: "Assurance pages", exact: true });
+  await assurancePages.locator("summary").filter({ hasText: /^Audits$/ }).click();
+  await assurancePages.getByRole("link", { name: "Dashboard", exact: true }).click();
+  // The governed audit dashboard remains reachable from the compact Assurance menu.
   await expect(page).toHaveURL(/\/quality\/audits\/dashboard$/);
 });
 
