@@ -112,7 +112,7 @@ See [Phase 1 baseline](CAR_RCA_PHASE1_BASELINE.md) for detailed source reference
 
 ## Phase 2 live implementation reconciliation — 22 October 2026
 
-**Evidence category: SOURCE IMPLEMENTED, NOT TEST VERIFIED.** Source changes are in draft PR #568. The current branch has **90 commits ahead and one main commit behind** as of the latest compare. Reconcile that upstream commit conservatively in Phase 3 after reviewing per-file overlap; no automatic merge was done.
+**Evidence category: SOURCE IMPLEMENTED, NOT TEST VERIFIED.** Source changes are in draft PR #568. The current branch has **main is independently advancing; HEAD divergence requires a fresh comparison before merge**. Reconcile that upstream commit conservatively in Phase 3 after reviewing per-file overlap; no automatic merge was done.
 
 | ID | Phase 2 status | Source evidence and remaining limitation |
 | --- | --- | --- |
@@ -148,8 +148,17 @@ See [Phase 1 baseline](CAR_RCA_PHASE1_BASELINE.md) for detailed source reference
 - Existing non-CAR controlled evidence references remain narrative/record references subject to independent Quality review; they are **not** represented as cryptographically verified uploaded files.
 - **Remaining Phase 2 source concern:** evidence upload itself still uses the established storage mechanism. Platform-wide shared object-store migration, resumable uploads, failover and restore are not established by these changes. These must not be represented as delivered unless separately implemented/verified.
 
-### Remaining Phase 2 closure blockers
+### Phase 2 source reconciliation — 26 October 2026
 
-- Shared CAR storage adapter exists but its integration into the legacy CAR router is not committed; no statement of object-storage readiness is warranted.
-- Serialized draft saves and CAR evidence-link UI changes need repository updates and validation.
-- Do not merge until these integration issues and Phase 3 checks are resolved.
+**IMPLEMENTED BY SOURCE, TEST VERIFICATION IN PROGRESS.** The original Phase 1-only PR description has been corrected, and the following Phase 2 repairs are committed:
+
+- `car_rca_storage.py` and the authoritative `quality/router.py` CAR attachment routes now use the shared object-storage abstraction with tenant keys for new evidence, SHA-256 checking on download, safe legacy file access, tenant-scoped immutable revision checks and deletion denial for retained evidence. Existing CAR URLs and permissions remain unchanged. Object-storage runtime configuration, pre-existing local-file backfill, disaster recovery and resumable upload still need operational verification and/or additional implementation.
+- `CarRcaActions.tsx` and `PublicCarInvitePage.tsx` provide controlled CAR attachment selection for corrective-action proposals and completion evidence; `CarRcaWorkbench` already links evidence to nodes and conclusions.
+- Public RCA draft saves are serialized per invitation so final submission waits for a pending autosave instead of racing it. The first revision is recorded even for a default-value save.
+- Internal Quality reviewers can add governed corrective actions, with independent lead-auditor authorization enforced on approval/rejection/verification.
+- **GitHub Actions diagnostics:** initial widespread frontend failure traced to an unclosed conditional JSX expression. Fixed; additional TS erasableSyntaxOnly, React immutability and lint violations corrected without disabling tests or lint. SQLite Quality test fixture now includes the invitation access-control table. People page restored an accessible Authorization governance heading required by browser acceptance.
+- Source scope spans the original QMS CAR state machine, guest invitation flow, versioned RCA, evidence, Quality review, effectiveness planning and controlled closure. No rival CAR register was created.
+
+**Remaining explicit verification and completion requirements:** live multi-tenant PostgreSQL and bearer-token negative tests; production object storage and any required existing-blob backfill; resumable/large-file upload recovery where applicable; browser and CI acceptance; preservation of evidence-report and DMS integration; comparison with the moving main branch. Do not claim all requirements are production-verified or merge this PR until these items and checks are settled.
+
+**Current main comparison:** main advanced independently after the branch baseline. At the last inspection, the six upstream commits affect different tracked source paths from this PR, but the branch is still behind; review and integrate them without force rebasing.
