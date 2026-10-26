@@ -38,7 +38,12 @@ def test_leave_governance_migration_is_reachable_from_repository_heads():
     revision = script.get_revision("workforce_260929_leave_gov")
 
     assert revision is not None
-    # A subsequent production migration may descend from this revision. Require\n    # the leave governance change to remain on an upgrade path from HEAD.\n    assert any(\n        entry.revision == "workforce_260929_leave_gov"\n        for entry in script.walk_revisions(base="base", head="heads")\n    )
+    # The leave migration must be reachable from current repository heads,
+    # rather than incorrectly required to remain the latest head forever.
+    assert any(
+        candidate.revision == "workforce_260929_leave_gov"
+        for candidate in script.walk_revisions(base="base", head="heads")
+    )
 
 
 def test_leave_governance_migration_repairs_columns_used_by_runtime_models():
