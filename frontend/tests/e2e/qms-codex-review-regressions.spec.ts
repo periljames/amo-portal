@@ -97,7 +97,7 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
         authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
         open_cases: 0,
       }],
-      total: 1,
+      total: 1, limit: 100, offset: 0, has_more: false,
     });
   }
   if (path.endsWith("/quality/people/authorization-control/people/quality-user-a")) {
@@ -128,7 +128,7 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
       audit_participation: { items: [], observed_completed: 3, observed_target: 3 },
     });
   }
-  if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+  if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0, limit: 100, offset: 0, has_more: false });
   if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
   if (path.endsWith("/quality/people/authorization-control/authorizations")) {
     return json(route, { items: [{
