@@ -891,3 +891,32 @@ body[data-color-scheme="dark"] .qms-authz-pill--bad,
 .qms-surface-root.qms-people .qms-authz-header .qms-authz-page-heading {
   font-size: clamp(28px, 2.25vw, 34px);
 }
+
+/* Keep nomination reachable when the mobile person-detail route hides
+   the master list and its original toolbar. */
+.qms-authz-mobile-nominate { display: none; }
+@media (max-width: 700px) {
+  .qms-authz.qms-people .qms-authz-mobile-person-actions {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    flex-wrap: wrap;
+    margin-bottom: .7rem;
+  }
+  .qms-authz.qms-people .qms-authz-mobile-person-actions .qms-authz-mobile-back {
+    margin-bottom: 0;
+  }
+  .qms-authz.qms-people .qms-authz-mobile-nominate {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+    min-height: 44px;
+    padding: .45rem .7rem;
+    border: 1px solid var(--qms-authz-border);
+    border-radius: .45rem;
+    background: var(--qms-authz-surface);
+    color: var(--qms-authz-text);
+    font: inherit;
+  }
+}
