@@ -139,7 +139,11 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const responsesQuery = useQuery({
     queryKey: ["qms-car-control-responses", carId],
     queryFn: () => qmsListCarResponses(carId, false, amoCode),
-    staleTime: 10_000,
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
   const attachmentsQuery = useQuery({
     queryKey: ["qms-car-control-attachments", carId],
@@ -149,12 +153,20 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const inviteQuery = useQuery({
     queryKey: ["qms-car-control-source", carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
-    staleTime: 30_000,
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
   const rcaQuery = useQuery({
     queryKey: ["qms-car-control-rca", amoCode, carId],
     queryFn: () => getCarRcaInternal(amoCode, carId),
-    staleTime: 10_000,
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
   const paretoQuery = useQuery({
     queryKey: ["qms-car-control-pareto", amoCode, carId],
