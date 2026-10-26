@@ -137,3 +137,105 @@ def test_control_loop_routers_use_persistent_post_commit_tenant_context() -> Non
 
     assert car_control_loop_router.set_postgres_tenant_context is set_persistent_control_loop_context
     assert car_control_loop_guard_router.set_postgres_tenant_context is set_persistent_control_loop_context
+
+
+def test_legacy_car_transition_cannot_close_governed_car_without_controlled_authority() -> None:
+    """The PATCH /cars/{id} route uses transition_car, not the close endpoint."""
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000121"),
+        status="PENDING_VERIFICATION",
+        finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = SimpleNamespace(effectiveness_required=True)
+    document_query.filter.return_value.first.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "/control-loop/close" in str(exc_info.value.detail)
+    assert car.status == "PENDING_VERIFICATION"
+    db.add.assert_not_called()
+
+
+def test_submitted_structured_car_cannot_close_when_control_loop_is_missing() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000122"),
+        status="PENDING_VERIFICATION", finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = None
+    document_query.filter.return_value.first.return_value = ("structured-document",)
+
+    with pytest.raises(HTTPException) as exc_info:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+    assert exc_info.value.status_code == 409
+    assert car.status == "PENDING_VERIFICATION"
+
+
+def test_controlled_close_still_requires_structured_independent_verification() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000123"),
+        status="PENDING_VERIFICATION", finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = SimpleNamespace(effectiveness_required=True)
+    document_query.filter.return_value.first.return_value = ("structured-document",)
+
+    with patch(
+        "amodb.apps.quality.car_closure_guards.ensure_structured_car_ready_for_closure",
+        side_effect=HTTPException(status_code=409, detail="Unverified causal corrective action"),
+    ) as readiness:
+        with pytest.raises(HTTPException) as exc_info:
+            transition_car(
+                db, amo_id="amo-1", actor_user_id="reviewer-a",
+                car=car, target_status="CLOSED", evidence_ref="CAR:EVIDENCE",
+                controlled_closure=True,
+            )
+    assert exc_info.value.status_code == 409
+    assert car.status == "PENDING_VERIFICATION"
+    readiness.assert_called_once_with(
+        db, amo_id="amo-1", car_id=car.id, effectiveness_required=True,
+    )
+
+
+def test_plain_legacy_car_keeps_backwards_compatible_transition() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000124"),
+        status="PENDING_VERIFICATION", finding_id=None, evidence_ref=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = None
+    document_query.filter.return_value.first.return_value = None
+
+    with patch("amodb.apps.quality.transitions.write_ledger_event") as audit:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+    assert car.status == "CLOSED"
+    assert car.evidence_ref == "LEGACY:EVIDENCE"
+    audit.assert_called_once()
