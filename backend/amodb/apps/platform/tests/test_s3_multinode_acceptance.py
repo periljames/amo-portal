@@ -60,3 +60,26 @@ def test_real_s3_two_node_upload_restore_integrity_and_delete(monkeypatch, tmp_p
     assert storage.materialize(stored.uri, expected_sha256=checksum).read_bytes() == content
     storage.delete(stored.uri)
     assert not storage.exists(stored.uri)
+
+def test_managed_s3_delete_never_touches_foreign_buckets_or_prefixes(monkeypatch, tmp_path):
+    from amodb import storage
+
+    monkeypatch.setenv("AMO_STORAGE_S3_BUCKET", "managed")
+    monkeypatch.setenv("AMO_STORAGE_S3_PREFIX", "amo-portal")
+    monkeypatch.setenv("AMO_STORAGE_CACHE_DIR", str(tmp_path))
+    deleted = []
+
+    class Client:
+        def delete_object(self, *, Bucket, Key):
+            deleted.append((Bucket, Key))
+
+    monkeypatch.setattr(storage, "_client", lambda: Client())
+    with pytest.raises(ValueError, match="outside"):
+        storage.delete("s3://foreign/amo-portal/tenant/file.pdf")
+    with pytest.raises(ValueError, match="outside"):
+        storage.delete("s3://managed/unrelated/tenant/file.pdf")
+    assert deleted == []
+    storage.delete("s3://managed/amo-portal/tenant/file.pdf")
+    assert deleted == [("managed", "amo-portal/tenant/file.pdf")]
+
+
