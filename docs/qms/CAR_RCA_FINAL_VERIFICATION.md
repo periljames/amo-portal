@@ -1,10 +1,10 @@
 # CAR / RCA — Phase 3 verification and release evidence
 
-**Assessment:** 2026-10-26. **Repository:** `periljames/amo-portal`. **One consolidated PR:** [#568](https://github.com/periljames/amo-portal/pull/568). **Feature branch:** `feat/qms-car-rca-unified-20261022`. **Verified application-code snapshot before this documentation commit:** `4c7b73b1f817fb3d241bb4bade9f1cd5305df6c6`. **Merge state:** OPEN, not merged. **Evidence standard:** PASSED requires actual command/job or proven scenario, not source presence; NOT RUN and BLOCKED are not passes.
+**Assessment:** 2026-10-26. **Repository:** `periljames/amo-portal`. **One consolidated PR:** [#568](https://github.com/periljames/amo-portal/pull/568). **Feature branch:** `feat/qms-car-rca-unified-20261022`. **Most recent application-code snapshot examined:** `876b918170bd4d7b3ce2895647c9e28d95f938e8` (before this report update). **Merge state:** OPEN, not merged. **Evidence standard:** PASSED requires actual command/job or proven scenario, not source presence; NOT RUN and BLOCKED are not passes.
 
 ## Executive decision
 
-**Phase 3 is not fully certified for production deployment.** All eleven PR-targeted workflows passed on application SHA `66bfdc88caba3ba71f44d72d48e9e07167a724b9`. Further strict negative contracts and actual-browser token/viewport/screenshot assertions were added after that SHA. At the time this report was first authored, the full checks for code SHA `4c7b73b1f817fb3d241bb4bade9f1cd5305df6c6` were **PENDING**. Update the run evidence below only after jobs complete.
+**Phase 3 is not fully certified for production deployment.** All eleven PR-targeted workflows passed on application SHA `66bfdc88caba3ba71f44d72d48e9e07167a724b9`. Further strict negative contracts and actual-browser token/viewport/screenshot assertions were added after that SHA. Further strict negative contracts and real-browser token/mobile/screenshot assertions were subsequently verified in a new FastAPI/PostgreSQL run. Other jobs on `876b918` remain **IN PROGRESS** as detailed in the final status addendum.
 
 Release blockers are not allowed to disappear on the strength of a successful mocked test: (1) production storage/backfill/restore/large-file verification; (2) direct RCA two-tenant and multi-action/concurrency acceptance; (3) private Tailnet access requiring dedicated synthetic environment credentials; and (4) upstream main reconciliation before merge. None of these blockers justifies weakening CI or granting fictitious approval.
 
@@ -102,7 +102,7 @@ The existing `frontend/src/services/qmsAuditHubActions.test.ts` is included in t
 
 ## Feature changes and exact PR file inventory
 
-The changed-file paths below are the complete PR inventory reported by GitHub before this report itself is added. They include Phase 1/2 code and Phase 3 fixes; the Phase 3 specific additions include `test_car_rca_phase3_contract.py`, updates to `qms-car-control-loop-ci.yml`, strict real-browser cases and both review fixes.
+GitHub's current changed-file enumeration contains **57 paths** on code head `876b918`. The list includes the Phase 3 verification report and navigation regression fixes and is the authoritative PR inventory at this assessment.
 
 ### .github
 
@@ -137,11 +137,13 @@ The changed-file paths below are the complete PR inventory reported by GitHub be
 
 ### docs
 
+- `docs/qms/CAR_RCA_FINAL_VERIFICATION.md`
 - `docs/qms/CAR_RCA_IMPLEMENTATION_LEDGER.md`
 - `docs/qms/CAR_RCA_PHASE1_BASELINE.md`
 
 ### frontend
 
+- `frontend/src/components/QMS/QmsNavigationMenus.tsx`
 - `frontend/src/components/QMS/carRca/CarInviteGovernance.tsx`
 - `frontend/src/components/QMS/carRca/CarRcaActions.tsx`
 - `frontend/src/components/QMS/carRca/CarRcaInternalReview.tsx`
@@ -170,6 +172,29 @@ The changed-file paths below are the complete PR inventory reported by GitHub be
 - `frontend/tests/e2e/qms-operational-semantic-regressions.spec.ts`
 - `frontend/tests/e2e/qms-role-gates.spec.ts`
 - `frontend/tests/e2e/qms-usability-enhancements.spec.ts`
+
+## Final Phase 3 evidence refresh — 26 October 2026
+
+**Verified application code:** `876b918170bd4d7b3ce2895647c9e28d95f938e8`. The latest real-browser CAR CI [run 40356945688](https://github.com/periljames/amo-portal/actions/runs/40356945688) is **PASSED** on this code SHA, including the new invalid token 404, revoked existing token 410, no-store/related CAR isolation check, 390px public mobile overflow assertion, full respondent/Quality RCA rejection/rework, corrective implementation, effectiveness and authorized closeout, and a separate PostgreSQL state-proof step. CI uploaded [artifact 12666193557](https://github.com/periljames/amo-portal/actions/runs/40356945688/artifacts/12666193557), name `qms-car-real-40356945688-1`, size 682003 bytes. Screenshot paths under the workflow's `frontend/test-results` include `phase3-quality-rework.png`, `phase3-quality-closed.png`, and `phase3-public-closed-mobile.png`. This validates the test path, not a production Tailnet deployment.
+
+**Additional regression repaired:** current main changed the QMS page menus from nested `<summary>` groups to direct-link navigation. The Playwright error was not a missing role permission or a CAR bug; it was old navigation assertions on a merged PR build. The feature branch now uses the current upstream `QmsNavigationMenus.tsx`. The tests verify direct links to the canonical `?workspace=people` and `/audits/dashboard` destinations. A separate Audit lifecycle Playwright run [40356114938](https://github.com/periljames/amo-portal/actions/runs/40356114938) **PASSED** after the first correction. The latest Audit lifecycle and QMS Operational UI jobs for both fixes were still **IN PROGRESS, Chromium installation** at this refresh. The Test is not waived.
+
+**Latest-head CI snapshot (not future-proof):**
+- `QMS CAR Control Loop CI`: **IN PROGRESS / PENDING**, [run 40356945576](https://github.com/periljames/amo-portal/actions/runs/40356945576)
+- `QMS Live Audit Security`: **PASSED**, [run 40356945975](https://github.com/periljames/amo-portal/actions/runs/40356945975)
+- `QMS Assurance OS Completion CI`: **PASSED**, [run 40356945607](https://github.com/periljames/amo-portal/actions/runs/40356945607)
+- `QMS Planner CI`: **IN PROGRESS / PENDING**, [run 40356945722](https://github.com/periljames/amo-portal/actions/runs/40356945722)
+- `QMS Operational UI CI`: **IN PROGRESS / PENDING**, [run 40356945714](https://github.com/periljames/amo-portal/actions/runs/40356945714)
+- `Audit lifecycle Playwright`: **IN PROGRESS / PENDING**, [run 40356945945](https://github.com/periljames/amo-portal/actions/runs/40356945945)
+- `Document Control Lifecycle CI`: **IN PROGRESS / PENDING**, [run 40356945887](https://github.com/periljames/amo-portal/actions/runs/40356945887)
+- `QMS Live Audit Setup Prepare Real Browser CI`: **IN PROGRESS / PENDING**, [run 40356946243](https://github.com/periljames/amo-portal/actions/runs/40356946243)
+- `Quality Module CI`: **PASSED**, [run 40356945926](https://github.com/periljames/amo-portal/actions/runs/40356945926)
+- `QMS CAR Control Loop Real Browser CI`: **PASSED**, [run 40356945688](https://github.com/periljames/amo-portal/actions/runs/40356945688)
+- `Platform Control Plane CI`: **PASSED**, [run 40356945562](https://github.com/periljames/amo-portal/actions/runs/40356945562)
+
+**Review state:** 2 inline review threads; 2 RESOLVED, 0 OPEN. No authorized production maintenance action or PR merge was performed.
+
+**Remaining release gates:** three upstream main commits still need deliberate four-file reconciliation for router/service/QMS UI clients; historical live object evidence migration and restore, true two-tenant adversarial browser verification, multiple-action and concurrency stress, advanced Fishbone/Pareto full-browser usability, large file/retry/recovery, and private Tailnet acceptance remain **BLOCKED or NOT RUN**. These are unresolved verification limits, not simulated green checks.
 
 ## Release decision, rollback and next gates
 
