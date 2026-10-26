@@ -465,8 +465,9 @@ test("QMS root presents the assurance Control Room and compact navigable workspa
 
   await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
   const assurancePages = page.getByRole("navigation", { name: "Assurance pages", exact: true });
-  await assurancePages.locator("summary").filter({ hasText: /^Audits$/ }).click();
-  await assurancePages.getByRole("link", { name: "Dashboard", exact: true }).click();
+  const auditsLink = assurancePages.getByRole("link", { name: "Audits", exact: true });
+  await expect(auditsLink).toHaveAttribute("href", /\/quality\/audits\/dashboard$/);
+  await auditsLink.click();
   // The governed audit dashboard remains reachable from the compact Assurance menu.
   await expect(page).toHaveURL(/\/quality\/audits\/dashboard$/);
 });
