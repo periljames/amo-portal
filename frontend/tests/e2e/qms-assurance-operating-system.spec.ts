@@ -148,7 +148,7 @@ async function prepare(page: Page): Promise<void> {
         home_role: "QUALITY_INSPECTOR", department: "Quality", workforce_status: "Active",
         authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
         open_cases: 1,
-      }], total: 1 });
+      }], total: 1, limit: 100, offset: 0, has_more: false });
     }
     if (path.endsWith("/quality/people/authorization-control/people/auditor-user-a")) {
       return json(route, {
@@ -171,7 +171,7 @@ async function prepare(page: Page): Promise<void> {
         department: "Quality", authorization: "Auditor", case_type: "RENEWAL",
         status: "READY_FOR_DECISION", nomination_date: "2026-08-08", nominator: "Quality Manager",
         recommendation: "Renew current authorization.", updated_at: "2026-08-09T10:00:00Z", next_action: "Decision required",
-      }], total: 1 });
+      }], total: 1, limit: 100, offset: 0, has_more: false });
     }
     if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
     if (path.endsWith("/quality/people/authorization-control/authorizations")) {
