@@ -226,7 +226,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
         evidence_ref: "CAR-NEGATIVE:unverified-action",
       });
       expect(attemptedClose.status, `PATCH ${legacyPath}: ${JSON.stringify(attemptedClose.body)}`).toBe(409);
-      expect(JSON.stringify(attemptedClose.body)).toMatch(/control-loop\\/close|governed CAR/i);
+      expect(JSON.stringify(attemptedClose.body)).toMatch(/control-loop\/close|governed CAR/i);
     }
     const stillActive = await authenticatedRequest(internalPage, "GET", `${carEndpoint}/control-loop`);
     expect(stillActive.status, JSON.stringify(stillActive.body)).toBe(200);
