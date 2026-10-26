@@ -122,7 +122,7 @@ function contrastRatio(foreground: string, background: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-async function toolbarContrast(page: Page): Promise<{ icon: number; muted: number }> {
+async function toolbarContrast(page: Page): Promise<{ icon: number; muted: number; computedColors: { background: string; icon: string; muted: string } }> {
   const colors = await page.evaluate(() => {
     const toolbar = document.querySelector<HTMLElement>(".pdfv3-toolbar");
     const iconButton = document.querySelector<HTMLElement>(".pdfv3-toolbar button[aria-label='Print PDF']");
@@ -138,6 +138,7 @@ async function toolbarContrast(page: Page): Promise<{ icon: number; muted: numbe
   return {
     icon: contrastRatio(colors.icon, colors.background),
     muted: contrastRatio(colors.muted, colors.background),
+    computedColors: colors,
   };
 }
 
@@ -259,8 +260,8 @@ test.describe("Publications reader integrated real-world stability", () => {
     for (const scheme of ["dark", "light"]) {
       await page.evaluate((value) => document.body.setAttribute("data-color-scheme", value), scheme);
       const contrast = await toolbarContrast(page);
-      expect(contrast.icon).toBeGreaterThanOrEqual(4.5);
-      expect(contrast.muted).toBeGreaterThanOrEqual(4.5);
+      expect(contrast.icon, `Scheme ${scheme}; toolbar computed colors ${JSON.stringify(contrast.computedColors)}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast.muted, `Scheme ${scheme}; toolbar computed colors ${JSON.stringify(contrast.computedColors)}`).toBeGreaterThanOrEqual(4.5);
       await expect(page.locator(".pdfv5-navigator")).toHaveCSS(
         "color",
         scheme === "light" ? "rgb(15, 23, 42)" : "rgb(248, 250, 252)",
