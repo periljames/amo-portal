@@ -34,6 +34,11 @@ def backfill(*, amo_id: str, apply: bool, limit: int) -> dict:
             .order_by(models.CARAttachment.uploaded_at, models.CARAttachment.id)
             .limit(limit).all())
         for attachment, car in rows:
+            # set_config(..., is_local=true) expires after every commit; renew
+            # before inspecting ORM attributes or issuing the next DB write.
+            set_postgres_tenant_context(
+                db, amo_id=amo_id, user_id="00000000-0000-0000-0000-000000000000",
+            )
             result["examined"] += 1
             uri = str(attachment.file_ref or "")
             if uri.startswith("s3://") or (uri and storage.exists(uri)):
@@ -49,6 +54,9 @@ def backfill(*, amo_id: str, apply: bool, limit: int) -> dict:
                     continue
                 except ValueError:
                     pass
+            if not attachment.sha256:
+                result["missing_or_invalid"].append({"attachment_id": str(attachment.id), "reason": "missing_sha256"})
+                continue
             try:
                 source = car_attachment_path(
                     uri, car_id=car.id, expected_sha256=attachment.sha256,
