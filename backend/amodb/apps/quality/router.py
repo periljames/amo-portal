@@ -6249,6 +6249,26 @@ def update_car(
     if not data:
         return car
 
+    # Closure timestamps and governed deadlines are decisions with their own
+    # permission, evidence and audit workflows. Generic CAR edits must not
+    # manufacture a closure timestamp or rewrite an approved control schedule.
+    if "closed_at" in data:
+        raise HTTPException(
+            status_code=409,
+            detail="The CAR closure timestamp is system-managed. Complete closure through the authorized CAR workflow.",
+        )
+    if {"due_date", "target_closure_date"} & data.keys():
+        from .car_control_loop_models import QualityCARControlProfile
+        governed = db.query(QualityCARControlProfile.id).filter(
+            QualityCARControlProfile.amo_id == car.amo_id,
+            QualityCARControlProfile.car_id == car.id,
+        ).first()
+        if governed is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Governed CAR deadlines can only be amended through a controlled deadline-change request and approval.",
+            )
+
     previous_assignee = car.assigned_to_user_id
     changed_status = False
     assignee_allowed = {
