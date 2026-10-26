@@ -463,6 +463,15 @@ const QualityAuditRegisterPage: React.FC = () => {
             <div className="qa-register-grid-page__summary">
               {registerQuery.isFetching && !registerQuery.isLoading ? <span className="qa-register-grid-page__refreshing"><RefreshCw size={13} aria-hidden /> Updating</span> : null}
               {hasFilters ? <button type="button" onClick={clearFilters}>Clear filters</button> : null}
+              {hasQmsRolePermission("qms.reports.view") ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(qmsModulePath(amoCode, "reports", "car-performance"))}
+                  title="Analyse findings and corrective-action performance"
+                >
+                  Analysis
+                </button>
+              ) : null}
             </div>
           </div>
 
