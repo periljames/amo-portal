@@ -802,10 +802,14 @@ def update_invite_access_control(
     control = _control_for_car(db, car)
     if control is not None and control.revoked_at is not None:
         raise HTTPException(status_code=409, detail="A revoked token cannot be reactivated. Issue a new controlled invitation.")
-    if payload.expires_at is not None:
-        expiry = payload.expires_at
+    expiry = payload.expires_at
+    if expiry is not None:
+        # Persist an absolute UTC instant. Never validate a normalized value
+        # and then save an unnormalized, timezone-less request timestamp.
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
+        else:
+            expiry = expiry.astimezone(timezone.utc)
         if expiry <= _utcnow() and not payload.revoke:
             raise HTTPException(status_code=422, detail="Future expiry must be after the current time.")
     if control is None:
@@ -815,7 +819,7 @@ def update_invite_access_control(
         )
         db.add(control)
     if "expires_at" in payload.model_fields_set:
-        control.expires_at = payload.expires_at
+        control.expires_at = expiry
     if payload.revoke:
         control.revoked_at = _utcnow()
     control.reason = payload.reason.strip()
