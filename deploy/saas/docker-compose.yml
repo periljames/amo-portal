@@ -94,7 +94,7 @@ services:
       - "1"
       - --proxy-headers
       - --forwarded-allow-ips
-      - ${FORWARDED_ALLOW_IPS:-*}
+      - ${FORWARDED_ALLOW_IPS:?Trusted proxy IP range must be configured}
     environment:
       <<: *backend-environment
       DB_POOL_SIZE: ${PLATFORM_OPS_DB_POOL_SIZE:-3}
