@@ -54,6 +54,17 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
     return () => { active = false; };
   }, [amoCode, carId]);
 
+  useEffect(() => {
+    let active = true;
+    const changed = (event: Event) => {
+      if ((event as CustomEvent<{carId:string}>).detail?.carId !== carId) return;
+      void getCarRcaInternal(amoCode, carId).then(result => { if(active) setData(result); })
+        .catch(cause => { if(active) setError(cause instanceof Error ? cause.message : "Investigation refresh failed."); });
+    };
+    window.addEventListener("amo:car-feedback-updated", changed);
+    return () => { active=false; window.removeEventListener("amo:car-feedback-updated", changed); };
+  }, [amoCode, carId]);
+
   const review = async (action: CarRcaAction, state: "ACCEPTED" | "REJECTED" | "VERIFIED") => {
     if (busy) return;
     const reason = (notes[action.id] || "").trim();

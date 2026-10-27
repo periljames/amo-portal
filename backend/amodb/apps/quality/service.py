@@ -764,12 +764,14 @@ def add_car_action(
     action_type: CARActionType,
     message: str,
     actor_user_id: Optional[str],
+    visibility: str = "INTERNAL",
 ) -> models.CARActionLog:
     log = models.CARActionLog(
         car=car,
         action_type=action_type,
         message=message,
         actor_user_id=actor_user_id,
+        visibility=visibility,
     )
     db.add(log)
     return log

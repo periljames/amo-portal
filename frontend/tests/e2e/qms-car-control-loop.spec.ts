@@ -184,6 +184,10 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     const request = route.request();
     const url = request.url();
     const controlLoopBase = `/api/maintenance/tenant-a/quality/cars/${CAR_ID}/control-loop`;
+    if(new URL(url).pathname.endsWith(`/cars/${CAR_ID}/feedback`)) {
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({car_id:CAR_ID,status:"IN_PROGRESS",root_cause_status:"ACCEPTED",capa_status:"ACCEPTED",items:[],next_cursor:null})});
+      return;
+    }
 
     if (new URL(url).pathname.endsWith(`/cars/${CAR_ID}/investigation`)) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({

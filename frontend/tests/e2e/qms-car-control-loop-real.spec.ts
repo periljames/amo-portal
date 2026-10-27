@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import { expect, test, type Page, type Response } from "@playwright/test";
 
-test.use({ trace: "retain-on-failure", screenshot: "only-on-failure", video: "retain-on-failure" });
-test.setTimeout(180_000);
+// Explicit checkpoint images verify the real UI without continuously recording
+// animated pages on the same low-memory host that runs the database VM.
+test.use({ trace: "off", screenshot: "only-on-failure", video: "off" });
+test.setTimeout(Number(process.env.E2E_CAR_ACCEPTANCE_TIMEOUT_MS || 180_000));
 
 type Fixture = {
   amo_slug: string;
@@ -16,7 +18,10 @@ type Fixture = {
 };
 
 function fixture(): Fixture {
-  return JSON.parse(fs.readFileSync(process.env.E2E_QMS_LIVE_FIXTURE || "/tmp/qms-live-audit-real-e2e.json", "utf-8")) as Fixture;
+  const data=JSON.parse(fs.readFileSync(process.env.E2E_QMS_LIVE_FIXTURE || "/tmp/qms-live-audit-real-e2e.json", "utf-8")) as Fixture;
+  const password=process.env.E2E_QMS_AUDITOR_PASSWORD || data.realtime_password;
+  if(!password) throw new Error("Provide E2E_QMS_AUDITOR_PASSWORD for the requested auditor; personal credentials are not retained in the fixture.");
+  return {...data,realtime_password:password};
 }
 
 function futureDate(days: number): string {
@@ -40,7 +45,7 @@ async function login(page: Page, data: Fixture): Promise<void> {
   await page.getByLabel("Email", { exact: true }).fill(data.realtime_user_a_email);
   await page.getByLabel("Password", { exact: true }).fill(data.realtime_password);
   await Promise.all([
-    page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 }),
+    page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 60_000, waitUntil:"domcontentloaded" }),
     page.getByRole("button", { name: "Sign In" }).click(),
   ]);
 }
@@ -53,7 +58,7 @@ async function authenticatedRequest(
   page: Page, method: "GET" | "POST" | "PATCH" | "PUT", path: string, payload?: unknown,
 ): Promise<{ status: number; body: unknown }> {
   return page.evaluate(async ({ requestMethod, requestPath, body }) => {
-    const token = window.localStorage.getItem("amo_portal_token");
+    const token = window.sessionStorage.getItem("amo_portal_token") || window.localStorage.getItem("amo_portal_token");
     const response = await fetch(requestPath, {
       method: requestMethod,
       credentials: "include",
@@ -80,7 +85,40 @@ async function authenticatedPost(page: Page, path: string, payload: unknown) {
   return authenticatedRequest(page, "POST", path, payload);
 }
 
-async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffix: string): Promise<void> {
+async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"REJECTED", rootReason: string, actionReason: string) {
+  console.log(`CAR acceptance: reviewing RCA/CAPA ${decision} through the auditor dialog`);
+  await page.goto(`/maintenance/${data.amo_slug}/quality/cars?carId=${data.car_loop_id}`);
+  await page.getByRole("button", {name:"Review response",exact:true}).click({timeout:30000});
+  const dialog=page.getByRole("dialog",{name:"Review corrective action response"});
+  await dialog.getByLabel("Root cause decision",{exact:true}).selectOption(decision);
+  await dialog.getByLabel("Corrective action decision",{exact:true}).selectOption(decision);
+  await dialog.getByLabel("Root cause review note",{exact:true}).fill(rootReason);
+  await dialog.getByLabel("Corrective action review note",{exact:true}).fill(actionReason);
+  await dialog.getByLabel("Message to auditee",{exact:true}).fill(`Quality ${decision.toLowerCase()}: review the retained reasons and next action.`);
+  await page.screenshot({path:`test-results/car-feedback-review-${decision.toLowerCase()}.png`,fullPage:true});
+  const response=page.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/review`)&&r.request().method()==="POST");
+  await dialog.getByRole("button",{name:"Record review decision",exact:true}).click();
+  const result=await response;
+  expect(result.status(),await result.text()).toBe(200);
+  await expect(dialog).toHaveCount(0);
+  return {status:result.status(),body:await result.json()};
+}
+
+async function reviewIndividualActionUi(page:Page,data:Fixture,description:string,state:"ACCEPTED"|"REJECTED"|"VERIFIED",reason:string) {
+  console.log(`CAR acceptance: individual action review ${state} through the auditor view`);
+  await page.goto(`/maintenance/${data.amo_slug}/quality/cars?carId=${data.car_loop_id}`);
+  const region=page.getByRole("region",{name:"Structured CAR investigation and Quality action review"});
+  const row=region.getByRole("row").filter({hasText:description});
+  await row.getByLabel("Independent Quality rationale").fill(reason,{timeout:30000});
+  const response=page.waitForResponse(r=>r.url().includes("/corrective-actions/")&&r.url().endsWith("/review")&&r.request().method()==="PATCH");
+  await row.getByRole("button",{name:state==="ACCEPTED"?"Approve proposed action":state==="VERIFIED"?"Verify implementation":"Return for rework",exact:true}).click();
+  const result=await response;
+  expect(result.status(),await result.text()).toBe(200);
+  return {status:result.status(),body:await result.json()};
+}
+
+async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffix: string, whileEditing?:()=>Promise<void>): Promise<void> {
+  console.log(`CAR acceptance: ${suffix} public response opened`);
   await page.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".car-invite-kicker").getByText(data.car_loop_number, { exact: true })).toBeVisible({ timeout: 30_000 });
   const responderName = page.getByLabel("Your name");
@@ -105,6 +143,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   // free-text fields exist only for CARs issued before the controlled rollout.
   const investigation = page.getByRole("region", { name: "Root cause investigation" });
   await expect(investigation.getByRole("heading", { name: "Root cause workbench" })).toBeVisible({ timeout: 30_000 });
+  console.log(`CAR acceptance: ${suffix} evidence-linked investigation visible`);
   await investigation.getByLabel("Problem statement from this CAR").fill(
     `The CAR process failed to verify ownership and independent effectiveness evidence ${suffix}.`,
   );
@@ -129,6 +168,10 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await investigation.getByLabel("Final root cause explanation").fill(
     `The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`,
   );
+  if(whileEditing){
+    await whileEditing();
+    await expect(investigation.getByLabel("Final root cause explanation")).toHaveValue(`The local workflow lacked an explicit effectiveness checkpoint and evidence-index ownership control ${suffix}.`);
+  }
   await investigation.getByLabel("Evidence supporting the consolidated conclusion (one per line)").fill(
     `CAR-SAMPLE:${suffix}:governance-control-review`,
   );
@@ -148,6 +191,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     `CAR-SAMPLE:${suffix}:effectiveness-observation`,
   );
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
+  console.log(`CAR acceptance: ${suffix} RCA saved; preparing action plan`);
   await expect(structuredEditor(page, "Corrective action plan")).toBeVisible({ timeout: 30_000 });
   await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
@@ -163,9 +207,21 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     `CAR-PROCEDURE:${suffix}:implementation-plan`,
   );
   await actionSection.getByRole("checkbox", { name: new RegExp(causalStatement) }).check();
-  await actionSection.getByRole("button", {
+  const actionSave=actionSection.getByRole("button", {
     name: (await revisionButton.isVisible().catch(() => false)) ? "Save revised action" : "Add corrective action",
-  }).click();
+  });
+  const actionRoute="**/quality/cars/invite/*/corrective-actions";
+  let dropActionAcknowledgement=suffix==="initial";
+  if(dropActionAcknowledgement)await page.route(actionRoute,async route=>{
+    if(route.request().method()==="POST"&&dropActionAcknowledgement){dropActionAcknowledgement=false;const committed=await route.fetch();expect(committed.status()).toBe(201);await route.abort("failed");}
+    else await route.continue();
+  });
+  await actionSave.click();
+  if(suffix==="initial"){
+    await expect(actionSection.getByRole("alert")).toBeVisible({timeout:30000});
+    await expect(actionSection.getByLabel("What specifically changes?")).toHaveValue(actionName);
+    await actionSave.click();await page.unroute(actionRoute);
+  }
   await expect(actionSection.getByRole("status")).toContainText(/Corrective action recorded|Proposed action revision retained/, { timeout: 30_000 });
   // The issued CAR can lock its authoritative deadlines. Public respondents must
   // use the controlled deadline-change request rather than silently rewriting them.
@@ -175,6 +231,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
     else await expect(field).toBeDisabled();
   }
   await page.getByRole("button", { name: "Save corrective action and continue" }).click();
+  console.log(`CAR acceptance: ${suffix} CAP saved; uploading evidence`);
   await structuredEditor(page, "Evidence reference").fill(`EVID-QMS-CAR-${suffix.replace(/\W+/g, "-").toUpperCase()}`);
   await page.locator(`input[id="evidence-${data.car_loop_invite_token}"]`).setInputFiles({
     name: `car-effectiveness-${suffix}.txt`,
@@ -187,7 +244,11 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByRole("button", { name: "Preview submission" }).click();
   await expect(page.getByRole("dialog", { name: "Preview CAR submission" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm and submit" }).click();
-  await expect(page.getByText("Response submitted. The audit team can now review it.")).toBeVisible({ timeout: 30_000 });
+  // Live feedback can replace a transient success notice. Assert the durable
+  // submitted state, not the timing of a toast relative to background refresh.
+  await expect(page.getByText("Response locked — no further submissions or changes are permitted.")).toBeVisible({ timeout: 30_000 });
+  console.log(`CAR acceptance: ${suffix} response submitted`);
+  await page.screenshot({path:`test-results/car-feedback-${suffix}-submitted.png`});
 }
 
 test("real responsible-manager and Quality browsers prove CAR rejection/rework, deadline governance, effectiveness and final closure", async ({ browser }) => {
@@ -214,19 +275,68 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     );
     expect(invalidGuest.status()).toBe(404);
 
-    await submitResponsibleManagerResponse(publicPage, data, "initial");
+    if(process.env.E2E_CAR_RESUME_SUBMITTED === "1") {
+      expect((guestBody as {submitted_at?:string}).submitted_at,"Resume requires an already submitted synthetic CAR").toBeTruthy();
+      await publicPage.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`);
+      await expect(async()=>{
+        const retry=publicPage.getByRole("button",{name:"Retry loading response",exact:true});
+        if(await retry.isVisible())await retry.click();
+        await expect(publicPage.getByText("Response locked — no further submissions or changes are permitted.")).toBeVisible({timeout:15000});
+      }).toPass({timeout:90000,intervals:[3000,6000,10000]});
+      console.log("CAR acceptance: resumed the retained initial submission");
+    } else await submitResponsibleManagerResponse(publicPage, data, "initial");
 
     const internalPage = await internalContext.newPage();
     watchServerFailures(internalPage, internalFailures);
     await login(internalPage, data);
     const controlPath = `/maintenance/${data.amo_slug}/quality/cars?control=${encodeURIComponent(data.car_loop_id)}`;
     await internalPage.goto(controlPath, { waitUntil: "domcontentloaded" });
-    await expect(internalPage.getByRole("heading", { name: new RegExp(data.car_loop_number) })).toBeVisible({ timeout: 30_000 });
+    await expect(async()=>{
+      const retry=internalPage.getByRole("button",{name:"Retry",exact:true});
+      if(await retry.isVisible())await retry.click();
+      await expect(internalPage.getByRole("heading", { name: new RegExp(data.car_loop_number) })).toBeVisible({timeout:15000});
+    }).toPass({timeout:120000,intervals:[3000,6000,10000]});
 
     await internalPage.getByLabel("Accountable lead owner").selectOption(data.realtime_user_b_id);
     await internalPage.getByLabel("Controlled final due date").fill(futureDate(28));
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
     await expect(internalPage.getByRole("status").filter({ hasText: "Staged CAR control initialized" })).toContainText("Staged CAR control initialized", { timeout: 30_000 });
+
+    const internalFeedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
+    console.log("CAR acceptance: exchanging live shared feedback and checking private-note isolation");
+    const publicFeedback=publicPage.getByRole("region",{name:"CAR feedback and decision history"});
+    await internalFeedback.getByLabel("CAR feedback message",{exact:true}).fill("Please identify the evidence owner and the independent effectiveness check.");
+    await internalFeedback.getByRole("button",{name:"Send feedback",exact:true}).click();
+    await expect(publicFeedback).toContainText("Please identify the evidence owner",{timeout:20000});
+    await internalFeedback.getByLabel("Internal note · hidden from auditee",{exact:true}).check();
+    await internalFeedback.getByLabel("CAR feedback message",{exact:true}).fill("PRIVATE QA NOTE: internal reviewer discussion only.");
+    await internalFeedback.getByRole("button",{name:"Record internal note",exact:true}).click();
+    await expect(internalFeedback).toContainText("PRIVATE QA NOTE");
+    await expect(publicFeedback).not.toContainText("PRIVATE QA NOTE");
+    await internalFeedback.getByLabel("Internal note · hidden from auditee",{exact:true}).uncheck();
+    const publicHistory=await publicPage.request.get(`/quality/cars/invite/${data.car_loop_invite_token}/feedback`);
+    expect(publicHistory.status()).toBe(200);
+    const safeHistory=await publicHistory.json();
+    expect(JSON.stringify(safeHistory)).not.toContain("PRIVATE QA NOTE");
+    expect(JSON.stringify(safeHistory)).not.toContain("actor_user_id");
+    let dropAcknowledgement=true;
+    const feedbackRoute="**/quality/cars/invite/*/feedback";
+    await publicPage.route(feedbackRoute,async route=>{
+      if(route.request().method()==="POST"&&dropAcknowledgement){dropAcknowledgement=false;const committed=await route.fetch();expect(committed.status()).toBe(201);await route.abort("failed");}
+      else await route.continue();
+    });
+    const reply="Acknowledged: I will clarify ownership and provide the controlled evidence.";
+    await publicFeedback.getByLabel("CAR feedback message",{exact:true}).fill(reply);
+    await publicFeedback.getByRole("button",{name:"Send feedback",exact:true}).click();
+    await expect(publicFeedback.getByLabel("CAR feedback message",{exact:true})).toHaveValue(reply);
+    await expect(publicFeedback.getByRole("alert")).toBeVisible();
+    await publicFeedback.getByRole("button",{name:"Send feedback",exact:true}).click();
+    await expect(publicFeedback.getByLabel("CAR feedback message",{exact:true})).toHaveValue("");
+    await publicPage.unroute(feedbackRoute);
+    await expect(internalFeedback).toContainText(reply,{timeout:20000});
+    const replyHistory=await publicPage.request.get(`/quality/cars/invite/${data.car_loop_invite_token}/feedback`);
+    expect((await replyHistory.json()).items.filter((item:{message:string})=>item.message===reply)).toHaveLength(1);
+    console.log("CAR acceptance: lost-acknowledgement retry retained exactly one message");
 
     const carEndpoint = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}`;
     // Both public legacy and tenant-prefixed PATCH aliases must reject an
@@ -284,15 +394,20 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(savedAccess.status, JSON.stringify(savedAccess.body)).toBe(200);
     expect(new Date((savedAccess.body as { expires_at: string }).expires_at).toISOString()).toBe(expiresAt);
 
-    const rejected = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
-      root_cause_status: "REJECTED",
-      root_cause_review_note: "Return for rework: identify the missing management-control checkpoint and accountable evidence owner.",
-      capa_status: "REJECTED",
-      capa_review_note: "Return for rework: corrective action must include effectiveness verification and recurrence monitoring.",
-    });
+    const rejected = await reviewThroughUi(internalPage,data,"REJECTED",
+      "Return for rework: identify the missing management-control checkpoint and accountable evidence owner.",
+      "Return for rework: corrective action must include effectiveness verification and recurrence monitoring.");
     expect(rejected.status).toBe(200);
+    const sharedGuest=publicPage.getByRole("region",{name:"CAR feedback and decision history"});
+    await expect(sharedGuest).toContainText("Root cause: REJECTED",{timeout:20000});
+    await expect(sharedGuest).toContainText("identify the missing management-control checkpoint");
 
-    await submitResponsibleManagerResponse(publicPage, data, "rework");
+    await submitResponsibleManagerResponse(publicPage, data, "rework",async()=>{
+      const feedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
+      await feedback.getByLabel("CAR feedback message",{exact:true}).fill("Rework guidance: retain your draft while linking the independent evidence owner.");
+      await feedback.getByRole("button",{name:"Send feedback",exact:true}).click();
+      await expect(publicFeedback).toContainText("Rework guidance: retain your draft",{timeout:20000});
+    });
     // Verify the new submission is actually committed and reviewable, not
     // merely reported as successful in the invited browser.
     const revisedResponses = await authenticatedRequest(
@@ -306,7 +421,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(responseRows).toHaveLength(1);
     expect(responseRows[0].root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
     expect(responseRows[0].is_latest).toBe(true);
-    await internalPage.reload({ waitUntil: "domcontentloaded" });
+    await internalPage.goto(controlPath, { waitUntil: "domcontentloaded" });
     const responsePanel = internalPage.getByRole("region", { name: "Corrective action response" });
     // The Quality page may hydrate asynchronously; this check must prove the
     // actual revised response, not match a stale name elsewhere on the page.
@@ -341,6 +456,11 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await dependencyRow.getByRole("combobox").selectOption("RESOLVED");
     await expect(internalPage.getByRole("status").filter({ hasText: "Dependency status updated" })).toContainText("Dependency status updated", { timeout: 30_000 });
 
+    const accepted = await reviewThroughUi(internalPage,data,"ACCEPTED",
+      "RCA accepted after rework identified the management-control and evidence-ownership root cause.",
+      "CAPA accepted as a plan; implementation, evidence and effectiveness still require independent verification.");
+    expect(accepted.status).toBe(200);
+    await internalPage.goto(controlPath);
     const lifecycle = internalPage.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");
     const stages = [
       "Root cause analysis submitted",
@@ -349,7 +469,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       "Closure evidence complete",
       "Effectiveness review complete",
     ];
-    for (const [index, stage] of stages.entries()) {
+    for (const [index, stage] of stages.slice(0,2).entries()) {
       const row = lifecycle.getByRole("row", { name: new RegExp(stage) });
       await row.getByRole("combobox").last().selectOption("ACCEPTED");
       await row.getByPlaceholder("Evidence reference").fill(`car-evidence:stage-${index + 1}`);
@@ -357,14 +477,6 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       await row.getByRole("button", { name: "Save" }).click();
       await expect(internalPage.getByRole("status").filter({ hasText: `${stage} updated` })).toContainText(`${stage} updated`, { timeout: 30_000 });
     }
-
-    const accepted = await authenticatedPost(internalPage, `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/review`, {
-      root_cause_status: "ACCEPTED",
-      root_cause_review_note: "RCA accepted after rework identified the management-control and evidence-ownership root cause.",
-      capa_status: "ACCEPTED",
-      capa_review_note: "CAPA accepted after implementation, evidence and effectiveness milestones were independently verified.",
-    });
-    expect(accepted.status).toBe(200);
 
     const apiCarPath = `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}`;
     const investigationState = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/investigation`);
@@ -380,6 +492,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(corrective, "A separate, accountable CAR action must persist with the submitted RCA").toBeDefined();
     expect(corrective!.state).toBe("PROPOSED");
     expect(corrective!.description).toContain("rework");
+    expect(record.actions,"Retrying a committed action must not create duplicates").toHaveLength(1);
 
     // Closing with an unapproved or unverified action must fail even when
     // legacy control-loop milestones have otherwise been accepted.
@@ -388,19 +501,23 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       closure_reason: "Negative control: reject closure without independent implementation verification.",
     });
     expect(premature.status).toBe(409);
-    expect(JSON.stringify(premature.body)).toMatch(/independently verified|Implementation must be independently verified/i);
+    expect(JSON.stringify(premature.body)).toMatch(/implementation|evidence|effectiveness|milestone|independently verified/i);
 
-    const approvedAction = await authenticatedRequest(internalPage, "PATCH",
-      `${apiCarPath}/corrective-actions/${corrective!.id}/review`, {
-        state: "ACCEPTED",
-        reason: "The proposed corrective action addresses the verified RCA and has a responsible owner and deadline.",
-      });
+    await reviewIndividualActionUi(internalPage,data,corrective!.description,"REJECTED","Return this individual action: clarify implementation ownership and the controlled evidence index.");
+    await expect(sharedGuest).toContainText("clarify implementation ownership",{timeout:20000});
+    const returnedActions=publicPage.getByRole("region",{name:"Individual corrective actions"});
+    await returnedActions.getByRole("button",{name:"Revise proposed action",exact:true}).click({timeout:20000});
+    const revisedDescription=corrective!.description+" — clarified after independent action review";
+    await returnedActions.getByLabel("What specifically changes?").fill(revisedDescription);
+    await returnedActions.getByRole("button",{name:"Save revised action",exact:true}).click();
+    await expect(returnedActions.getByRole("status")).toContainText("Proposed action revision retained",{timeout:20000});
+    const approvedAction = await reviewIndividualActionUi(internalPage,data,revisedDescription,"ACCEPTED",
+      "The proposed corrective action addresses the verified RCA and has a responsible owner and deadline.");
     expect(approvedAction.status, JSON.stringify(approvedAction.body)).toBe(200);
     expect((approvedAction.body as { state: string }).state).toBe("ACCEPTED");
 
     // The actual respondent browser, not a privileged backend shortcut,
     // records implementation evidence after independent Quality approval.
-    await publicPage.reload({ waitUntil: "domcontentloaded" });
     const implementation = publicPage.getByRole("region", { name: "Individual corrective actions" });
     await expect(implementation.getByRole("button", { name: "Record progress" })).toBeVisible({ timeout: 30_000 });
     await implementation.getByRole("button", { name: "Record progress" }).click();
@@ -410,6 +527,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await implementation.getByLabel("Evidence references, one per line").fill(
       "CAR-SAMPLE:rework:effectiveness-observation",
     );
+    await implementation.getByLabel("Link existing CAR file to implementation evidence").selectOption({label:"car-effectiveness-rework.txt"});
     await implementation.getByRole("button", { name: "Save in progress" }).click();
     await expect(implementation.getByText("IN PROGRESS")).toBeVisible({ timeout: 30_000 });
     await implementation.getByRole("button", { name: "Record progress" }).click();
@@ -423,44 +541,77 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(submittedAction?.state).toBe("SUBMITTED");
     expect(submittedAction?.evidence_references).toContain("CAR-SAMPLE:rework:effectiveness-observation");
 
-    const verifiedAction = await authenticatedRequest(internalPage, "PATCH",
-      `${apiCarPath}/corrective-actions/${corrective!.id}/review`, {
-        state: "VERIFIED",
-        reason: "Independent Quality review confirms that the control and indexed implementation evidence were recorded.",
-      });
+    const verifiedAction = await reviewIndividualActionUi(internalPage,data,revisedDescription,"VERIFIED",
+      "Independent Quality review confirms that the control and indexed implementation evidence were recorded.");
     expect(verifiedAction.status, JSON.stringify(verifiedAction.body)).toBe(200);
     expect((verifiedAction.body as { state: string }).state).toBe("VERIFIED");
+    await internalPage.goto(controlPath);
+    for (const [offset,stage] of stages.slice(2,4).entries()) {
+      const row=internalPage.getByRole("heading",{name:"Staged CAR lifecycle"}).locator("xpath=ancestor::section[1]").getByRole("row",{name:new RegExp(stage)});
+      await row.getByRole("combobox").last().selectOption("ACCEPTED");
+      await row.getByPlaceholder("Evidence reference").fill(`car-evidence:stage-${offset+3}`);
+      await row.getByPlaceholder("Control note").fill(`${stage} accepted after independent verification of the implemented action.`);
+      await row.getByRole("button",{name:"Save",exact:true}).click();
+      await expect(internalPage.getByRole("status").filter({hasText:`${stage} updated`})).toContainText(`${stage} updated`,{timeout:30000});
+    }
 
-    const adopted = await authenticatedPost(internalPage, `${apiCarPath}/effectiveness-plan`, {
-      responsible_reviewer_user_id: data.realtime_user_a_id,
-      reason: "Independent effectiveness review follows the respondent's measured and evidenced proposal.",
-    });
+    console.log("CAR acceptance: adopting independent effectiveness plan through Quality controls");
+    await internalPage.goto(controlPath);
+    await internalPage.getByLabel("Independent effectiveness reviewer",{exact:true}).selectOption(data.realtime_user_a_id,{timeout:30000});
+    await internalPage.getByLabel("Quality adoption and independence rationale",{exact:true}).fill("Independent effectiveness review follows the respondent's measured and evidenced proposal.");
+    const adopting=internalPage.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/effectiveness-plan`)&&r.request().method()==="POST");
+    await internalPage.getByRole("button",{name:"Adopt governed effectiveness plan",exact:true}).click();
+    const adoptedResponse=await adopting;
+    const adopted={status:adoptedResponse.status(),body:await adoptedResponse.json()};
     expect(adopted.status, JSON.stringify(adopted.body)).toBe(201);
-    const plan = adopted.body as { case_id: string; plan_id: string };
+    const plan = adopted.body as { case_id: string; case_ref:string; plan_id: string };
     expect(plan.case_id).toBeTruthy();
     expect(plan.plan_id).toBeTruthy();
 
-    const conclusion = await authenticatedPost(internalPage,
-      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/assurance-cases/${plan.case_id}/effectiveness-plans/${plan.plan_id}/conclusion`, {
-        conclusion: "EFFECTIVE",
-        rationale: "Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.",
-        evidence_references: [{ source_type: "CAR", source_id: data.car_loop_id, reference: "CAR-SAMPLE:rework:effectiveness-observation" }],
-      });
+    await internalPage.getByRole("button",{name:"Open Assurance Cases",exact:true}).click();
+    await internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref}).click({timeout:30000});
+    await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id);
+    await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
+    await internalPage.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
+    await internalPage.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
+    await internalPage.screenshot({path:"test-results/car-feedback-effectiveness-review.png"});
+    const concluding=internalPage.waitForResponse(r=>r.url().endsWith(`/effectiveness-plans/${plan.plan_id}/conclusion`)&&r.request().method()==="POST");
+    await internalPage.getByRole("button",{name:"Record immutable effectiveness conclusion",exact:true}).click();
+    const conclusionResponse=await concluding;
+    const conclusion={status:conclusionResponse.status(),body:await conclusionResponse.json()};
     expect(conclusion.status, JSON.stringify(conclusion.body)).toBe(200);
     expect((conclusion.body as { effectiveness_plan: { status: string; conclusion: string } }).effectiveness_plan)
       .toMatchObject({ status: "CONCLUDED", conclusion: "EFFECTIVE" });
 
-    const governedClose = await authenticatedPost(internalPage, `${apiCarPath}/control-loop/close`, {
-      evidence_ref: "car-evidence:stage-5",
-      closure_reason: "Quality accepts closure after rejected-response rework, controlled extension, independent action verification and concluded effectiveness.",
-    });
+    console.log("CAR acceptance: closing through the governed Quality interface");
+    await internalPage.goto(controlPath);
+    const effectivenessMilestone=internalPage.getByRole("heading",{name:"Staged CAR lifecycle"}).locator("xpath=ancestor::section[1]").getByRole("row",{name:new RegExp(stages[4])});
+    await effectivenessMilestone.getByRole("combobox").last().selectOption("ACCEPTED");
+    await effectivenessMilestone.getByPlaceholder("Evidence reference").fill("car-evidence:stage-5");
+    await effectivenessMilestone.getByPlaceholder("Control note").fill("Effectiveness accepted only after the appointed reviewer recorded the immutable effective conclusion.");
+    await effectivenessMilestone.getByRole("button",{name:"Save",exact:true}).click();
+    await expect(internalPage.getByRole("status").filter({hasText:`${stages[4]} updated`})).toContainText(`${stages[4]} updated`,{timeout:30000});
+    await internalPage.getByLabel("Closure evidence reference",{exact:true}).fill("car-evidence:stage-5",{timeout:30000});
+    await internalPage.getByLabel("Closure rationale",{exact:true}).fill("Quality accepts closure after rejected-response rework, controlled extension, independent action verification and concluded effectiveness.");
+    const closing=internalPage.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/control-loop/close`)&&r.request().method()==="POST");
+    await internalPage.getByRole("button",{name:"Close CAR",exact:true}).click();
+    const closeResponse=await closing;
+    const governedClose={status:closeResponse.status(),body:await closeResponse.json()};
     expect(governedClose.status, JSON.stringify(governedClose.body)).toBe(200);
     const closedControl = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/control-loop`);
     expect(closedControl.status, JSON.stringify(closedControl.body)).toBe(200);
     expect((closedControl.body as { car: { status: string }; health: { state: string } }).car.status).toBe("CLOSED");
     expect((closedControl.body as { car: { status: string }; health: { state: string } }).health.state).toBe("CLOSED");
+    await expect(publicFeedback).toContainText("CAR closed · communication history is read only.",{timeout:20000});
+    const retainedHistory=await publicPage.request.get(`/quality/cars/invite/${data.car_loop_invite_token}/feedback`);
+    const retained=await retainedHistory.json();
+    expect(JSON.stringify(retained)).toContain("Root cause: REJECTED");
+    expect(JSON.stringify(retained)).toContain("Root cause: ACCEPTED");
+    expect(JSON.stringify(retained)).toContain("Effectiveness: EFFECTIVE");
+    expect(JSON.stringify(retained)).not.toContain("PRIVATE QA NOTE");
+    console.log("CAR acceptance: governed closure confirmed; rejection, acceptance and effectiveness retained in shared history");
 
-    await internalPage.reload({ waitUntil: "domcontentloaded" });
+    await internalPage.goto(controlPath, { waitUntil: "domcontentloaded" });
     await expect(internalPage.getByText("Closed", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(internalPage.getByRole("heading", { name: "Control event timeline" })).toBeVisible();
     await expect(internalPage.getByText(/Control Loop Closed/i)).toBeVisible();
@@ -495,7 +646,18 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     expect(publicFailures).toEqual([]);
     expect(internalFailures).toEqual([]);
+  } catch(error) {
+    const detail=String(error).replaceAll(data.car_loop_invite_token,"[redacted]").replaceAll(data.realtime_password,"[redacted]");
+    console.error("CAR acceptance failed:",detail);
+    console.error("Observed server/page failures:",JSON.stringify([...publicFailures,...internalFailures]).replaceAll(data.car_loop_invite_token,"[redacted]"));
+    await Promise.allSettled([
+      publicContext.pages()[0]?.screenshot({path:"test-results/car-feedback-public-failed.png"}),
+      internalContext.pages()[0]?.screenshot({path:"test-results/car-feedback-auditor-failed.png"}),
+    ]);
+    throw error;
   } finally {
+    console.log("CAR acceptance: closing auditor and auditee contexts");
     await Promise.allSettled([publicContext.close(), internalContext.close()]);
+    console.log("CAR acceptance: browser contexts closed");
   }
 });

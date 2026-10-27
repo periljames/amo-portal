@@ -415,5 +415,13 @@ def conclude_effectiveness(
         reason=f"Effectiveness concluded {payload.conclusion}: {payload.rationale.strip()}",
         actor_user_id=ctx.user_id, before=before,
     )
+    if plan.source_type == "CAR":
+        from .car_feedback import record_shared_feedback
+        from amodb.apps.accounts.models import User
+        reviewer = db.query(User).filter(User.id == ctx.user_id, User.amo_id == ctx.amo_id).first()
+        record_shared_feedback(db, source_car, f"Effectiveness: {payload.conclusion}. {payload.rationale.strip()}", user=reviewer)
     db.commit()
+    if plan.source_type == "CAR":
+        from .car_feedback import feedback_changed
+        feedback_changed(source_car, ctx.user_id)
     return {"case": _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=case_id), detail=True), "effectiveness_plan": _plan_dict(plan)}

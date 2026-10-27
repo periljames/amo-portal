@@ -43,6 +43,7 @@ import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarI
 import { emptyCarRca, getCarRcaInvite, saveCarRcaInvite, type CarRcaDocument, type CarRcaAction } from "../services/qmsCarRca";
 import CarRcaWorkbench from "../components/QMS/carRca/CarRcaWorkbench";
 import CarRcaActions from "../components/QMS/carRca/CarRcaActions";
+import CarFeedbackPanel from "../components/QMS/carRca/CarFeedbackPanel";
 import "../components/QMS/carRca/car-rca.css";
 import { personDisplay } from "../utils/personDisplay";
 import "../styles/car-invite.css";
@@ -584,7 +585,9 @@ const PublicCarInvitePage: React.FC = () => {
   }, [camera?.stream]);
 
   const updateEntry = (tokenValue: string, updater: (entry: InviteEntry) => InviteEntry) => {
-    setEntries((prev) => prev.map((entry) => (entry.token === tokenValue ? updater(entry) : entry)));
+    const next = latestEntries.current.map(entry => entry.token === tokenValue ? updater(entry) : entry);
+    latestEntries.current = next;
+    setEntries(next);
   };
 
   // Revision-based server persistence is authoritative. The original
@@ -595,8 +598,9 @@ const PublicCarInvitePage: React.FC = () => {
       // Navigation/submit joins the current autosave instead of racing it.
       const ok = await existing;
       if (!ok) return false;
-      const updated = latestEntries.current.find(item => item.token === tokenValue);
-      return Boolean(updated && JSON.stringify({ form: updated.form, investigation: updated.rca }) === updated.rcaSavedSignature);
+      if(pendingRcaSaves.current.get(tokenValue)===existing)pendingRcaSaves.current.delete(tokenValue);
+      // Flush edits made while the previous revision was in flight before advancing.
+      return saveRca(tokenValue, force);
     }
     const current = latestEntries.current.find(item => item.token === tokenValue);
     if (!current?.rcaLoaded || !current.invite || !isInviteEditable(current.invite)) return false;
@@ -629,7 +633,7 @@ const PublicCarInvitePage: React.FC = () => {
     })();
     pendingRcaSaves.current.set(tokenValue, work);
     try { return await work; }
-    finally { pendingRcaSaves.current.delete(tokenValue); }
+    finally { if(pendingRcaSaves.current.get(tokenValue)===work)pendingRcaSaves.current.delete(tokenValue); }
   };
 
   useEffect(() => {
@@ -824,7 +828,9 @@ const PublicCarInvitePage: React.FC = () => {
         .filter((relatedToken) => relatedToken && !knownTokens.current.has(relatedToken))));
       if (relatedTokens.length) {
         relatedTokens.forEach((relatedToken) => knownTokens.current.add(relatedToken));
-        setEntries((prev) => [...prev, ...relatedTokens.map((relatedToken) => createEntry(relatedToken))]);
+        const next = [...latestEntries.current, ...relatedTokens.map(relatedToken => createEntry(relatedToken))];
+        latestEntries.current = next;
+        setEntries(next);
         relatedTokens.forEach((relatedToken) => void loadInvite(relatedToken));
       }
     } catch (error: unknown) {
@@ -846,12 +852,14 @@ const PublicCarInvitePage: React.FC = () => {
     setSelectedPreview(null);
     if (!token) {
       knownTokens.current.clear();
-      setEntries([{ ...createEntry(""), state: "error", error: "Invite token missing." }]);
+      const missing:InviteEntry[]=[{ ...createEntry(""), state: "error", error: "Invite token missing." }];
+      latestEntries.current=missing;setEntries(missing);
       return;
     }
     const tokens = Array.from(new Set(token.split(",").map((value) => value.trim()).filter(Boolean)));
     knownTokens.current = new Set(tokens);
-    setEntries(tokens.map((tokenValue) => createEntry(tokenValue)));
+    const initial=tokens.map(tokenValue=>createEntry(tokenValue));
+    latestEntries.current=initial;setEntries(initial);
     tokens.forEach((tokenValue) => void loadInvite(tokenValue));
   }, [token, loadInvite]);
 
@@ -1154,7 +1162,6 @@ const PublicCarInvitePage: React.FC = () => {
   const openItems = readyEntries.filter((entry) => !["CLOSED", "CANCELLED"].includes(entry.invite?.status ?? "")).length;
   const evidenceCount = entries.reduce((sum, entry) => sum + entry.attachments.length, 0);
   const sideEvidence = entries.flatMap((entry) => entry.attachments.map((attachment) => ({ entry, attachment })));
-  const sideHistory = entries.flatMap((entry) => entry.actions.map((action) => ({ entry, action }))).slice(0, 18);
   const previewEntry = submissionPreviewToken ? entries.find((entry) => entry.token === submissionPreviewToken) ?? null : null;
 
   return (
@@ -1512,7 +1519,9 @@ const PublicCarInvitePage: React.FC = () => {
                         entry.rcaActions.length > 0 && (
                           <div className="car-invite-stage__body">
                             <CarRcaActions token={entry.token} actions={entry.rcaActions} disabled
+                              attachments={entry.attachments}
                               canProgress={!entry.submitting && entry.rcaLoaded}
+                              canReviseReturned={!entry.submitting && entry.rcaLoaded}
                               causeIds={entry.rca.investigations.flatMap(method =>
                                 method.nodes.filter(node => node.entry_type === "CAUSAL_CONCLUSION")
                                   .map(node => ({ id: node.id, statement: node.statement })))}
@@ -1524,6 +1533,12 @@ const PublicCarInvitePage: React.FC = () => {
                         )}
                     </>
                   )}
+                  {invite && <CarFeedbackPanel carId={invite.car_id} token={entry.token} actorName={entry.form.submitted_by_name}
+                    onUpdate={async () => {
+                      const [fresh, investigation] = await Promise.all([qmsGetCarInviteByToken(entry.token), getCarRcaInvite(entry.token)]);
+                      // Refresh review/lock state and implementation actions, never the local response draft.
+                      updateEntry(entry.token, current => ({ ...current, invite:fresh, rcaActions:investigation.actions }));
+                    }} />}
                 </article>
               );
             })}
@@ -1578,19 +1593,6 @@ const PublicCarInvitePage: React.FC = () => {
               ) : <p className="car-invite-subtitle">QR appears after a CAR loads.</p>}
             </details>
 
-            <details className="car-invite-panel" open>
-              <summary><span>History and progress</span><strong>{sideHistory.length}</strong></summary>
-              <div className="car-invite-history">
-                {sideHistory.length === 0 && <p className="car-invite-subtitle">No history entries yet.</p>}
-                {sideHistory.map(({ entry, action }) => (
-                  <div key={action.id} className="car-invite-history__item">
-                    <strong>{entry.invite?.car_number || "CAR"}: {action.action_type.replaceAll("_", " ")}</strong>
-                    <p className="car-invite-subtitle">{action.message}</p>
-                    <small>{formatDateTime(action.created_at)}</small>
-                  </div>
-                ))}
-              </div>
-            </details>
           </aside>
         </div>
       </div>

@@ -38,6 +38,7 @@ from . import intelligence_models as _intelligence_models  # noqa: F401,E402
 from . import audit_preparation_models as _audit_preparation_models  # noqa: F401,E402
 from . import car_control_loop_models as _car_control_loop_models  # noqa: F401,E402
 from . import car_rca_models as _car_rca_models  # noqa: F401,E402
+from . import car_feedback_router as _car_feedback_router  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded after the base router is complete.
@@ -212,6 +213,8 @@ _include_once(
 )
 
 _canonical_router.router.include_router(_car_rca_router.router)
+_canonical_router.router.include_router(_car_feedback_router.router)
+public_router.include_router(_car_feedback_router.public_router)
 _canonical_router.router.include_router(_car_rca_pareto_router.router)
 
 # Deadline decisions and escalation evaluation enforce sequence and stale-request

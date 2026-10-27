@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CarRcaAction, CarRcaActionCreate } from "../../../services/qmsCarRca";
 import { addCarRcaInviteAction, reviseCarRcaInviteAction, progressCarRcaInviteAction } from "../../../services/qmsCarRca";
 
@@ -7,11 +7,12 @@ const EMPTY: CarRcaActionCreate = {
   external_owner_name: null, target_date: null, priority: "MEDIUM",
 };
 
-export default function CarRcaActions({ token, actions, disabled, canProgress = false, onChanged, causeIds, attachments = [] }: {
+export default function CarRcaActions({ token, actions, disabled, canProgress = false, canReviseReturned = false, onChanged, causeIds, attachments = [] }: {
   token: string;
   actions: CarRcaAction[];
   disabled: boolean;
   canProgress?: boolean;
+  canReviseReturned?: boolean;
   onChanged: () => Promise<void>;
   causeIds: Array<{ id: string; statement: string }>;
   attachments?: Array<{ id: string; filename: string }>;
@@ -24,6 +25,11 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
   const [proof, setProof] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [confirmed,setConfirmed]=useState<CarRcaAction[]>([]);
+  const retry=useRef<{body:string;key:string}|null>(null);
+  useEffect(()=>{setConfirmed(previous=>previous.filter(row=>!actions.some(action=>action.id===row.id)));},[actions]);
+  const displayed=Array.from(new Map([...actions,...confirmed].map(action=>[action.id,action])).values());
+  const refreshAfterSave=()=>{void onChanged().catch(()=>setError("Your action was recorded. The latest view could not refresh; use Refresh actions to reconnect."));};
   const create = async () => {
     if (!draft.description.trim() || !draft.external_owner_name?.trim() || !draft.target_date || busy) return;
     setBusy("create"); setError(null);
@@ -31,10 +37,14 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
       const payload = { ...draft,
         description: draft.description.trim(), external_owner_name: draft.external_owner_name?.trim(),
       };
-      if (editingActionId) await reviseCarRcaInviteAction(token, editingActionId, payload);
-      else await addCarRcaInviteAction(token, payload);
-      setDraft(EMPTY); setEditingActionId(null); await onChanged();
+      const body=JSON.stringify(payload);
+      if(!retry.current||retry.current.body!==body)retry.current={body,key:crypto.randomUUID()};
+      const saved=editingActionId?await reviseCarRcaInviteAction(token, editingActionId, {...payload,mutation_key:retry.current.key})
+        :await addCarRcaInviteAction(token, {...payload,mutation_key:retry.current.key});
+      setConfirmed(previous=>[...previous.filter(row=>row.id!==saved.id),saved]);
+      retry.current=null;setDraft(EMPTY); setEditingActionId(null);
       setMessage(editingActionId ? "Proposed action revision retained for Quality review." : "Corrective action recorded for Quality review.");
+      refreshAfterSave();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save corrective action."); }
     finally { setBusy(null); }
   };
@@ -42,12 +52,13 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
     if (busy) return;
     setBusy(actionId); setError(null);
     try {
-      await progressCarRcaInviteAction(token, actionId, {
+      const saved=await progressCarRcaInviteAction(token, actionId, {
         state, completion_note: note.trim(),
         evidence_references: proof.split("\n").map(x => x.trim()).filter(Boolean),
       });
-      await onChanged(); setActiveId(null); setNote(""); setProof("");
+      setConfirmed(previous=>[...previous.filter(row=>row.id!==saved.id),saved]);setActiveId(null); setNote(""); setProof("");
       setMessage(state === "SUBMITTED" ? "Implementation submitted for independent Quality verification." : "Implementation marked in progress.");
+      refreshAfterSave();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not update action."); }
     finally { setBusy(null); }
   };
@@ -56,13 +67,13 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
       <p>Separate containment from permanent correction and systemic prevention. Each action has its own owner, due date, evidence and Quality decision.</p>
     </div></div>
     {message && <p role="status">{message}</p>}
-    {error && <p role="alert">{error}</p>}
-    {actions.length > 0 ? <div className="car-rca-table-scroll"><table>
-      <caption>{actions.length} linked actions</caption>
+    {error && <p role="alert">{error} <button type="button" onClick={()=>void onChanged().then(()=>setError(null),()=>setError("Latest actions could not be refreshed. Your recorded actions are retained."))}>Refresh actions</button></p>}
+    {displayed.length > 0 ? <div className="car-rca-table-scroll"><table>
+      <caption>{displayed.length} linked actions</caption>
       <thead><tr><th>No.</th><th>Action</th><th>Responsible</th><th>Due</th><th>State / review</th><th>Implementation</th></tr></thead>
-      <tbody>{actions.map(action => <tr key={action.id}>
+      <tbody>{displayed.map(action => <tr key={action.id}>
         <td>{action.action_number}</td><td><strong>{action.kind}</strong><p>{action.description}</p>
-          {!disabled && ["PROPOSED", "REJECTED"].includes(action.state) && <button type="button" disabled={Boolean(busy)}
+          {((!disabled && ["PROPOSED", "REJECTED"].includes(action.state)) || (canReviseReturned && action.state === "REJECTED")) && <button type="button" disabled={Boolean(busy)}
             onClick={() => { setEditingActionId(action.id); setDraft({ kind: action.kind, description: action.description,
               cause_node_ids: action.cause_node_ids, evidence_references: action.evidence_references,
               external_owner_name: action.external_owner_name, target_date: action.target_date, priority: action.priority }); }}>
@@ -89,7 +100,7 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
             <button type="button" disabled={Boolean(busy) || !note.trim() || !proof.trim()} onClick={() => void progress(action.id, "SUBMITTED")}>Submit implementation evidence</button>
           </div>}</td>
       </tr>)}</tbody></table></div> : <p>No individually tracked actions yet. An accountable corrective action is required for a new governed CAR.</p>}
-    {!disabled && <div className="car-rca-analysis">
+    {(!disabled || (canReviseReturned && editingActionId)) && <div className="car-rca-analysis">
       <h4>{editingActionId ? "Revise proposed action" : "New accountable action"}</h4>
       <div className="car-rca-grid">
         <label>Action category<select value={draft.kind} onChange={e => setDraft(d => ({ ...d, kind: e.target.value as CarRcaActionCreate["kind"] }))}>

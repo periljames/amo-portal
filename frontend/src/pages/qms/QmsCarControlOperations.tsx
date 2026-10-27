@@ -29,6 +29,7 @@ import {
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
 import CarInviteGovernance from "../../components/QMS/carRca/CarInviteGovernance";
+import CarFeedbackPanel from "../../components/QMS/carRca/CarFeedbackPanel";
 import { adoptCarEffectivenessProposal, getCarRcaInternal, listCarRcaParetoSnapshots } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
@@ -613,6 +614,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         </div>
         <p className="muted">The printable package includes the finding context, latest response, Quality review state, lifecycle milestones, dependencies, extension history, evidence index, effectiveness/closure position and complete control timeline. The generated timestamp is included in both printable and CSV outputs.</p>
       </section>
+      <CarFeedbackPanel amoCode={amoCode} carId={carId} canWrite={canManage} />
     </>
   );
 };

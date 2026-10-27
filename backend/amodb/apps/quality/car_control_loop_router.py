@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, lazyload
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
@@ -148,7 +148,7 @@ def _assert_user(db: Session, *, amo_id: str, user_id: str | None) -> None:
 
 
 def _load_car(db: Session, *, amo_id: str, car_id: str, lock: bool = False) -> models.CorrectiveActionRequest:
-    query = db.query(models.CorrectiveActionRequest).filter(
+    query = db.query(models.CorrectiveActionRequest).options(lazyload("*")).filter(
         models.CorrectiveActionRequest.amo_id == amo_id,
         models.CorrectiveActionRequest.id == car_id,
     )
@@ -255,6 +255,12 @@ def _add_event(
         created_at=_utcnow(),
     )
     db.add(row)
+    if event_type.startswith("DEADLINE_CHANGE_") or event_type == "CONTROL_LOOP_CLOSED":
+        from .car_feedback import record_shared_feedback
+        actor = db.query(account_models.User).filter(account_models.User.id == actor_user_id,
+            account_models.User.amo_id == car.amo_id).first() if actor_user_id else None
+        record_shared_feedback(db, car, f"{event_type.replace('_', ' ').title()}: {reason.strip()}", user=actor,
+            actor_kind="STAFF" if actor else "SYSTEM")
     return row
 
 

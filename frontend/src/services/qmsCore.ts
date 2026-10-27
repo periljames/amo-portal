@@ -2272,8 +2272,8 @@ export async function qmsRequestCarAccess(
     "I can support resolution of this CAR. Please review and assign write access if appropriate."
   ).trim();
   return qmsAddCarAction(carId, {
-    action_type: "ASSIGNMENT",
-    message: cleanMessage || "CAR access requested.",
+    action_type: "COMMENT",
+    message: `Access request: ${cleanMessage || "CAR access requested."}`,
   });
 }
 

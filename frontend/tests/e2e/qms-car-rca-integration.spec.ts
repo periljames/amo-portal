@@ -25,6 +25,7 @@ async function prepare(page: Page, reader = false, invalid = false) {
     if (route.request().resourceType() === "document") return route.fallback();
     const path = new URL(route.request().url()).pathname;
     let body: unknown = [];
+    if (path.endsWith("/feedback")) body = {car_id:carId,status:"OPEN",root_cause_status:"PENDING",capa_status:"PENDING",items:[],next_cursor:null};
     if (path.endsWith("/cars/register/paged")) body = { items:[car],total:1,limit:25,offset:0,has_more:false,summary:{total:1,open:1,overdue:0,in_review:0} };
     if (path.endsWith("/investigation")) body = malformed ? { module:"cars",record_id:carId } : projection;
     if (path.endsWith("/pareto-snapshots")) paretoRequests++;

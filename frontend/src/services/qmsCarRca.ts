@@ -78,6 +78,7 @@ export type CarRcaSavePayload = {
   form: Record<string, string>;
 };
 export type CarRcaActionCreate = Pick<CarRcaAction, "kind" | "description" | "cause_node_ids" | "evidence_references" | "target_date" | "priority"> & {
+  mutation_key?: string;
   external_owner_name: string | null;
   owner_user_id?: string | null;
 };
@@ -99,7 +100,7 @@ export class CarRcaRequestError extends Error {
   }
 }
 
-async function publicRcaRequest<T>(token: string, path: string, method: "GET" | "PUT" | "POST" | "PATCH" = "GET", body?: unknown): Promise<T> {
+async function publicRcaRequest<T>(token: string, path: string, method: "GET" | "PUT" | "POST" | "PATCH" = "GET", body?: unknown, readRetry = true): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), method === "GET" ? 20000 : 45000);
   try {
@@ -118,6 +119,15 @@ async function publicRcaRequest<T>(token: string, path: string, method: "GET" | 
       throw new CarRcaRequestError(response.status, message || `CAR investigation request failed (${response.status}).`);
     }
     return await response.json() as T;
+  } catch(error) {
+    const transient=error instanceof TypeError || (error instanceof DOMException && error.name==="AbortError") ||
+      (error instanceof CarRcaRequestError && [502,503,504].includes(error.status));
+    if(method==="GET" && readRetry && transient){
+      window.clearTimeout(timeout);
+      await new Promise(resolve=>window.setTimeout(resolve,400));
+      return publicRcaRequest<T>(token,path,method,body,false);
+    }
+    throw error;
   } finally { window.clearTimeout(timeout); }
 }
 

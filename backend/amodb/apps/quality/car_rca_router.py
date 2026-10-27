@@ -160,6 +160,7 @@ class CarRcaSave(BaseModel):
 
 
 class ActionCreate(BaseModel):
+    mutation_key: str | None = Field(default=None, min_length=8, max_length=80)
     kind: Literal["CORRECTIVE", "PREVENTIVE", "CONTAINMENT"] = "CORRECTIVE"
     description: str = Field(min_length=5, max_length=8000)
     cause_node_ids: list[str] = Field(default_factory=list, max_length=30)
@@ -209,12 +210,15 @@ def assert_invite_access(db: Session, car) -> None:
             raise HTTPException(status_code=410, detail="This CAR invitation has expired. Contact Quality.")
 
 
-def _car_for_guest(db: Session, token: str, *, lock=False):
+def _car_for_guest(db: Session, token: str, *, lock=False, lean=False):
     if not token or len(token) > 64:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
     query = db.query(models.CorrectiveActionRequest).filter(
         models.CorrectiveActionRequest.invite_token == token
     )
+    if lean:
+        from sqlalchemy.orm import lazyload
+        query = query.options(lazyload("*"))
     car = (query.with_for_update() if lock else query).first()
     if car is None:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
@@ -222,12 +226,15 @@ def _car_for_guest(db: Session, token: str, *, lock=False):
     return car
 
 
-def _car_for_employee(db: Session, ctx: TenantContext, car_id: uuid.UUID, *, lock=False):
+def _car_for_employee(db: Session, ctx: TenantContext, car_id: uuid.UUID, *, lock=False, lean=False):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     query = db.query(models.CorrectiveActionRequest).filter(
         models.CorrectiveActionRequest.amo_id == ctx.amo_id,
         models.CorrectiveActionRequest.id == car_id,
     )
+    if lean:
+        from sqlalchemy.orm import lazyload
+        query = query.options(lazyload("*"))
     car = (query.with_for_update() if lock else query).first()
     if car is None:
         raise HTTPException(status_code=404, detail="CAR not found for this tenant")
@@ -605,6 +612,16 @@ def _assert_action_scope(db: Session, car, payload: ActionCreate, *, public: boo
 
 
 def _add_action(db, car, payload: ActionCreate, *, public: bool, actor_ref: str):
+    key = "action:" + payload.mutation_key if payload.mutation_key else None
+    fingerprint = hashlib.sha256(json.dumps({"payload":payload.model_dump(mode="json",exclude={"mutation_key"}),"actor":actor_ref,"public":public},sort_keys=True).encode()).hexdigest()
+    if key:
+        previous=db.query(QualityCarRcaMutation).filter(QualityCarRcaMutation.amo_id==str(car.amo_id),QualityCarRcaMutation.car_id==car.id,QualityCarRcaMutation.mutation_key==key).first()
+        if previous:
+            if previous.fingerprint!=fingerprint:
+                raise HTTPException(status_code=409,detail="Action retry identifier was already used for different content.")
+            result=db.query(QualityCarRcaAction).filter(QualityCarRcaAction.amo_id==str(car.amo_id),QualityCarRcaAction.car_id==car.id,QualityCarRcaAction.sequence_no==previous.result_revision).first()
+            if result is None:raise HTTPException(status_code=409,detail="Retained action receipt could not be resolved.")
+            return _action_dict(result)
     _assert_action_scope(db, car, payload, public=public)
     # The CAR row is locked by the route, protecting action sequence allocation.
     existing = _actions(db, car)
@@ -621,12 +638,18 @@ def _add_action(db, car, payload: ActionCreate, *, public: bool, actor_ref: str)
     )
     db.add(row)
     db.flush()
+    if key:
+        db.add(QualityCarRcaMutation(id=uuid.uuid4(),amo_id=str(car.amo_id),car_id=car.id,mutation_key=key,fingerprint=fingerprint,result_revision=row.sequence_no))
     _record_action_event(
         db, car, row, from_state=None, actor_kind="GUEST" if public else "EMPLOYEE",
         actor_ref=actor_ref,
         reason="Corrective action proposed."
     )
+    from .car_feedback import record_shared_feedback, feedback_changed
+    author = db.query(account_models.User).filter(account_models.User.id==actor_ref,account_models.User.amo_id==str(car.amo_id)).first() if not public else None
+    record_shared_feedback(db,car,f"Action {row.sequence_no:02d}: proposed. {row.description}",user=author,actor_kind="AUDITEE" if public else "STAFF",actor_name="Invited respondent" if public else None)
     db.commit()
+    feedback_changed(car, None if public else actor_ref)
     return _action_dict(row)
 
 
@@ -653,7 +676,6 @@ def add_employee_action(car_id: uuid.UUID, payload: ActionCreate,
 def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: ActionCreate,
     db: Session = Depends(get_db)):
     car = _car_for_guest(db, invite_token, lock=True)
-    _assert_guest_editable(db, car)
     row = db.query(QualityCarRcaAction).filter(
         QualityCarRcaAction.amo_id == str(car.amo_id),
         QualityCarRcaAction.car_id == car.id,
@@ -661,8 +683,16 @@ def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
     ).with_for_update().first()
     if row is None:
         raise HTTPException(status_code=404, detail="Action does not belong to this invitation.")
+    if payload.mutation_key and row.state=="PROPOSED" and all(getattr(row,name,None)==value for name,value in payload.model_dump(exclude={"mutation_key"}).items()):
+        return _action_dict(row)
     if row.state not in {"PROPOSED", "REJECTED"}:
         raise HTTPException(status_code=409, detail="Only proposed or returned actions can be revised.")
+    returned_after_approval = row.state == "REJECTED" and car.root_cause_status == "ACCEPTED" and car.capa_status == "ACCEPTED"
+    if returned_after_approval:
+        if getattr(car.status, "value", car.status) in {"CLOSED", "CANCELLED", "ESCALATED"}:
+            raise HTTPException(status_code=409, detail="CAR is locked.")
+    else:
+        _assert_guest_editable(db, car)
     _assert_action_scope(db, car, payload, public=True)
     previous = row.state
     row.kind = payload.kind
@@ -677,7 +707,10 @@ def revise_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         db, car, row, from_state=previous, actor_kind="GUEST",
         actor_ref="Invited responder", reason="Responder revised proposed corrective action."
     )
+    from .car_feedback import record_shared_feedback, feedback_changed
+    record_shared_feedback(db, car, f"Action {row.sequence_no:02d}: revised for Quality review. {row.description}", actor_name="Invited respondent", actor_kind="AUDITEE")
     db.commit()
+    feedback_changed(car)
     return _action_dict(row)
 
 
@@ -698,6 +731,8 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         raise HTTPException(status_code=404, detail="Action not found for this CAR")
     if car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED":
         raise HTTPException(status_code=409, detail="Quality must accept the RCA and CAPA before implementation progress can be recorded.")
+    if row.state==payload.state and row.completion_note==payload.completion_note.strip() and row.evidence_references==payload.evidence_references:
+        return _action_dict(row)
     if row.state not in {"ACCEPTED", "IN_PROGRESS"}:
         raise HTTPException(status_code=409, detail="Only an approved corrective action can enter implementation.")
     previous = row.state
@@ -713,7 +748,11 @@ def report_public_action(invite_token: str, action_id: uuid.UUID, payload: Actio
         db, car, row, from_state=previous, actor_kind="GUEST",
         actor_ref="Invited responder", reason="Respondent reported implementation progress."
     )
+    from .car_feedback import record_shared_feedback, feedback_changed
+    record_shared_feedback(db, car, f"Action {row.sequence_no:02d}: {payload.state}. {payload.completion_note.strip()}",
+        actor_name="Invited respondent", actor_kind="AUDITEE")
     db.commit()
+    feedback_changed(car)
     return _action_dict(row)
 
 
@@ -762,7 +801,10 @@ def review_action(car_id: uuid.UUID, action_id: uuid.UUID, payload: ActionReview
         db, car, row, from_state=previous, actor_kind="EMPLOYEE",
         actor_ref=ctx.user_id, reason="Quality decision: " + payload.reason.strip()
     )
+    from .car_feedback import record_shared_feedback, feedback_changed
+    record_shared_feedback(db, car, f"Action {row.sequence_no:02d}: {payload.state}. {payload.reason.strip()}", user=current_user)
     db.commit()
+    feedback_changed(car, current_user.id)
     return _action_dict(row)
 
 class InviteAccessChange(BaseModel):
@@ -953,7 +995,11 @@ def adopt_car_effectiveness_proposal(
     db.flush()
     _add_event(db, row=case, event_type="CREATED", reason=payload.reason.strip(), actor_user_id=ctx.user_id)
     _add_event(db, row=case, event_type="EFFECTIVENESS_PLANNED", reason="Independent review planned from submitted CAR RCA.", actor_user_id=ctx.user_id)
+    from .car_feedback import record_shared_feedback, feedback_changed
+    reviewer = db.query(account_models.User).filter(account_models.User.id == ctx.user_id, account_models.User.amo_id == ctx.amo_id).first()
+    record_shared_feedback(db, car, f"Effectiveness review planned for {proposal.proposed_review_date}. {payload.reason.strip()}", user=reviewer)
     db.commit()
+    feedback_changed(car, ctx.user_id)
     return {
         "case_id": str(case.id), "case_ref": case.case_ref,
         "plan_id": str(plan.id), "planned_review_date": plan.planned_review_date,

@@ -229,6 +229,7 @@ function readyCarControl() {
 
 test("QUALITY_OFFICER can work the CAR control loop and prepare authorization cases without final approval authority", async ({ page }) => {
   await prepare(page, "QUALITY_OFFICER", (route, path) => {
+    if(path.endsWith(`/quality/cars/${CAR_ID}/feedback`)) return json(route,{car_id:CAR_ID,status:"IN_PROGRESS",root_cause_status:"ACCEPTED",capa_status:"ACCEPTED",items:[],next_cursor:null});
     if (path.endsWith(`/quality/cars/${CAR_ID}/control-loop`)) return json(route, readyCarControl());
     if (path.endsWith("/quality/cars/assignees")) return json(route, [{ id: "owner-1", full_name: "Responsible Manager", email: "owner@tenant-a.test", role: "MAINTENANCE_MANAGER", department_name: "Maintenance" }]);
     if (path.endsWith(`/quality/cars/${CAR_ID}/responses`)) return json(route, []);

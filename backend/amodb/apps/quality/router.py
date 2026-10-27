@@ -23,7 +23,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header, Form, Body
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import and_, func, or_, cast, String
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, lazyload
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from amodb.entitlements import require_module
@@ -6176,7 +6176,7 @@ def list_car_assignees(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     q = (
-        db.query(account_models.User, account_models.Department)
+        db.query(account_models.User, account_models.Department).options(lazyload("*"))
         .outerjoin(
             account_models.Department,
             and_(
@@ -6950,13 +6950,9 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     if _car_has_evidence(db, car):
         car.evidence_received_at = submitted_at
 
-    add_car_action(
-        db=db,
-        car=car,
-        action_type=models.CARActionType.COMMENT,
-        message="Auditee submitted CAR response via invite link",
-        actor_user_id=None,
-    )
+    from .car_feedback import record_shared_feedback
+    record_shared_feedback(db, car, "Auditee submitted CAR response via invite link",
+        actor_name=payload.submitted_by_name or "Invited respondent", actor_kind="AUDITEE")
 
     response = models.CARResponse(
         car_id=car.id,
@@ -7048,13 +7044,9 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     car.capa_status = "PENDING"
     from .car_response_workflow import sync_response_milestones
     sync_response_milestones(db, car, actor_user_id=None)
-    add_car_action(
-        db=db,
-        car=car,
-        action_type=models.CARActionType.COMMENT,
-        message=f"{CAR_INVITE_RECALLED_PREFIX} before auditor review",
-        actor_user_id=None,
-    )
+    from .car_feedback import record_shared_feedback
+    record_shared_feedback(db, car, f"{CAR_INVITE_RECALLED_PREFIX} before auditor review",
+        actor_name="Invited respondent", actor_kind="AUDITEE")
     audit = None
     if car.finding_id:
         audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
@@ -7294,12 +7286,14 @@ def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invite not found")
     from .car_rca_router import assert_invite_access
     assert_invite_access(db, car)
-    return (
+    rows = (
         db.query(models.CARActionLog)
         .filter(models.CARActionLog.car_id == car.id)
+        .filter(models.CARActionLog.visibility == "SHARED")
         .order_by(models.CARActionLog.created_at.desc())
         .all()
     )
+    return [CARActionOut.model_validate(row).model_copy(update={"actor_user_id": None}) for row in rows]
 
 
 @router.get("/cars/{car_id}/attachments", response_model=List[CARAttachmentOut])
@@ -7631,6 +7625,14 @@ def review_car_response(
         car.capa_review_note = (payload.capa_review_note or "").strip() or None
 
     _, outcome = _sync_car_review_state(db, car, actor_user_id=get_actor())
+    from .car_feedback import record_shared_feedback, feedback_changed
+    # Snapshot each decision/reason before a later review can replace current fields.
+    for label, decision, reason in (
+        ("Root cause", payload.root_cause_status, payload.root_cause_review_note),
+        ("Corrective action plan", payload.capa_status, payload.capa_review_note),
+    ):
+        if decision:
+            record_shared_feedback(db, car, f"{label}: {decision}. {(reason or '').strip()}", user=current_user)
     if outcome == "closed":
         note_msg = f"CAR {car.car_number} accepted and closed. The linked finding was verified."
     elif outcome == "accepted_pending_evidence":
@@ -7660,13 +7662,7 @@ def review_car_response(
         )
 
     if payload.message:
-        add_car_action(
-            db=db,
-            car=car,
-            action_type=models.CARActionType.COMMENT,
-            message=payload.message.strip(),
-            actor_user_id=get_actor(),
-        )
+        record_shared_feedback(db, car, payload.message.strip(), user=current_user)
 
     if note_msg:
         _notify_user(
@@ -7694,6 +7690,7 @@ def review_car_response(
     )
     db.commit()
     db.refresh(car)
+    feedback_changed(car, current_user.id)
     return car
 
 
@@ -7877,6 +7874,8 @@ def add_car_action_log(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    if payload.action_type != models.CARActionType.COMMENT or not payload.message.strip():
+        raise HTTPException(status_code=422, detail="Activity comments cannot manufacture system decisions or empty history entries.")
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
 
