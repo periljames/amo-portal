@@ -1060,9 +1060,10 @@
 }
 
 .car-invite-stage-rail__step strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .car-invite-stage-rail__step.is-active {

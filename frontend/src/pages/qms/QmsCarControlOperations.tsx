@@ -28,6 +28,8 @@ import {
   type CarDependencyType,
 } from "../../services/qmsCarControlLoop";
 import { saveDownloadedFile } from "../../utils/downloads";
+import CarInviteGovernance from "../../components/QMS/carRca/CarInviteGovernance";
+import { adoptCarEffectivenessProposal, getCarRcaInternal, listCarRcaParetoSnapshots } from "../../services/qmsCarRca";
 
 const DEPENDENCY_TYPES: CarDependencyType[] = ["INTERNAL", "EXTERNAL", "PROCUREMENT", "FACILITY", "RESOURCE", "SUPPLIER", "REGULATORY", "OTHER"];
 const DEPENDENCY_RISKS: CarDependencyRisk[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -94,8 +96,14 @@ function escapeHtml(value: unknown): string {
 }
 
 function csvCell(value: unknown): string {
-  const text = String(value ?? "").replaceAll('"', '""');
-  return `"${text}"`;
+  // Prevent spreadsheet formula execution from responder-entered CAR text.
+  const raw = String(value ?? "");
+  let prefixEnd = 0;
+  while (prefixEnd < raw.length && (/\s/.test(raw[prefixEnd]) || raw.charCodeAt(prefixEnd) < 32 || raw.charCodeAt(prefixEnd) === 127)) {
+    prefixEnd += 1;
+  }
+  const safe = ["=", "+", "@", "-"].includes(raw[prefixEnd] || "") ? "'" + raw : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 function dependencyDraft(row: CarControlDependency): DependencyDraft {
@@ -123,11 +131,19 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [dependencyDrafts, setDependencyDrafts] = useState<Record<string, DependencyDraft>>({});
+  const [effectivenessReviewer, setEffectivenessReviewer] = useState("");
+  const [effectivenessReason, setEffectivenessReason] = useState("");
+  const [effectivenessAdopting, setEffectivenessAdopting] = useState(false);
+  const [effectivenessResult, setEffectivenessResult] = useState<{ case_ref: string; case_id: string } | null>(null);
 
   const responsesQuery = useQuery({
     queryKey: ["qms-car-control-responses", carId],
     queryFn: () => qmsListCarResponses(carId, false, amoCode),
-    staleTime: 10_000,
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
   const attachmentsQuery = useQuery({
     queryKey: ["qms-car-control-attachments", carId],
@@ -137,8 +153,45 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const inviteQuery = useQuery({
     queryKey: ["qms-car-control-source", carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
-    staleTime: 30_000,
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
+  const rcaQuery = useQuery({
+    queryKey: ["qms-car-control-rca", amoCode, carId],
+    queryFn: () => getCarRcaInternal(amoCode, carId),
+    // Public respondents and other Quality reviewers can update CAR data.
+    // Revalidate persisted query cache when the record opens or gains focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+  const paretoQuery = useQuery({
+    queryKey: ["qms-car-control-pareto", amoCode, carId],
+    queryFn: () => listCarRcaParetoSnapshots(amoCode, carId),
+    staleTime: 10_000,
+    enabled: canViewReports && hasQmsRolePermission("qms.reports.view"),
+  });
+
+  const proposal = rcaQuery.data?.submitted_snapshot?.investigation.effectiveness_proposal;
+  const adoptEffectiveness = async () => {
+    if (!effectivenessReviewer || effectivenessReason.trim().length < 8 || effectivenessAdopting) return;
+    setEffectivenessAdopting(true);
+    setLocalError(null);
+    setEffectivenessResult(null);
+    try {
+      const next = await adoptCarEffectivenessProposal(amoCode, carId, effectivenessReviewer, effectivenessReason.trim());
+      setEffectivenessResult({ case_id: next.case_id, case_ref: next.case_ref });
+      setLocalMessage("Independent effectiveness verification plan established. Quality will review observations before closure.");
+      void queryClient.invalidateQueries({ queryKey: ["qms-car-control", amoCode, carId] });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Could not establish the governed effectiveness plan.");
+    } finally {
+      setEffectivenessAdopting(false);
+    }
+  };
 
   useEffect(() => {
     const next: Record<string, DependencyDraft> = {};
@@ -314,14 +367,51 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       `${item.created_at}; severity=${item.severity}; actor=${assigneeName(assignees, item.actor_user_id)}; ${item.reason}`,
     ]));
     control.closure_readiness.blockers.forEach((item) => rows.push(["Closure blocker", item.code, item.message]));
+    const rca = rcaQuery.data;
+    const documented = rca?.submitted_snapshot?.investigation || rca?.draft.investigation;
+    if (rca) {
+      rows.push(["Structured RCA", "Current revision", String(rca.revision)]);
+      rows.push(["Structured RCA", "Submitted revision", rca.submitted_revision == null ? "Not submitted" : String(rca.submitted_revision)]);
+      rows.push(["Structured RCA", "Consolidated proposed root cause", documented?.conclusion || "Not recorded"]);
+      rows.push(["Structured RCA", "Conclusion evidence", (documented?.conclusion_evidence_references || []).join("; ")]);
+      documented?.investigations.forEach(method => method.nodes.forEach(node =>
+        rows.push(["Investigation " + method.method, node.category + " · " + node.entry_type,
+          node.statement + "; parent=" + (node.parent_id || "") + "; evidence=" + node.evidence_references.join("; ")])));
+      rca.actions.forEach(action => rows.push(["Action " + action.action_number, action.kind + " · " + action.state,
+        action.description + "; owner=" + (action.external_owner_name || action.owner_user_id || "") +
+        "; due=" + (action.target_date || "") + "; evidence=" + action.evidence_references.join("; ") +
+        "; Quality review=" + (action.quality_review_note || "")]));
+      rca.history.forEach(event => rows.push(["RCA revision " + event.revision, event.event_type,
+        event.created_at + "; actor=" + (event.actor_ref || "unattributed") + "; reason=" + event.reason]));
+    }
+    (paretoQuery.data || []).forEach(snapshot => {
+      rows.push(["QMS Pareto", "Source cohort", snapshot.population]);
+      rows.push(["QMS Pareto", "Snapshot", snapshot.id + " generated " + snapshot.created_at]);
+      rows.push(["QMS Pareto", "Period", snapshot.filters.start + " to " + snapshot.filters.end]);
+      rows.push(["QMS Pareto", "Population", String(snapshot.sample_size)]);
+      snapshot.categories.forEach(item => rows.push(["QMS Pareto category", item.category,
+        "count=" + item.count + "; share=" + item.share_percent + "%; cumulative=" + item.cumulative_percent + "%"]));
+      snapshot.source_references.forEach(source => rows.push(["QMS source finding", source.reference || source.id,
+        "audit=" + (source.audit_reference || "") + "; requirement=" + (source.requirement || "")]));
+    });
     return ["Section,Field,Value", ...rows.map((row) => row.map(csvCell).join(","))].join("\n");
   };
 
   const exportCsv = () => {
+    if (rcaQuery.isError || rcaQuery.isPending ||
+        (hasQmsRolePermission("qms.reports.view") && (paretoQuery.isError || paretoQuery.isPending))) {
+      setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before exporting a complete package.");
+      return;
+    }
     saveDownloadedFile(new Blob([buildCsv()], { type: "text/csv;charset=utf-8" }), `${control.car.car_number}-controlled-package.csv`);
   };
 
   const printPackage = () => {
+    if (rcaQuery.isError || rcaQuery.isPending ||
+        (hasQmsRolePermission("qms.reports.view") && (paretoQuery.isError || paretoQuery.isPending))) {
+      setLocalError("Controlled RCA/Pareto data could not be loaded. Retry before printing a complete package.");
+      return;
+    }
     const source = inviteQuery.data;
     const popup = window.open("", "_blank", "width=1100,height=850");
     if (!popup) {
@@ -336,6 +426,42 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     const evidenceRows = attachments.map((item) => `<tr><td>${escapeHtml(item.filename)}</td><td>${escapeHtml(item.content_type || "")}</td><td>${escapeHtml(formatBytes(item.size_bytes))}</td><td>${escapeHtml(formatDateTime(item.uploaded_at))}</td></tr>`).join("");
     const eventRows = control.events.map((item) => `<tr><td>${escapeHtml(formatDateTime(item.created_at))}</td><td>${escapeHtml(humanize(item.event_type))}</td><td>${escapeHtml(item.severity)}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(assigneeName(assignees, item.actor_user_id))}</td></tr>`).join("");
     const blockerItems = control.closure_readiness.blockers.map((item) => `<li><strong>${escapeHtml(item.code)}</strong> — ${escapeHtml(item.message)}</li>`).join("");
+    const rcaRecord = rcaQuery.data;
+    const qmsParetoRows = (paretoQuery.data || []).flatMap(snapshot => snapshot.categories.map(row =>
+      `<tr><td>${escapeHtml(snapshot.created_at)}</td><td>${escapeHtml(snapshot.filters.group_by)}</td><td>${escapeHtml(row.category)}</td><td>${row.count}</td><td>${row.share_percent.toFixed(2)}%</td><td>${row.cumulative_percent.toFixed(2)}%</td></tr>`
+    )).join("");
+    const documented = rcaRecord?.submitted_snapshot?.investigation || rcaRecord?.draft.investigation;
+    const methodRows = documented?.investigations.flatMap(method => method.nodes.map(node =>
+      `<tr><td>${escapeHtml(method.method.replaceAll("_", " "))}</td><td>${escapeHtml(node.category)}</td><td>${escapeHtml(node.statement)}</td><td>${escapeHtml(node.entry_type)}</td><td>${escapeHtml(node.parent_id || "")}</td><td>${escapeHtml(node.evidence_references.join("; "))}</td></tr>`
+    )).join("") || "";
+    const actionRows = (rcaRecord?.actions || []).map(action =>
+      `<tr><td>${escapeHtml(action.action_number)}</td><td>${escapeHtml(action.kind)}</td><td>${escapeHtml(action.description)}</td><td>${escapeHtml(action.external_owner_name || action.owner_user_id || "")}</td><td>${escapeHtml(action.target_date || "")}</td><td>${escapeHtml(action.state)}</td><td>${escapeHtml(action.evidence_references.join("; "))}</td><td>${escapeHtml(action.quality_review_note || "")}</td></tr>`
+    ).join("");
+    const rcaHistoryRows = (rcaRecord?.history || []).map(row =>
+      `<tr><td>${escapeHtml(formatDateTime(row.created_at))}</td><td>${escapeHtml(row.revision)}</td><td>${escapeHtml(row.event_type)}</td><td>${escapeHtml(row.actor_kind)}</td><td>${escapeHtml(row.actor_ref || "")}</td><td>${escapeHtml(row.reason)}</td></tr>`
+    ).join("");
+    const fishbone = documented?.investigations.find(method => method.method === "ISHIKAWA");
+    const branches = [...new Set((fishbone?.nodes || []).map(node => node.category))].slice(0, 8);
+    const fishboneSvg = branches.length ? `<svg viewBox="0 0 800 330" style="width:100%;border:1px solid #aaa;max-height:330px" role="img" aria-label="Recorded Fishbone diagram">
+      <path d="M70 165 L620 165 M620 128 L790 128 L790 200 L620 200 Z" fill="none" stroke="black" stroke-width="2"/>
+      <text x="705" y="160" font-size="12" text-anchor="middle">${escapeHtml((documented?.problem_statement || "").slice(0, 23))}</text>
+      ${branches.map((branch, index) => {
+        const x = 150 + Math.floor(index / 2) * 120;
+        const y = index % 2 === 0 ? 30 : 305;
+        const node = (fishbone?.nodes || []).find(cause => cause.category === branch);
+        return `<g><line x1="${x}" y1="165" x2="${x-60}" y2="${y}" stroke="black"/><text x="${x-57}" y="${y}" font-size="11">${escapeHtml(branch.slice(0, 17))}</text><text x="${x-57}" y="${y + (index % 2 ? -17 : 17)}" font-size="9">${escapeHtml((node?.statement || "").slice(0, 22))}</text></g>`;
+      }).join("")}</svg>` : "";
+    const paretoMethod = documented?.investigations.find(method => method.method === "PARETO");
+    const paretoSource = paretoMethod?.context?.frequencies;
+    const paretoCounts = Array.isArray(paretoSource) ? paretoSource.filter((row): row is { category: string; count: number; source_ref: string } =>
+      Boolean(row) && typeof row === "object" && typeof row.category === "string" && typeof row.count === "number" && typeof row.source_ref === "string"
+    ).sort((left, right) => right.count - left.count) : [];
+    const paretoTotal = paretoCounts.reduce((sum, row) => sum + row.count, 0);
+    let cumulative = 0;
+    const paretoRows = paretoCounts.map(row => {
+      cumulative += row.count;
+      return `<tr><td>${escapeHtml(row.category)}</td><td>${row.count}</td><td>${paretoTotal ? (100 * cumulative / paretoTotal).toFixed(1) : "0.0"}%</td><td>${escapeHtml(row.source_ref)}</td></tr>`;
+    }).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(control.car.car_number)} CAR Package</title><style>
       @page{size:A4;margin:14mm} body{font:12px Arial,sans-serif;color:#111;line-height:1.35} h1{font-size:20px;margin:0 0 4px} h2{font-size:14px;border-bottom:1px solid #222;padding-bottom:4px;margin-top:20px} h3{font-size:12px;margin:12px 0 4px}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #bbb;padding:8px}.meta div{min-width:0}.label{font-size:10px;color:#555;text-transform:uppercase}.value{font-weight:700}.box{border:1px solid #bbb;padding:8px;white-space:pre-wrap} table{width:100%;border-collapse:collapse;font-size:10px} th,td{border:1px solid #aaa;padding:5px;vertical-align:top;text-align:left} th{background:#eee}.mono{font-family:monospace;word-break:break-all}.footer{margin-top:24px;border-top:1px solid #777;padding-top:8px;font-size:9px;color:#555}.no-print{margin-bottom:10px}@media print{.no-print{display:none}}
     </style></head><body><button class="no-print" onclick="window.print()">Print / Save PDF</button>
@@ -343,6 +469,20 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <div class="meta"><div><div class="label">Audit</div><div class="value">${escapeHtml(source?.audit_ref || "—")}</div></div><div><div class="label">Finding</div><div class="value">${escapeHtml(source?.finding_ref || control.car.finding_id || "—")}</div></div><div><div class="label">Status</div><div class="value">${escapeHtml(humanize(control.car.status))}</div></div><div><div class="label">Priority</div><div class="value">${escapeHtml(humanize(control.car.priority))}</div></div><div><div class="label">Accountable owner</div><div class="value">${escapeHtml(assigneeName(assignees, control.profile?.accountable_owner_user_id))}</div></div><div><div class="label">Original due</div><div class="value">${escapeHtml(formatDate(control.profile?.original_due_date || control.car.due_date))}</div></div><div><div class="label">Current due</div><div class="value">${escapeHtml(formatDate(control.profile?.current_due_date || control.car.target_closure_date || control.car.due_date))}</div></div><div><div class="label">Health</div><div class="value">${escapeHtml(humanize(control.health.state))} · ${control.health.risk_score}/100</div></div></div>
       <h2>Finding / requirement context</h2><h3>Finding</h3><div class="box">${escapeHtml(source?.finding_description || control.car.summary)}</div><h3>Next required action</h3><div class="box">${escapeHtml(control.health.next_action)}</div>
       <h2>Auditee / responsible-manager response</h2><div class="meta"><div><div class="label">Responder</div><div class="value">${escapeHtml(personDisplay(response?.submitted_by_name, "—"))}</div></div><div><div class="label">Submitted</div><div class="value">${escapeHtml(formatDateTime(response?.submitted_at))}</div></div><div><div class="label">RCA review</div><div class="value">${escapeHtml(humanize(source?.root_cause_status))}</div></div><div><div class="label">CAP review</div><div class="value">${escapeHtml(humanize(source?.capa_status))}</div></div></div><h3>Immediate / containment action</h3><div class="box">${escapeHtml(response?.containment_action || "Not recorded")}</div><h3>Root cause analysis</h3><div class="box">${escapeHtml(response?.root_cause || "Not recorded")}</div><h3>Corrective action</h3><div class="box">${escapeHtml(response?.corrective_action || "Not recorded")}</div><h3>Preventive / long-term systemic action</h3><div class="box">${escapeHtml(response?.preventive_action || "Not recorded")}</div><h3>Quality review comments</h3><div class="box">RCA: ${escapeHtml(source?.root_cause_review_note || "—")}\nCAP: ${escapeHtml(source?.capa_review_note || "—")}</div>
+      <h2>Structured RCA evidence and diagram</h2>
+      <div class="box">RCA revision: ${escapeHtml(rcaRecord?.revision ?? "Legacy only")}; Submitted revision: ${escapeHtml(rcaRecord?.submitted_revision || "Not submitted")}</div>
+      <h3>Proposed systemic root cause</h3><div class="box">${escapeHtml(documented?.conclusion || "No structured RCA recorded.")}</div>
+      <h3>Supporting evidence references</h3><div class="box">${escapeHtml((documented?.conclusion_evidence_references || []).join("; "))}</div>
+      ${fishboneSvg}
+      <table><thead><tr><th>Method</th><th>Branch</th><th>Recorded finding / Why</th><th>Evidence class</th><th>Parent cause ID</th><th>References</th></tr></thead><tbody>${methodRows || '<tr><td colspan="6">No causal nodes recorded.</td></tr>'}</tbody></table>
+      <h3>Pareto analysis — respondent-reported source counts, Quality confirmation pending</h3>
+      <div class="box">Population: ${escapeHtml(paretoMethod?.context?.population || "Not specified")}; Period: ${escapeHtml(paretoMethod?.context?.period_from || "not set")} — ${escapeHtml(paretoMethod?.context?.period_to || "not set")}; Sample total: ${paretoTotal}</div>
+      <table><thead><tr><th>Category</th><th>Count</th><th>Cumulative %</th><th>Provenance</th></tr></thead><tbody>${paretoRows || '<tr><td colspan="4">No Pareto data recorded.</td></tr>'}</tbody></table>
+      <h3>Controlled QMS source-backed Pareto snapshots</h3>
+      <p>These are full-cohort aggregate frequencies from documented Quality audit findings, not proof of individual root causation.</p>
+      <table><thead><tr><th>Saved at</th><th>Grouping</th><th>Category</th><th>Count</th><th>Frequency</th><th>Cumulative</th></tr></thead><tbody>${qmsParetoRows || '<tr><td colspan="6">No saved QMS-source Pareto snapshots.</td></tr>'}</tbody></table>
+      <h2>Individually controlled corrective actions</h2><table><thead><tr><th>No.</th><th>Kind</th><th>Action</th><th>Owner</th><th>Due</th><th>State</th><th>Implementation evidence</th><th>Quality decision</th></tr></thead><tbody>${actionRows || '<tr><td colspan="8">No individually governed actions.</td></tr>'}</tbody></table>
+      <h3>RCA revision history</h3><table><thead><tr><th>Time</th><th>Revision</th><th>Event</th><th>Actor kind</th><th>Attribution</th><th>Reason</th></tr></thead><tbody>${rcaHistoryRows || '<tr><td colspan="6">No structured RCA revisions.</td></tr>'}</tbody></table>
       <h2>Governed lifecycle milestones</h2><table><thead><tr><th>Stage</th><th>Status</th><th>Owner</th><th>Original due</th><th>Current due</th><th>Evidence ref</th><th>Control note</th></tr></thead><tbody>${milestoneRows || '<tr><td colspan="7">No milestones recorded.</td></tr>'}</tbody></table>
       <h2>Dependencies and blockers</h2><table><thead><tr><th>Dependency</th><th>Type</th><th>Risk</th><th>Owner</th><th>Due</th><th>Blocks closure</th><th>Status</th><th>Description</th><th>Mitigation</th></tr></thead><tbody>${dependencyRows || '<tr><td colspan="9">No dependencies recorded.</td></tr>'}</tbody></table>
       <h2>Deadline / extension history</h2><table><thead><tr><th>Previous</th><th>Requested</th><th>Reason</th><th>Impact</th><th>Status</th><th>Decision</th></tr></thead><tbody>${extensionRows || '<tr><td colspan="6">No staged deadline changes recorded.</td></tr>'}</tbody></table>
@@ -388,10 +528,10 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
           <span className={`badge ${control.health.state === "HEALTHY" || control.health.state === "CLOSED" ? "badge--success" : control.health.state === "CRITICAL" || control.health.state === "OVERDUE" ? "badge--danger" : "badge--warning"}`}>{humanize(control.health.state)} · {control.health.risk_score}/100</span>
         </div>
         <div className="stats-grid">
-          <div><span className="muted">Action</span><strong>{control.health.next_action}</strong></div>
-          <div><span className="muted">Owner</span><strong>{nextOwner}</strong></div>
-          <div><span className="muted">Due</span><strong>{formatDate(nextDue)}</strong></div>
-          <div><span className="muted">Stage</span><strong>{nextMilestone?.title || "Final closure"}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Action</span><strong>{control.health.next_action}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Owner</span><strong>{nextOwner}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Due</span><strong>{formatDate(nextDue)}</strong></div>
+          <div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Stage</span><strong>{nextMilestone?.title || "Final closure"}</strong></div>
         </div>
       </section>
 
@@ -400,7 +540,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted"><InlineLoading label={"Loading response history…"}/></p> : null}
         {latestResponse || inviteQuery.data ? (
           <div className="stack">
-            <div className="stats-grid"><div><span className="muted">Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted">Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted">RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted">CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
+            <div className="stats-grid"><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
             <div><strong>Immediate / containment action</strong><p>{latestResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
             <div><strong>Root cause analysis</strong><p>{latestResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
             <div><strong>Corrective action</strong><p>{latestResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
@@ -410,6 +550,43 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         ) : <p className="muted">No auditee/responsible-manager response has been submitted.</p>}
       </section>
 
+      {proposal && <section className="card" aria-labelledby="car-effectiveness-proposal-heading">
+        <div className="card__header">
+          <div><h2 id="car-effectiveness-proposal-heading">Proposed independent effectiveness verification</h2>
+            <p>The auditee's suggested measure is not an approved verification plan. Quality must nominate the reviewer and adopt the plan independently.</p></div>
+        </div>
+        <dl className="case-key-values">
+          <div><dt>Expected outcome</dt><dd>{proposal.expected_result || "Not provided"}</dd></div>
+          <div><dt>Measurable criterion</dt><dd>{proposal.measurable_success_criterion || "Not provided"}</dd></div>
+          <div><dt>Verification method</dt><dd>{proposal.verification_method || "Not provided"}</dd></div>
+          <div><dt>Observation period</dt><dd>{proposal.observation_period || "Not provided"}</dd></div>
+          <div><dt>Proposed review date</dt><dd>{proposal.proposed_review_date || "Not provided"}</dd></div>
+        </dl>
+        {proposal.supporting_records?.length ? <ul>{proposal.supporting_records.map((source, index) => <li key={index}>{source}</li>)}</ul> : null}
+        {canManage && !effectivenessResult && <div className="form-grid">
+          <label>Independent effectiveness reviewer
+            <select className="input" value={effectivenessReviewer} onChange={e => setEffectivenessReviewer(e.target.value)}
+              disabled={effectivenessAdopting}>
+              <option value="">Select an authorized reviewer</option>
+              {assignees.filter(user => user.id !== control.car.assigned_to_user_id).map(user =>
+                <option key={user.id} value={user.id}>{personDisplay(user.full_name || user.email)}</option>)}
+            </select>
+          </label>
+          <label>Quality adoption and independence rationale
+            <textarea className="input" rows={2} value={effectivenessReason} maxLength={4000}
+              onChange={e => setEffectivenessReason(e.target.value)} disabled={effectivenessAdopting}/>
+          </label>
+          <button className="btn btn--primary" type="button" disabled={effectivenessAdopting || !effectivenessReviewer || effectivenessReason.trim().length < 8}
+            onClick={() => void adoptEffectiveness()}>
+            {effectivenessAdopting ? "Establishing plan…" : "Adopt governed effectiveness plan"}
+          </button>
+        </div>}
+        {effectivenessResult && <p role="status">Assurance Case {effectivenessResult.case_ref} created.
+          <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality?workspace=assurance`)}>
+            Open Assurance Cases</button></p>}
+      </section>}
+      <CarInviteGovernance amoCode={amoCode} carId={carId} canManage={canManage}
+        onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["qms-car-control-source", carId] }); }} />
       <section className="card" aria-labelledby="car-evidence-heading">
         <div className="card__header"><div><h2 id="car-evidence-heading">Objective evidence</h2><p>Upload, index, link and retrieve the evidence used to accept implementation and closure.</p></div><span className="badge badge--neutral">{attachments.length} file{attachments.length === 1 ? "" : "s"}</span></div>
         {canManage ? <div className="form-grid"><label>Link new evidence to milestone<select className="input" value={evidenceMilestoneId} onChange={(event) => setEvidenceMilestoneId(event.target.value)}><option value="">CAR-wide evidence</option>{control.milestones.map((item) => <option key={item.id} value={item.id}>{item.phase_order}. {item.title}</option>)}</select></label><label>Upload evidence files<input className="input" type="file" multiple disabled={uploadBusy} onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ""; }} /></label><div className="muted">Use the underlying evidence record for documents, photos, spreadsheets, certificates, work orders and other accepted proof. Filename, size and upload time remain visible below.</div></div> : null}

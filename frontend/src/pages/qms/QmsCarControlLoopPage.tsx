@@ -128,7 +128,12 @@ const QmsCarControlLoopPage: React.FC = () => {
     queryKey: ["qms-car-control-loop", amoCode, carId],
     queryFn: ({ signal }) => getCarControlLoop(amoCode, carId, signal),
     enabled: Boolean(carId),
-    staleTime: 5_000,
+    // An invited respondent or independent Quality reviewer may advance this
+    // control loop from another browser. A restored React Query cache must
+    // never keep showing IN_PROGRESS after authoritative closure.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
   });
   const assigneesQuery = useQuery({
     queryKey: ["qms-car-assignees", amoCode],

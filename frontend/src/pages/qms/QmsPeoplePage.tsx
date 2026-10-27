@@ -699,7 +699,8 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     <section className={`qms-authz qms-people qms-surface-root${!selfServiceOnly && effectiveTab === "people" && selectedPersonKey ? " qms-authz--person-open" : ""}${effectiveTab === "cases" && selectedCaseId ? " qms-authz--case-open" : ""}`} aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
-          <h1 className="qms-authz-page-heading">People & authorization</h1>
+          <h1 className="qms-authz-page-heading">Authorization governance</h1>
+          <p className="qms-authz-page-subtitle">Authorization governance: controlled nominations, competence evidence, independent decisions and periodic reviews.</p>
 
         </div>
         <button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={refresh} disabled={pageLoading || busy}>
@@ -790,7 +791,10 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           </article> : null}
 
           <article className="qms-authz-card qms-authz-detail">
-            {!selfServiceOnly && selectedPersonKey ? <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button> : null}
+            {!selfServiceOnly && selectedPersonKey ? <div className="qms-authz-mobile-person-actions">
+              <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button>
+              {canPrepare && <button type="button" className="qms-authz-mobile-nominate" onClick={() => setNominateOpen(true)}><UserCheck size={16} /> Nominate</button>}
+            </div> : null}
             {personQuery.isPending && activePersonKey ? <p><InlineLoading label={"Loading person…"}/></p> : personDetail ? (
               <>
                 <SectionTitle title={personDetail.person.name} subtitle={[personDetail.person.home_role ? human(personDetail.person.home_role) : null, personDetail.person.department].filter(Boolean).join(" · ")} />

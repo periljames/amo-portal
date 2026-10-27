@@ -97,7 +97,7 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
         authorizations: [{ authorization: "Auditor", status: "ACTIVE", scope: "Global", expires_on: "2026-12-31" }],
         open_cases: 0,
       }],
-      total: 1,
+      total: 1, limit: 100, offset: 0, has_more: false,
     });
   }
   if (path.endsWith("/quality/people/authorization-control/people/quality-user-a")) {
@@ -128,7 +128,7 @@ function peopleResponses(route: Route, url: URL, canManage = true): Promise<void
       audit_participation: { items: [], observed_completed: 3, observed_target: 3 },
     });
   }
-  if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+  if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0, limit: 100, offset: 0, has_more: false });
   if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
   if (path.endsWith("/quality/people/authorization-control/authorizations")) {
     return json(route, { items: [{
@@ -155,7 +155,7 @@ test("People uses authorization cases and does not duplicate audit assignment wo
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authorization governance", exact: true })).toBeVisible();
   await page.locator(".qms-authz-tabs").getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
@@ -268,7 +268,7 @@ test("People read access does not expose mutation controls to a Quality Auditor"
   }, "AUDITOR");
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authorization governance", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "My Authorization", exact: true })).toBeVisible();
   await expect(page.locator(".qms-authz-tabs").getByRole("button", { name: "People", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Authorization Cases", exact: true })).toHaveCount(0);

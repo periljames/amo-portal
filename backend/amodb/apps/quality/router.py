@@ -537,7 +537,7 @@ def _normalized_upload_mime(file: UploadFile) -> str:
     return (file.content_type or "").split(";", 1)[0].strip().lower()
 
 
-def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
+def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str) -> tuple[str, str, str, int]:
     original_name = _sanitize_attachment_filename(file.filename or "attachment.bin")
     ext = Path(original_name).suffix.lower()
     mime = _normalized_upload_mime(file)
@@ -569,7 +569,12 @@ def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, st
         target_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Attachment is empty.")
 
-    return target_path, original_name, digest.hexdigest(), total
+    from .car_rca_storage import store_car_file
+    try:
+        object_uri = store_car_file(target_path, amo_id=amo_id, car_id=car_id, content_type=mime)
+    finally:
+        target_path.unlink(missing_ok=True)
+    return object_uri, original_name, digest.hexdigest(), total
 
 
 def _store_finding_attachment(finding_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
@@ -6227,6 +6232,26 @@ def update_car(
     if not data:
         return car
 
+    # Closure timestamps and governed deadlines are decisions with their own
+    # permission, evidence and audit workflows. Generic CAR edits must not
+    # manufacture a closure timestamp or rewrite an approved control schedule.
+    if "closed_at" in data:
+        raise HTTPException(
+            status_code=409,
+            detail="The CAR closure timestamp is system-managed. Complete closure through the authorized CAR workflow.",
+        )
+    if {"due_date", "target_closure_date"} & data.keys():
+        from .car_control_loop_models import QualityCARControlProfile
+        governed = db.query(QualityCARControlProfile.id).filter(
+            QualityCARControlProfile.amo_id == car.amo_id,
+            QualityCARControlProfile.car_id == car.id,
+        ).first()
+        if governed is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Governed CAR deadlines can only be amended through a controlled deadline-change request and approval.",
+            )
+
     previous_assignee = car.assigned_to_user_id
     changed_status = False
     assignee_allowed = {
@@ -6843,6 +6868,8 @@ def get_car_invite_by_token(invite_token: str, request: Request, db: Session = D
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return _car_invite_payload(car, request=request, db=db)
 
 
@@ -6862,6 +6889,8 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
     text_fields = {
@@ -6907,6 +6936,10 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     # the same CAR from appearing twice.
     latest_existing = _car_invite_latest_response(db, car.id)
     if latest_existing is not None and _car_response_was_recalled(db, car.id, latest_existing) and not _car_submission_was_opened(db, car.id, latest_existing):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest_existing, reason="Earlier recalled submission superseded by a replacement.")
         db.delete(latest_existing)
         db.flush()
 
@@ -6994,12 +7027,18 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     state = _car_invite_state(db, car)
     if not state["can_recall"]:
         raise HTTPException(status_code=409, detail=state["locked_reason"] or "This submission can no longer be recalled.")
 
     latest = _car_invite_latest_response(db, car.id)
     if latest is not None and not _car_submission_was_opened(db, car.id, latest):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest, reason="Respondent recalled submitted CAR before Quality opened the review.")
         db.delete(latest)
         db.flush()
 
@@ -7063,6 +7102,8 @@ def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return [_serialize_attachment(invite_token, attachment) for attachment in car.attachments]
 
 
@@ -7084,9 +7125,11 @@ def upload_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
 
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
@@ -7122,6 +7165,8 @@ def update_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7152,6 +7197,8 @@ def delete_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7160,10 +7207,10 @@ def delete_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     remaining_attachment = (
         db.query(models.CARAttachment.id)
@@ -7192,6 +7239,8 @@ def download_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     attachment = (
         db.query(models.CARAttachment)
         .filter(
@@ -7202,9 +7251,8 @@ def download_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(
         path=file_path,
         filename=attachment.filename,
@@ -7221,6 +7269,8 @@ def download_car_invite_form(invite_token: str, request: Request, db: Session = 
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     try:
         payload = _car_invite_payload(car, request=request, db=db)
         output_path = generate_car_form_pdf(car, invite_url=str(payload.get("invite_url") or ""))
@@ -7242,6 +7292,8 @@ def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return (
         db.query(models.CARActionLog)
         .filter(models.CARActionLog.car_id == car.id)
@@ -7316,7 +7368,7 @@ def upload_car_attachment(
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="Closed or cancelled CAR evidence is read-only.")
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
         car_id=car.id,
@@ -7366,9 +7418,8 @@ def download_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(path=file_path, filename=attachment.filename, media_type=attachment.content_type or "application/octet-stream")
 
 
@@ -7386,10 +7437,10 @@ def delete_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     audit_services.log_event(
         db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="qms_car_attachment", entity_id=str(attachment_id), action="deleted", metadata=_audit_metadata(request)

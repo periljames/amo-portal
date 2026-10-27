@@ -4,6 +4,8 @@ import io
 import anyio
 import importlib
 import zipfile
+import json
+from datetime import datetime, timezone
 
 from starlette.requests import Request
 
@@ -11,6 +13,7 @@ from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import models as audit_models
 from amodb.apps.exports import evidence_pack as evidence_service
 from amodb.apps.quality import models as quality_models
+from amodb.apps.quality import car_rca_models as quality_car_rca_models
 from amodb.apps.quality import schemas as quality_schemas
 from amodb.apps.quality import service as quality_service
 
@@ -71,6 +74,23 @@ def test_car_evidence_pack_contains_pdf_and_timeline(db_session, monkeypatch, tm
     )
     db_session.commit()
 
+    snapshot = {"form": {}, "investigation": {
+        "version": 1, "problem_statement": "Inspection error", "investigations": [{
+            "id": "why-1", "method": "FIVE_WHYS", "version": 1,
+            "nodes": [{"id": "cause-1", "parent_id": None, "statement": "Incorrect sign-off sequence",
+                       "category": "Process", "entry_type": "CAUSAL_CONCLUSION",
+                       "evidence_references": ["AUDIT-REPORT:Q-01"], "rationale": "Checked records"}],
+            "context": {},
+        }], "conclusion": "Inspection sign-off sequence is not independently checked.",
+        "supported_cause_ids": ["cause-1"], "conclusion_evidence_references": ["AUDIT-REPORT:Q-01"],
+        "evidence_notes": "", "effectiveness_proposal": None,
+    }}
+    db_session.add(quality_car_rca_models.QualityCarRcaDocument(
+        amo_id=amo.id, car_id=car.id, revision=1, draft=snapshot,
+        submitted_revision=1, submitted_snapshot=snapshot, submitted_at=datetime.now(timezone.utc),
+    ))
+    db_session.commit()
+
     pdf_path = tmp_path / "car.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 dummy")
 
@@ -96,6 +116,15 @@ def test_car_evidence_pack_contains_pdf_and_timeline(db_session, monkeypatch, tm
         names = archive.namelist()
         assert "timeline.json" in names
         assert "car.pdf" in names
+        assert "linked/rca_document.json" in names
+        assert "linked/rca_revisions.json" in names
+        assert "linked/rca_actions.json" in names
+        assert "linked/rca_pareto_snapshots.json" in names
+        assert "linked/effectiveness_plans.json" in names
+        investigation = json.loads(archive.read("linked/rca_document.json"))
+        assert investigation["submitted_revision"] == 1
+        assert investigation["submitted_snapshot"]["investigation"]["supported_cause_ids"] == ["cause-1"]
+        assert "invite_token" not in json.loads(archive.read("summary.json"))
 
     event = (
         db_session.query(audit_models.AuditEvent)

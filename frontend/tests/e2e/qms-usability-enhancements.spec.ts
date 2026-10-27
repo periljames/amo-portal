@@ -196,6 +196,27 @@ async function prepare(page: Page, state: TestState): Promise<void> {
       return;
     }
 
+    // CAR details now load independently governed RCA and Pareto resources.
+    // Mock their actual response contracts rather than the generic register
+    // response, which otherwise crashes on missing investigation fields.
+    if (parsed.pathname.includes("/quality/cars/") && parsed.pathname.endsWith("/investigation")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        car_id: "rel-car-7", revision: 0,
+        draft: { form: {}, investigation: {
+          version: 1, problem_statement: "", investigations: [], conclusion: "",
+          supported_cause_ids: [], conclusion_evidence_references: [],
+          evidence_notes: "", effectiveness_proposal: null,
+        } },
+        submitted_revision: null, submitted_snapshot: null, submitted_at: null,
+        actions: [], action_events: [], retained_responses: [], history: [],
+      }) });
+      return;
+    }
+    if (parsed.pathname.includes("/quality/cars/") && parsed.pathname.endsWith("/pareto-snapshots")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+
     if (url.includes("/api/maintenance/tenant-a/quality/")) {
       state.qualityReads += 1;
       await route.fulfill({
@@ -239,17 +260,27 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   await prepare(page, state);
   await page.goto("/maintenance/tenant-a/quality/findings/register", { waitUntil: "domcontentloaded" });
 
-  const contextBar = page.locator(".quality-context-bar");
+  const contextBar = page.getByRole("navigation", { name: "QMS page menus" });
   await expect(contextBar).toBeVisible();
-  for (const label of ["Control Room", "Planner", "Missions", "People", "Assurance", "Intelligence"]) {
+  for (const label of ["Work", "Assurance", "Controls & settings", "Reports"]) {
     await expect(contextBar.getByRole("button", { name: label, exact: true })).toBeVisible();
   }
-  // On the canonical Findings register the Assurance rail owns local actions;
-  // the context bar intentionally avoids a second, competing creation control.
+  await contextBar.getByRole("button", { name: "Work", exact: true }).click();
+  const workPages = page.getByRole("navigation", { name: "Work pages" });
+  await expect(workPages.getByRole("link", { name: "Control Room", exact: true })).toBeVisible();
+  await expect(workPages.getByRole("link", { name: "Missions", exact: true })).toBeVisible();
+  const peopleLink = workPages.getByRole("link", { name: "People & authorizations", exact: true });
+  await expect(peopleLink).toBeVisible();
+  await expect(peopleLink).toHaveAttribute("href", /\/maintenance\/tenant-a\/quality\?workspace=people(?:&|$)/);
+  await page.keyboard.press("Escape");
+  await contextBar.getByRole("button", { name: "Assurance", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Assurance pages", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  // The compact Quality menu is the single navigation owner: no duplicate create action.
   await expect(contextBar.getByRole("button", { name: "New finding" })).toHaveCount(0);
   await expect(page.locator(".qms-ops-page > .page-header")).toBeHidden();
 
-  await page.locator(".tenant-shell__profile-trigger").click();
+  await page.getByRole("button", { name: "Account and appearance" }).click();
   await page.getByRole("menuitem", { name: "Appearance" }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Portal text size" });
   await expect(scaleGroup).toBeVisible();
@@ -257,11 +288,11 @@ test("QMS six-workspace navigation and user text scale persist without duplicate
   await expect(page.locator("html")).toHaveAttribute("data-portal-text-scale", "large");
   await expect.poll(() => state.scale).toBe("large");
 
-  const navFontSize = await page.locator(".tenant-nav__link > span:last-child").first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
-  expect(navFontSize).toBeGreaterThanOrEqual(14);
+  const navFontSize = await contextBar.getByRole("button", { name: "Work", exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(navFontSize).toBeGreaterThanOrEqual(13);
 
   await page.keyboard.press("Escape");
-  await page.locator(".tenant-shell__profile-trigger").click();
+  await page.getByRole("button", { name: "Account and appearance" }).click();
   await page.getByRole("menuitem", { name: "Appearance" }).click();
   await expect(page.getByRole("radio", { name: /Large/ })).toHaveAttribute("aria-checked", "true");
 
@@ -348,7 +379,19 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   await expect(preview.getByText("Engineering", { exact: true })).toBeVisible();
 
   await page.goto("/maintenance/tenant-a/quality/cars?carId=rel-car-7", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("REL-CAR-007", { exact: true })).toBeVisible({ timeout: 30_000 });
+  try {
+    await expect(page.getByRole("heading", { name: "REL-CAR-007", exact: true })).toBeVisible({ timeout: 15_000 });
+  } catch (error) {
+    console.error("CAR direct-record navigation diagnostic", {
+      url: page.url(),
+      carRegisterUrls: state.carRegisterUrls,
+      runtimeErrors,
+      consoleErrors,
+      failedRequests,
+      body: (await page.locator("body").innerText().catch(() => "<unavailable>")).slice(0, 6000),
+    });
+    throw error;
+  }
   await expect.poll(() => state.carRegisterUrls.at(-1) || "", { timeout: 15_000 }).toContain("car_id=rel-car-7");
   expect(state.carRegisterUrls.at(-1)).not.toContain("program=QUALITY");
   expect(runtimeErrors).toEqual([]);

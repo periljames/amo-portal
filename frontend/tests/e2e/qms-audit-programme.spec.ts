@@ -509,8 +509,11 @@ test("programme schedule deep-link stays inside Audit Assurance chrome", async (
     { waitUntil: "domcontentloaded" },
   );
 
-  await expect(page.getByLabel("Assurance pages")).toBeVisible();
-  // The deep link uses the canonical Assurance shell; this page no longer exposes legacy tabs.
+  const qmsMenu = page.getByRole("navigation", { name: "QMS page menus" });
+  await expect(qmsMenu).toBeVisible({ timeout: 15_000 });
+  await qmsMenu.getByRole("button", { name: "Assurance", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Assurance pages", exact: true })).toBeVisible();
+  // The deep link uses the canonical Assurance menu, not the removed legacy tabs/rail.
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");

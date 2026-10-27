@@ -380,9 +380,16 @@ def _close_control_loop_guarded(
     assert_quality_permission(db, ctx, "qms.car.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
-    _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
+    profile = _require_profile(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     milestones = _milestones(db, amo_id=ctx.amo_id, car_id=car_id)
     _validated_closure_evidence_ref(payload, milestones)
+    # This gate is also checked at the shared CLOSED transition boundary, so
+    # a legacy update endpoint cannot silently skip independent verification.
+    from .car_closure_guards import ensure_structured_car_ready_for_closure
+    ensure_structured_car_ready_for_closure(
+        db, amo_id=ctx.amo_id, car_id=car_id,
+        effectiveness_required=profile.effectiveness_required,
+    )
     return _close_control_loop_base(str(car_id), payload, ctx, db)
 
 

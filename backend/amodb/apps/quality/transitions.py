@@ -48,6 +48,7 @@ def transition_car(
     target_status: str,
     evidence_ref: str | None,
     fail_closed_ledger: bool = True,
+    controlled_closure: bool = False,
 ) -> models.CorrectiveActionRequest:
     target = str(target_status.value if hasattr(target_status, "value") else target_status)
     rule = CAR_STATUS_RULES.get(target)
@@ -61,8 +62,37 @@ def transition_car(
     if rule.evidence_required and not evidence_ref:
         raise HTTPException(status_code=400, detail="evidence_ref is required for this transition")
 
-    if target == CARStatus.CLOSED.value and car.finding_id:
-        ensure_finding_training_gate_satisfied(db, amo_id=amo_id, finding_id=str(car.finding_id))
+    if target == CARStatus.CLOSED.value:
+        # All write routes share this transition boundary. The legacy CAR PATCH
+        # endpoint must not bypass a staged control loop or a submitted structured
+        # investigation, even when the caller supplies an evidence reference.
+        from .car_control_loop_models import QualityCARControlProfile
+        from .car_rca_models import QualityCarRcaDocument
+
+        profile = db.query(QualityCARControlProfile).filter(
+            QualityCARControlProfile.amo_id == amo_id,
+            QualityCARControlProfile.car_id == car.id,
+        ).first()
+        submitted = db.query(QualityCarRcaDocument.id).filter(
+            QualityCarRcaDocument.amo_id == amo_id,
+            QualityCarRcaDocument.car_id == car.id,
+            QualityCarRcaDocument.submitted_revision.isnot(None),
+        ).first()
+        if (profile is not None or submitted is not None) and not controlled_closure:
+            raise HTTPException(
+                status_code=409,
+                detail="Governed CARs must close through /control-loop/close after independent verification and effectiveness review.",
+            )
+        if controlled_closure:
+            if profile is None:
+                raise HTTPException(status_code=409, detail="Initialize the CAR control loop before controlled closure.")
+            from .car_closure_guards import ensure_structured_car_ready_for_closure
+            ensure_structured_car_ready_for_closure(
+                db, amo_id=amo_id, car_id=car.id,
+                effectiveness_required=profile.effectiveness_required,
+            )
+        if car.finding_id:
+            ensure_finding_training_gate_satisfied(db, amo_id=amo_id, finding_id=str(car.finding_id))
 
     car.status = target
     if evidence_ref:

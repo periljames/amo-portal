@@ -197,7 +197,10 @@ def _build_car_pack(
     from ..quality import models as quality_models
     from ..quality import service as quality_service
 
-    car = db.query(quality_models.CorrectiveActionRequest).filter(quality_models.CorrectiveActionRequest.id == car_id).first()
+    car = db.query(quality_models.CorrectiveActionRequest).filter(
+        quality_models.CorrectiveActionRequest.id == car_id,
+        quality_models.CorrectiveActionRequest.amo_id == amo_id,
+    ).first()
     if not car:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CAR not found")
 
@@ -221,24 +224,40 @@ def _build_car_pack(
     )
 
     summary = _model_to_dict(car)
+    # Exported evidence can circulate beyond the original requester. Never
+    # disclose an active public bearer invitation in the package manifest.
+    summary.pop("invite_token", None)
     linked = {
         "actions": [_model_to_dict(action) for action in actions],
         "responses": [_model_to_dict(response) for response in responses],
         "attachments": [_model_to_dict(attachment) for attachment in attachments],
     }
+    from ..quality.car_rca_export import collect_car_rca_evidence
+    from ..quality.car_rca_storage import car_attachment_path
+    linked.update(collect_car_rca_evidence(db, amo_id=amo_id, car_id=car.id, serialize=_model_to_dict))
 
     timeline = _collect_timeline(db, amo_id=amo_id, entities=[("qms_car", str(car.id))])
 
-    attachment_files = [
-        (_basename_only(attachment.filename, f"car_attachment_{attachment.id}"), Path(attachment.file_ref))
-        for attachment in attachments
-    ]
-
+    attachment_files: list[tuple[str, Path]] = []
     omitted: list[dict[str, Any]] = []
+    for attachment in attachments:
+        name = _basename_only(attachment.filename, f"car_attachment_{attachment.id}")
+        if attachment.size_bytes and MAX_EVIDENCE_PACK_BYTES and attachment.size_bytes > MAX_EVIDENCE_PACK_BYTES:
+            omitted.append({"path": "attachments/" + name, "reason": "exceeds_limit", "size_bytes": attachment.size_bytes})
+            continue
+        try:
+            controlled_path = car_attachment_path(
+                attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256,
+            )
+            attachment_files.append((name, controlled_path))
+        except HTTPException as exc:
+            omitted.append({"path": "attachments/" + name, "reason": "unavailable_or_unverified", "status": exc.status_code})
+
     pdf_path: Optional[Path] = None
     try:
-        invite_url = quality_service.build_car_invite_link(car)
-        pdf_path = quality_service.generate_car_form_pdf(car, invite_url)
+        # A downloaded evidence package is not a public invitation. Never
+        # embed a reusable guest bearer token in the archived CAR PDF or QR.
+        pdf_path = quality_service.generate_car_form_pdf(car, "", archive_copy=True)
     except Exception as exc:
         omitted.append({"path": "car.pdf", "reason": f"pdf_generation_failed: {exc}"})
 
@@ -388,6 +407,20 @@ def build_evidence_pack(
         current_size += _add_entry(entries, "linked/actions.json", linked["actions"])
         current_size += _add_entry(entries, "linked/responses.json", linked["responses"])
         current_size += _add_entry(entries, "linked/attachments.json", linked["attachments"])
+        for group in ("rca_document", "rca_revisions", "rca_actions", "rca_action_events",
+                      "rca_pareto_snapshots", "recalled_responses", "effectiveness_plans"):
+            current_size += _add_entry(entries, "linked/" + group + ".json", linked[group])
+        from ..quality.car_rca_export import render_submitted_rca_pdf
+        try:
+            rca_pdf = render_submitted_rca_pdf(linked, car_number=str(summary.get("car_number", entity_id)))
+            if rca_pdf is not None:
+                if not MAX_EVIDENCE_PACK_BYTES or current_size + len(rca_pdf) <= MAX_EVIDENCE_PACK_BYTES:
+                    entries.append(("car-rca-investigation.pdf", rca_pdf))
+                    current_size += len(rca_pdf)
+                else:
+                    omitted_files.append({"path": "car-rca-investigation.pdf", "reason": "exceeds_limit"})
+        except Exception as exc:
+            omitted_files.append({"path": "car-rca-investigation.pdf", "reason": "render_failed", "detail": type(exc).__name__})
         current_size += _add_entry(entries, "timeline.json", timeline)
         for name, path in attachment_files:
             current_size += _load_attachment(

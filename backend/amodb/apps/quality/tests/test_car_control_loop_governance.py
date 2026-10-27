@@ -137,3 +137,170 @@ def test_control_loop_routers_use_persistent_post_commit_tenant_context() -> Non
 
     assert car_control_loop_router.set_postgres_tenant_context is set_persistent_control_loop_context
     assert car_control_loop_guard_router.set_postgres_tenant_context is set_persistent_control_loop_context
+
+
+def test_legacy_car_transition_cannot_close_governed_car_without_controlled_authority() -> None:
+    """The PATCH /cars/{id} route uses transition_car, not the close endpoint."""
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000121"),
+        status="PENDING_VERIFICATION",
+        finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = SimpleNamespace(effectiveness_required=True)
+    document_query.filter.return_value.first.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "/control-loop/close" in str(exc_info.value.detail)
+    assert car.status == "PENDING_VERIFICATION"
+    db.add.assert_not_called()
+
+
+def test_submitted_structured_car_cannot_close_when_control_loop_is_missing() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000122"),
+        status="PENDING_VERIFICATION", finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = None
+    document_query.filter.return_value.first.return_value = ("structured-document",)
+
+    with pytest.raises(HTTPException) as exc_info:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+    assert exc_info.value.status_code == 409
+    assert car.status == "PENDING_VERIFICATION"
+
+
+def test_controlled_close_still_requires_structured_independent_verification() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000123"),
+        status="PENDING_VERIFICATION", finding_id=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = SimpleNamespace(effectiveness_required=True)
+    document_query.filter.return_value.first.return_value = ("structured-document",)
+
+    with patch(
+        "amodb.apps.quality.car_closure_guards.ensure_structured_car_ready_for_closure",
+        side_effect=HTTPException(status_code=409, detail="Unverified causal corrective action"),
+    ) as readiness:
+        with pytest.raises(HTTPException) as exc_info:
+            transition_car(
+                db, amo_id="amo-1", actor_user_id="reviewer-a",
+                car=car, target_status="CLOSED", evidence_ref="CAR:EVIDENCE",
+                controlled_closure=True,
+            )
+    assert exc_info.value.status_code == 409
+    assert car.status == "PENDING_VERIFICATION"
+    readiness.assert_called_once_with(
+        db, amo_id="amo-1", car_id=car.id, effectiveness_required=True,
+    )
+
+
+def test_plain_legacy_car_keeps_backwards_compatible_transition() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000124"),
+        status="PENDING_VERIFICATION", finding_id=None, evidence_ref=None,
+    )
+    db = MagicMock()
+    profile_query, document_query = MagicMock(), MagicMock()
+    db.query.side_effect = [profile_query, document_query]
+    profile_query.filter.return_value.first.return_value = None
+    document_query.filter.return_value.first.return_value = None
+
+    with patch("amodb.apps.quality.transitions.write_ledger_event") as audit:
+        transition_car(
+            db, amo_id="amo-1", actor_user_id="reviewer-a",
+            car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
+        )
+    assert car.status == "CLOSED"
+    assert car.evidence_ref == "LEGACY:EVIDENCE"
+    audit.assert_called_once()
+
+
+@pytest.mark.parametrize("submitted", [
+    "2026-12-01T15:00:00+03:00",
+    "2026-12-01T12:00:00Z",
+    "2026-12-01T12:00:00",
+])
+def test_invitation_expiry_persists_same_utc_instant(submitted: str) -> None:
+    from datetime import datetime, timezone
+    from amodb.apps.quality import car_rca_router as access
+
+    car_id = UUID("00000000-0000-0000-0000-000000000125")
+    car = SimpleNamespace(id=car_id, amo_id="amo-1")
+    control = SimpleNamespace(
+        revoked_at=None, expires_at=None, reason=None,
+        updated_by_user_id=None, updated_at=None,
+    )
+    db = MagicMock()
+    ctx = SimpleNamespace(amo_id="amo-1", user_id="reviewer-a")
+    payload = access.InviteAccessChange(
+        expires_at=datetime.fromisoformat(submitted.replace("Z", "+00:00")),
+        reason="Confirmed the controlled access expiry.",
+    )
+    with (
+        patch.object(access, "assert_quality_permission"),
+        patch.object(access, "_car_for_employee", return_value=car),
+        patch.object(access, "_control_for_car", return_value=control),
+        patch("amodb.apps.quality.service.add_car_action"),
+    ):
+        access.update_invite_access_control(car_id=car_id, payload=payload, ctx=ctx, db=db)
+    assert control.expires_at == datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)
+    assert control.expires_at.tzinfo == timezone.utc
+    db.commit.assert_called_once()
+
+
+def test_optional_effectiveness_policy_does_not_waive_structured_action_verification() -> None:
+    from amodb.apps.quality.car_closure_guards import ensure_structured_car_ready_for_closure
+
+    car_id = UUID("00000000-0000-0000-0000-000000000126")
+    db = MagicMock()
+    doc_query, action_query = MagicMock(), MagicMock()
+    db.query.side_effect = [doc_query, action_query]
+    doc_query.filter.return_value.first.return_value = SimpleNamespace(submitted_revision=1)
+    action = SimpleNamespace(
+        kind="CORRECTIVE", state="PROPOSED", sequence_no=1,
+        owner_user_id="implementer-a", reviewed_by_user_id=None,
+        evidence_references=[],
+    )
+    action_query.filter.return_value.all.return_value = [action]
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_structured_car_ready_for_closure(
+            db, amo_id="amo-1", car_id=car_id, effectiveness_required=False,
+        )
+    assert exc_info.value.status_code == 409
+    assert "independently verified" in str(exc_info.value.detail)
+
+    db.query.reset_mock(side_effect=True)
+    db.query.side_effect = [doc_query, action_query]
+    action.state = "VERIFIED"
+    action.reviewed_by_user_id = "independent-quality-reviewer"
+    action.evidence_references = ["EVIDENCE:CONTROL-VERIFICATION"]
+    ensure_structured_car_ready_for_closure(
+        db, amo_id="amo-1", car_id=car_id, effectiveness_required=False,
+    )
+    assert db.query.call_count == 2, "The expressly optional effectiveness plan should not be queried"
