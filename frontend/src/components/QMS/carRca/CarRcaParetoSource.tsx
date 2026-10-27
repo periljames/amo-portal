@@ -17,13 +17,17 @@ export default function CarRcaParetoSource({ amoCode, carId, canSave }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = async () => {
-    const data = await listCarRcaParetoSnapshots(amoCode, carId);
-    setItems(data);
-    setSelectedId(id => id || data[0]?.id || "");
+    setLoading(true); setError(null);
+    try {
+      const data = await listCarRcaParetoSnapshots(amoCode, carId);
+      setItems(data);
+      setSelectedId(id => data.some(item => item.id === id) ? id : data[0]?.id || "");
+    } finally { setLoading(false); }
   };
   useEffect(() => {
     let active = true;
     setLoading(true); setError(null);
+    setItems([]); setSelectedId("");
     void listCarRcaParetoSnapshots(amoCode, carId).then(data => {
       if (active) { setItems(data); setSelectedId(data[0]?.id || ""); }
     }).catch(e => { if (active) setError(e instanceof Error ? e.message : "Pareto source unavailable"); })

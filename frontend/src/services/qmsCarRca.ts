@@ -1,5 +1,6 @@
 import { apiRequest, qmsPath } from "./apiClient";
 import { getApiBaseUrl } from "./config";
+import { validateCarRcaProjection, validateCarInviteAccess, validateCarParetoSnapshots } from "./qmsCarRcaContracts";
 
 export type CauseEntryType = "FACT" | "HYPOTHESIS" | "CAUSAL_CONCLUSION" | "RULED_OUT";
 export type CarRcaMethod = "FIVE_WHYS" | "ISHIKAWA" | "PARETO" | "CAUSAL_FACTOR" | "BARRIER_ANALYSIS" | "CHANGE_ANALYSIS" | "HUMAN_ORGANIZATIONAL" | "EIGHT_D" | "FMEA";
@@ -120,8 +121,8 @@ async function publicRcaRequest<T>(token: string, path: string, method: "GET" | 
   } finally { window.clearTimeout(timeout); }
 }
 
-export const getCarRcaInvite = (token: string) => publicRcaRequest<CarRcaProjection>(token, "/draft");
-export const saveCarRcaInvite = (token: string, payload: CarRcaSavePayload) => publicRcaRequest<CarRcaProjection>(token, "/draft", "PUT", payload);
+export const getCarRcaInvite = (token: string) => publicRcaRequest<CarRcaProjection>(token, "/draft").then(validateCarRcaProjection);
+export const saveCarRcaInvite = (token: string, payload: CarRcaSavePayload) => publicRcaRequest<CarRcaProjection>(token, "/draft", "PUT", payload).then(validateCarRcaProjection);
 export const addCarRcaInviteAction = (token: string, payload: CarRcaActionCreate) => publicRcaRequest<CarRcaAction>(token, "/corrective-actions", "POST", payload);
 export const reviseCarRcaInviteAction = (token: string, actionId: string, payload: CarRcaActionCreate) =>
   publicRcaRequest<CarRcaAction>(token, `/corrective-actions/${encodeURIComponent(actionId)}`, "PUT", payload);
@@ -135,11 +136,11 @@ export const adoptCarEffectivenessProposal = (amoCode: string, carId: string, re
   );
 
 export const getCarRcaInternal = (amoCode: string, carId: string) =>
-  apiRequest<CarRcaProjection>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/investigation`), { cacheTtlMs: 0, timeoutMs: 20000 });
+  apiRequest<CarRcaProjection>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/investigation`), { cacheTtlMs: 0, timeoutMs: 20000 }).then(validateCarRcaProjection);
 export const saveCarRcaInternal = (amoCode: string, carId: string, payload: CarRcaSavePayload) =>
   apiRequest<CarRcaProjection>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/investigation`), {
     method: "PUT", body: JSON.stringify(payload), cacheTtlMs: 0,
-  });
+  }).then(validateCarRcaProjection);
 export const addCarRcaInternalAction = (amoCode: string, carId: string, payload: CarRcaActionCreate) =>
   apiRequest<CarRcaAction>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/corrective-actions`), {
     method: "POST", body: JSON.stringify(payload), cacheTtlMs: 0,
@@ -168,7 +169,7 @@ export type CarRcaParetoSnapshot = {
 export const listCarRcaParetoSnapshots = (amoCode: string, carId: string) =>
   apiRequest<CarRcaParetoSnapshot[]>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/pareto-snapshots`), {
     cacheTtlMs: 0, timeoutMs: 20000,
-  });
+  }).then(validateCarParetoSnapshots);
 
 export const saveCarRcaParetoSnapshot = (
   amoCode: string, carId: string,
@@ -188,7 +189,7 @@ export type CarInviteAccessControl = {
 };
 
 export const getCarInviteAccessControl = (amoCode: string, carId: string) =>
-  apiRequest<CarInviteAccessControl>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/invite-access`), { cacheTtlMs: 0 });
+  apiRequest<CarInviteAccessControl>(qmsPath(amoCode, `/cars/${encodeURIComponent(carId)}/invite-access`), { cacheTtlMs: 0 }).then(validateCarInviteAccess);
 
 export const updateCarInviteAccessControl = (
   amoCode: string, carId: string,

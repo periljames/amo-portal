@@ -44,6 +44,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setData(null);
+    setNotes({});
     setError(null);
     void getCarRcaInternal(amoCode, carId)
       .then(result => { if (active) setData(result); })
@@ -76,22 +78,28 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   const events = data?.action_events ?? [];
   const revisions = data?.history ?? [];
 
-  return <section className="case-section car-rca-internal" aria-label="Structured CAR investigation and Quality action review">
-    <h3>Structured investigation and corrective action assurance</h3>
+  return <section className="case-section car-rca car-rca-internal" aria-label="Structured CAR investigation and Quality action review">
+    <h3>Investigation & action review</h3>
     {loading && <p role="status">Loading documented investigation…</p>}
     {error && <p role="alert">{error} <button type="button" onClick={() => void load()}>Retry</button></p>}
     {data && <>
-      <p>Investigation revision {data.revision}. Submitted revision: {data.submitted_revision ?? "not yet submitted"}.
-        {data.submitted_at ? ` Submitted ${new Date(data.submitted_at).toLocaleString()}.` : ""}
-        Proposed causes are not automatically accepted by Quality.</p>
-      {data.revision && investigation ? <CarRcaWorkbench
+      <p>Revision {data.revision} · {data.submitted_revision == null ? "Not submitted" : `Submitted revision ${data.submitted_revision}`}
+        {data.submitted_at ? ` · ${new Date(data.submitted_at).toLocaleString()}` : ""}</p>
+      {data.revision && investigation ? <details>
+        <summary>View structured investigation · revision {data.submitted_revision ?? data.revision}</summary>
+        <CarRcaWorkbench
         value={investigation}
         disabled onChange={() => undefined} onSave={() => undefined}
-        saveState="Controlled record — reviewer read only" /> :
-        <p>Only legacy free-text RCA is available for this CAR. No new structured analysis has been recorded.</p>}
-      <CarRcaParetoSource amoCode={amoCode} carId={carId}
-        canSave={canReview && hasQmsRolePermission("qms.car.manage") && hasQmsRolePermission("qms.reports.view")} />
-      {canReview && hasQmsRolePermission("qms.car.manage") && <div className="car-rca" aria-label="Create an internal governed corrective action">
+        saveState="Controlled record — reviewer read only" /></details> :
+        <p>No structured investigation recorded. Existing narrative responses remain above.</p>}
+      {hasQmsRolePermission("qms.reports.view") && <details>
+        <summary>Source frequency analysis</summary>
+        <CarRcaParetoSource amoCode={amoCode} carId={carId}
+          canSave={canReview && hasQmsRolePermission("qms.car.manage")} />
+      </details>}
+      {canReview && hasQmsRolePermission("qms.car.manage") && <details>
+        <summary>Add a Quality-managed action</summary>
+        <div className="car-rca" aria-label="Create an internal governed corrective action">
         <h4>Record a Quality-managed corrective action</h4>
         <p>This supplements the auditee's plan and retains an individual owner, deadline, causal linkage and independent review trail.</p>
         <div className="car-rca-grid">
@@ -119,8 +127,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
           onChange={event => setNewAction(current => ({ ...current, evidence_references: event.target.value.split("\n").map(value => value.trim()).filter(Boolean) }))}/></label>
         <button type="button" disabled={creating || Boolean(busy) || newAction.description.trim().length < 5 || !newAction.target_date || !newAction.external_owner_name?.trim()}
           onClick={() => void submitInternalAction()}>{creating ? "Recording…" : "Create governed action"}</button>
-      </div>}
-      <div className="car-rca-table-scroll"><table>
+      </div></details>}
+      {actions.length > 0 ? <div className="car-rca-table-scroll"><table>
         <caption>Individually governed corrective and preventive actions — {actions.length}</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
         <tbody>{actions.map(action => <tr key={action.id}>
@@ -141,7 +149,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
                 onClick={() => void review(action, "REJECTED")}>Return for rework</button>
             </div>}
           </td></tr>)}</tbody>
-      </table></div>
+      </table></div> : <p>No individual actions recorded.</p>}
       {retained.length > 0 && <details>
         <summary>Retained recalled CAR responses ({retained.length})</summary>
         <p>These revisions remain in the audit history but are excluded from the active Quality review queue.</p>

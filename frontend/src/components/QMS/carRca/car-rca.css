@@ -31,6 +31,13 @@
 .car-rca-conclusions { display: grid; gap: .8rem; border-top: 1px solid var(--border, #cbd5e1); padding-top: .9rem; }
 .car-rca-check { display: flex; align-items: flex-start; gap: .5rem; line-height: 1.5; }
 .car-rca-check input { flex: 0 0 auto; margin-top: .3rem; }
+.tenant-shell .car-rca :is(th, td) { white-space: normal; overflow: visible; text-overflow: clip; }
+.car-rca-internal > details > summary { font-weight: 550; }
+.car-rca-internal > details[open] > summary { margin-bottom: .75rem; }
+.car-rca-internal > h3 { margin: 0; }
+.car-rca-internal > .car-rca-table-scroll table { min-width: 680px; }
+.car-rca-internal > .car-rca-table-scroll td:first-child { min-width: 200px; }
+.car-rca-internal > .car-rca-table-scroll td:last-child { min-width: 230px; }
 @media (max-width: 660px) {
   .car-rca { padding: .65rem; }
   .car-rca-heading { display: grid; }

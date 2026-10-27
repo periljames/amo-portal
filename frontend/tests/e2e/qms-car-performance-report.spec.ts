@@ -73,7 +73,7 @@ async function prepare(page: Page): Promise<void> {
     await route.fulfill({
       status: 200,
       contentType: "text/csv",
-      headers: { "Content-Disposition": 'attachment; filename="qms-car-performance.csv"' },
+      headers: { "Content-Disposition": 'attachment; filename="qms-car-performance.csv"', "Access-Control-Expose-Headers": "Content-Disposition" },
       body: "CAR,Status,Due,Closed\nQMS-CAR-001,CLOSED,2026-08-05,2026-08-04\nQMS-CAR-002,CLOSED,2026-07-31,2026-08-08\nQMS-CAR-003,IN_PROGRESS,2026-08-10,\n",
     });
   });
