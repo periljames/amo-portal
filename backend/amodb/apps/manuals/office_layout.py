@@ -372,6 +372,14 @@ def precompute_office_layout_assets(revision_id: str) -> None:
         raw = str(revision.source_storage_path or "").strip()
         if not raw or Path(raw).suffix.lower() not in SUPPORTED_OFFICE_EXTENSIONS:
             return
+        # Never silently replace an author-supplied Word PDF proof with LibreOffice.
+        existing = db.query(models.ManualRendition).filter(
+            models.ManualRendition.revision_id == revision.id,
+            models.ManualRendition.rendition_type == "PDF",
+        ).first()
+        if existing and existing.converter == "Author-supplied Microsoft Word PDF export":
+            if existing.pdf_sha256 and office_layout_pdf_path(revision) and office_layout_pdf_checksum(office_layout_pdf_path(revision)) == existing.pdf_sha256:
+                return
         rendition = begin_rendition(db, revision)
         db.commit()
         try:

@@ -398,6 +398,19 @@ export async function retryPublicationOfficeLayout(tenantSlug: string, manualId:
   return response.json() as Promise<{ status: string }>;
 }
 
+export async function uploadPublicationWordPdf(tenantSlug: string, manualId: string, revisionId: string, sourceSha256: string, file: File): Promise<{ status: string; pdf_sha256?: string }> {
+  const path = "/manuals/t/" + encodeURIComponent(tenantSlug) + "/" + encodeURIComponent(manualId) + "/rev/" + encodeURIComponent(revisionId) + "/layout-upload";
+  const data = new FormData();
+  data.append("source_sha256", sourceSha256);
+  data.append("file", file);
+  const response = await portalFetch(getApiBaseUrl() + path, { method: "POST", headers: authHeaders(), body: data, credentials: "same-origin" });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(typeof error?.detail === "string" ? error.detail : "Word PDF rendition upload failed (" + response.status + ")");
+  }
+  return response.json() as Promise<{ status: string; pdf_sha256?: string }>;
+}
+
 export async function verifyPublicationOfficeLayout(
   tenantSlug: string, manualId: string, revisionId: string, pdfSha256: string, note: string,
 ): Promise<{ status: string; verified_at?: string }> {

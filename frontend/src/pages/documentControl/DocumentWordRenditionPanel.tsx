@@ -3,7 +3,7 @@ import { CheckCircle2, RefreshCw, ShieldCheck } from "lucide-react";
 import { getApiBaseUrl } from "../../services/config";
 import { authHeaders } from "../../services/auth";
 import { portalFetch } from "../../services/offlineHttp";
-import { retryPublicationOfficeLayout, verifyPublicationOfficeLayout } from "../../services/publications";
+import { retryPublicationOfficeLayout, verifyPublicationOfficeLayout, uploadPublicationWordPdf } from "../../services/publications";
 import { DocumentControlSection } from "./DocumentControlShell";
 import "./documentMicrosoft.css";
 
@@ -25,6 +25,7 @@ export default function DocumentWordRenditionPanel({
 }: { tenant: string; manualId: string; revisionId: string }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [note, setNote] = useState("");
+  const [wordPdf, setWordPdf] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
@@ -57,6 +58,16 @@ export default function DocumentWordRenditionPanel({
           <button type="button" className="dc-button" onClick={() => void load()} disabled={busy}><RefreshCw size={14} /> Refresh</button>
           {status.status === "FAILED" ? <button type="button" className="dc-button" disabled={busy} onClick={() => void perform(async () => { await retryPublicationOfficeLayout(tenant, manualId, revisionId); })}>Retry conversion</button> : null}
         </div>
+        {!status.verified_at && status.source_sha256 ? <div className="dms-microsoft__form">
+          <label className="dms-microsoft__wide"><span>Optional original Word PDF export (preserves author-checked pages)</span>
+            <input type="file" accept="application/pdf,.pdf" onChange={(event) => setWordPdf(event.target.files?.[0] || null)} />
+          </label>
+          <button type="button" className="dc-button" disabled={!wordPdf || busy} onClick={() => void perform(async () => {
+            if (!wordPdf) return;
+            await uploadPublicationWordPdf(tenant, manualId, revisionId, status.source_sha256!, wordPdf);
+            setWordPdf(null);
+          })}>Use this PDF as the reading rendition</button>
+        </div> : null}
         {(status.status === "READY" || status.status === "REVIEW_REQUIRED") && !status.verified_at && status.pdf_sha256 ? <div className="dms-microsoft__form">
           <label className="dms-microsoft__wide"><span>Visual verification note</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Confirm pages, logos, tables, headers, footers and pagination against the original Word file." rows={2} /></label>
           <button type="button" className="dc-button dc-button--primary" disabled={busy || note.trim().length < 8} onClick={() => void perform(async () => {
