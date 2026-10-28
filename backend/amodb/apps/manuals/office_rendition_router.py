@@ -138,6 +138,8 @@ async def upload_word_export_pdf(
         models.ManualRendition.revision_id == revision.id,
         models.ManualRendition.rendition_type == "PDF",
     ).first()
+    if existing and existing.status == "PROCESSING":
+        raise HTTPException(status_code=409, detail="An Office conversion is still in progress; retry when it finishes")
     if existing and existing.verified_at:
         raise HTTPException(status_code=409, detail="The current rendition has already been verified; use a controlled correction")
     limit = 100 * 1024 * 1024

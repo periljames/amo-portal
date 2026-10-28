@@ -215,24 +215,33 @@ def download_docx(connection: mm.DocumentMicrosoftConnection, item: dict, *, dri
     # Do not send our bearer token to the redirected host.
     token = _refresh(connection)
     path = GRAPH + "/drives/" + quote(drive_id, safe="") + "/items/" + quote(item_id, safe="") + "/content"
+    def read_stream(stream, data: bytearray) -> None:
+        stream.raise_for_status()
+        length = stream.headers.get("content-length")
+        if length and length.isdecimal() and int(length) > max_bytes:
+            raise HTTPException(status_code=413, detail="SharePoint file exceeds the DMS import limit")
+        for chunk in stream.iter_bytes():
+            data.extend(chunk)
+            if len(data) > max_bytes:
+                raise HTTPException(status_code=413, detail="SharePoint file exceeds the DMS import limit")
+
     try:
+        data = bytearray()
         with httpx.Client(timeout=90, follow_redirects=False) as client:
-            response = client.get(path, headers={"Authorization": "Bearer " + token})
-            if response.status_code not in {301, 302, 303, 307, 308}:
-                response.raise_for_status()
-                raise HTTPException(status_code=502, detail="Graph did not return a secure document download")
-            download_url = response.headers.get("location", "")
-            valid_sharepoint_url(download_url)
-            with client.stream("GET", download_url) as stream:
-                stream.raise_for_status()
-                length = stream.headers.get("content-length")
-                if length and int(length) > max_bytes:
-                    raise HTTPException(status_code=413, detail="SharePoint file exceeds the DMS import limit")
-                data = bytearray()
-                for chunk in stream.iter_bytes():
-                    data.extend(chunk)
-                    if len(data) > max_bytes:
-                        raise HTTPException(status_code=413, detail="SharePoint file exceeds the DMS import limit")
+            with client.stream("GET", path, headers={"Authorization": "Bearer " + token}) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    download_url = response.headers.get("location", "")
+                    valid_sharepoint_url(download_url)
+                elif response.status_code == 200:
+                    download_url = None
+                    read_stream(response, data)
+                else:
+                    response.raise_for_status()
+                    raise HTTPException(status_code=502, detail="Microsoft Graph document download was unsuccessful")
+            if download_url:
+                # Pre-authenticated URL is issued by Graph; never forward the bearer token.
+                with client.stream("GET", download_url) as download:
+                    read_stream(download, data)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Unable to download the selected SharePoint document") from exc
     if not bytes(data).startswith(b"PK\x03\x04"):

@@ -316,6 +316,11 @@ async def import_document(
     if str(current_after.get("eTag") or "") != etag:
         raise HTTPException(status_code=409, detail="The SharePoint source changed during download; retry with the new version")
     file_name = str(item["name"])
+    preflight_file = UploadFile(
+        file=BytesIO(content), filename=file_name,
+        headers=Headers({"content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}),
+    )
+    manual_core._validate_docx_upload(preflight_file, content)
     parsed = manual_core._extract_docx_content(content, file_name)
     meta = dict(parsed.get("metadata") or {})
     detected_code = str(meta.get("part_number") or manual.code).strip().upper()
