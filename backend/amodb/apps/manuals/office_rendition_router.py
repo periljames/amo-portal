@@ -150,7 +150,11 @@ async def upload_word_export_pdf(
     try:
         import fitz
         with fitz.open(stream=content, filetype="pdf") as pdf:
+            if pdf.needs_pass:
+                raise HTTPException(status_code=422, detail="Password-protected PDFs cannot be used as controlled Word renditions")
             pages = pdf.page_count
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail="The uploaded PDF could not be opened") from exc
     if pages < 1:

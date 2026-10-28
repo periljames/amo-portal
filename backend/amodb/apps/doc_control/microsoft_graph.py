@@ -138,9 +138,13 @@ def tenant_claim(token: str) -> str:
 
 
 def valid_sharepoint_url(value: str) -> str:
-    url = urlsplit(value.strip())
-    host = str(url.hostname or "").lower()
-    if url.scheme != "https" or url.username or url.password or url.port or not (
+    try:
+        url = urlsplit(value.strip())
+        host = str(url.hostname or "").lower()
+        unsafe_authority = bool(url.username or url.password or url.port)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid SharePoint sharing link") from exc
+    if url.scheme != "https" or unsafe_authority or not (
         host.endswith(".sharepoint.com") or host.endswith(".sharepoint-df.com")
     ):
         raise HTTPException(status_code=422, detail="Paste a secure SharePoint/OneDrive for Business sharing link")

@@ -1,7 +1,7 @@
 """Exact-source Office PDF rendition ledger and bounded visual-integrity hints."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zipfile import ZipFile
 from sqlalchemy.orm import Session
@@ -104,11 +104,14 @@ def rendition_payload(db: Session, revision: models.ManualRevision) -> dict:
         except (OfficeLayoutError, OSError):
             valid = False
     status = row.status
-    if status in {"READY", "REVIEW_REQUIRED"} and not valid:
+    expired = bool(status == "PROCESSING" and row.started_at and (
+        now() - (row.started_at if row.started_at.tzinfo else row.started_at.replace(tzinfo=timezone.utc))
+    ) > timedelta(minutes=15))
+    if expired or (status in {"READY", "REVIEW_REQUIRED"} and not valid):
         status = "FAILED"
     return {
         "status": status,
-        "error": row.error if status == "FAILED" else None,
+        "error": ("The Office conversion did not complete. A controller may retry it." if expired else (row.error or "The stored layout proof failed integrity verification.")) if status == "FAILED" else None,
         "warning": row.warning,
         "source_sha256": row.source_sha256,
         "pdf_sha256": row.pdf_sha256 if valid else None,

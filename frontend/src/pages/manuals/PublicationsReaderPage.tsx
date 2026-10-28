@@ -858,7 +858,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                       {layoutRetryError ? <p className="publication-office-unavailable__error">{layoutRetryError}</p> : null}
                       <div className="publication-office-unavailable__actions">
                         <button type="button" onClick={() => void downloadPdf()} disabled={downloadBusy}><Download size={15} /> Download original Word file</button>
-                        {metadata.layout_status === "FAILED" ? <button type="button" onClick={() => void retryOfficeLayout()} disabled={layoutRetryBusy}>{layoutRetryBusy ? "Retrying…" : "Retry rendition (Document Control)"}</button> : null}
+                        {["FAILED", "QUEUED"].includes(metadata.layout_status || "") ? <button type="button" onClick={() => void retryOfficeLayout()} disabled={layoutRetryBusy}>{layoutRetryBusy ? "Requesting…" : "Request rendition (Document Control)"}</button> : null}
                         <button type="button" onClick={() => setViewMode("text")} disabled={!textAvailable}>Open accessible text</button>
                         <button type="button" onClick={() => setShowApproximateOfficePreview((value) => !value)}>{showApproximateOfficePreview ? "Close approximate preview" : "Open approximate Word preview"}</button>
                       </div>
