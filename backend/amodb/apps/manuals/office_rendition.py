@@ -64,6 +64,7 @@ def complete_rendition(db: Session, row: models.ManualRendition, revision, deriv
         "Inspect the pages; some artwork may legitimately be vector graphics."
         if source_images and images == 0 else None
     )
+    previous_pdf_sha = row.pdf_sha256
     row.status = "REVIEW_REQUIRED" if warning else "READY"
     row.storage_path = str(derivative.path)
     row.source_sha256 = derivative.source_sha256
@@ -76,7 +77,7 @@ def complete_rendition(db: Session, row: models.ManualRendition, revision, deriv
     row.error = None
     row.finished_at = now()
     # A regenerated artifact must be re-verified, even when its filename is unchanged.
-    if not row.pdf_sha256 or row.pdf_sha256 != derivative.pdf_sha256:
+    if not previous_pdf_sha or previous_pdf_sha != derivative.pdf_sha256:
         row.verified_at = None
         row.verified_by = None
         row.verification_note = None

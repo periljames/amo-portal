@@ -114,6 +114,10 @@ export type PublicationReaderMetadata = {
   layout_proof_supported?: boolean;
   layout_proof_available?: boolean;
   layout_proof_ready?: boolean;
+  layout_status?: "QUEUED" | "PROCESSING" | "READY" | "REVIEW_REQUIRED" | "FAILED" | "NOT_APPLICABLE";
+  layout_error?: string | null;
+  layout_warning?: string | null;
+  layout_verified?: boolean;
   image_only: boolean;
   text_char_count: number;
   citation_current: number;
@@ -386,6 +390,23 @@ export async function approvePublicationIntake(tenantSlug: string, manualId: str
   const path = `/manuals/t/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(manualId)}/rev/${encodeURIComponent(revisionId)}/approved-intake`;
   const response = await authenticatedFetch(path, { method: "POST", body: JSON.stringify(payload) });
   return response.json();
+}
+
+export async function retryPublicationOfficeLayout(tenantSlug: string, manualId: string, revisionId: string): Promise<{ status: string }> {
+  const path = "/manuals/t/" + encodeURIComponent(tenantSlug) + "/" + encodeURIComponent(manualId) + "/rev/" + encodeURIComponent(revisionId) + "/layout-retry";
+  const response = await authenticatedFetch(path, { method: "POST" });
+  return response.json() as Promise<{ status: string }>;
+}
+
+export async function verifyPublicationOfficeLayout(
+  tenantSlug: string, manualId: string, revisionId: string, pdfSha256: string, note: string,
+): Promise<{ status: string; verified_at?: string }> {
+  const path = "/manuals/t/" + encodeURIComponent(tenantSlug) + "/" + encodeURIComponent(manualId) + "/rev/" + encodeURIComponent(revisionId) + "/layout-verify";
+  const response = await authenticatedFetch(path, {
+    method: "POST",
+    body: JSON.stringify({ expected_pdf_sha256: pdfSha256, note }),
+  });
+  return response.json() as Promise<{ status: string; verified_at?: string }>;
 }
 
 export async function getPublicationReaderMetadata(tenantSlug: string, manualId: string, revisionId: string): Promise<PublicationReaderMetadata> {

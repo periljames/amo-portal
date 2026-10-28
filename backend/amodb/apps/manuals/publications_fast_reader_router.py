@@ -198,6 +198,8 @@ def _reader_metadata(
         except (OfficeLayoutError, OSError):
             office_layout_ready = False
     rendition_state = rendition_payload(db, revision) if source_type in {"DOCX", "DOC", "ODT", "RTF"} else None
+    if rendition_state and rendition_state.get("status") in {"FAILED", "PROCESSING"}:
+        office_layout_ready = False
     if source_type == "PDF" and source_path:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream.pdf"

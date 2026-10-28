@@ -37,6 +37,7 @@ import {
   getPublicationReaderBootstrap,
   getPublicationReaderContent,
   getPublicationReaderMetadata,
+  retryPublicationOfficeLayout,
   readCachedPublicationBootstrap,
   readPersistedPublicationBootstrap,
   searchPublicationReader,
@@ -229,6 +230,9 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>(() => (window.localStorage.getItem("amo-publication-reader-theme") as ReaderTheme) || "neutral");
   const [readingWidth, setReadingWidth] = useState<ReadingWidth>(() => (window.localStorage.getItem("amo-publication-reader-width") as ReadingWidth) || "fit");
   const [docxZoom, setDocxZoom] = useState(() => window.localStorage.getItem("amo-publication-docx-zoom") || "fit");
+  const [showApproximateOfficePreview, setShowApproximateOfficePreview] = useState(false);
+  const [layoutRetryBusy, setLayoutRetryBusy] = useState(false);
+  const [layoutRetryError, setLayoutRetryError] = useState("");
   const [blocksBySection, setBlocksBySection] = useState<Record<string, ExtendedReadPayload["blocks"]>>({});
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -243,7 +247,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const sourceType = String(metadata?.source_type || payload?.revision?.source_type || "").toUpperCase();
   const sourceIsPdf = sourceType === "PDF";
   const sourceIsOffice = ["DOCX", "DOC", "ODT", "RTF"].includes(sourceType);
-  const officeLayoutProofAvailable = sourceIsOffice && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url);
+  const officeLayoutProofAvailable = sourceIsOffice && Boolean(metadata?.layout_proof_available && metadata?.rendered_pdf_url && metadata?.layout_status !== "FAILED");
   const officeSourcePath = metadata?.original_source_url
     || `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/source`;
   const browserOfficeSourcePath = `/manuals/t/${encodeURIComponent(tenant)}/${encodeURIComponent(manualId || "")}/rev/${encodeURIComponent(revId || "")}/browser-office.docx`;
@@ -293,6 +297,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
       !sourceIsOffice
       || !metadata?.layout_proof_supported
       || metadata.layout_proof_ready
+      || metadata.layout_status === "FAILED"
       || !tenant
       || !manualId
       || !revId
@@ -323,6 +328,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   }, [
     manualId,
     metadata?.layout_proof_ready,
+    metadata?.layout_status,
     metadata?.layout_proof_supported,
     revId,
     sourceIsOffice,
@@ -765,8 +771,23 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
     : sections.find((section) => section.anchor_slug === activeSection)?.heading || "Document detail";
   const activeSectionId = sections.find((section) => section.anchor_slug === activeSection)?.id;
   const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
-  const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsOffice ? (officeLayoutProofAvailable ? "Word layout proof" : "Word layout") : "PDF proof";
+  const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsOffice ? (officeLayoutProofAvailable ? "Word PDF rendition" : "Word rendition status") : "PDF proof";
   const textLabel = "Accessible text";
+  const retryOfficeLayout = async () => {
+    if (!tenant || !manualId || !revId || layoutRetryBusy) return;
+    setLayoutRetryBusy(true);
+    setLayoutRetryError("");
+    try {
+      await retryPublicationOfficeLayout(tenant, manualId, revId);
+      setShowApproximateOfficePreview(false);
+      const next = await getPublicationReaderMetadata(tenant, manualId, revId);
+      setMetadata(next);
+    } catch (caught) {
+      setLayoutRetryError(caught instanceof Error ? caught.message : "The rendition could not be retried.");
+    } finally {
+      setLayoutRetryBusy(false);
+    }
+  };
 
   const content = (
     <div className={`publication-reader-page publication-reader-theme--${readerTheme} publication-reader-width--${readingWidth} ${navigationCollapsed ? "publication-reader-page--nav-collapsed" : ""}`}>
@@ -817,7 +838,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
             <>
               <section className="publication-metadata" aria-label="Document metadata"><dl>
                 <div><dt>Date</dt><dd>{formatDate(metadata.date)}</dd></div><div><dt>Language</dt><dd>{metadata.language || "Not recorded"}</dd></div><div><dt>Status</dt><dd>{metadata.status || payload.status} · {isPublished ? "Controlled" : "Draft"}</dd></div>
-                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF · figures, signatures, annotations and approval marks preserved" : officeLayoutProofAvailable ? "Original Word source retained · stable page-layout proof preserves headers, footers, graphics and pagination for reading" : sourceIsOffice ? "Original Word source retained · PDF layout proof is generated on demand" : "Generated readable proof"}</dd></div>
+                <div><dt>Source fidelity</dt><dd>{metadata.source_exact ? "Exact uploaded PDF retained" : officeLayoutProofAvailable ? `Original Word source retained · PDF rendition generated${metadata.layout_verified ? " and verified" : " · visual fidelity not yet verified"}` : sourceIsOffice ? "Original Word document retained · layout rendition not ready" : "Generated readable proof"}</dd></div>
                 {hasAcroForm || metadata.form_policy === "READ_ONLY_PRESERVED" ? <div><dt>PDF forms</dt><dd><Eye size={15} /> AcroForm appearances are preserved in read-only mode; the portal does not alter field values.</dd></div> : null}
                 {acknowledgement?.required ? <div><dt>Acknowledgement</dt><dd>{acknowledgement.pending ? <span className="publication-acknowledgement-state publication-acknowledgement-state--pending">Pending{acknowledgement.due_at ? ` · due ${formatDate(acknowledgement.due_at)}` : ""}{isPublished ? <button type="button" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}>Acknowledge now</button> : null}</span> : <span className="publication-acknowledgement-state publication-acknowledgement-state--complete"><BadgeCheck size={16} /> Acknowledged{acknowledgement.acknowledged_at ? ` on ${formatDate(acknowledgement.acknowledged_at)}` : ""}</span>}{acknowledgementError ? <span className="publication-acknowledgement-error">{acknowledgementError}</span> : null}</dd></div> : null}
               </dl></section>
@@ -825,9 +846,27 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
               <div className="publication-reader-workspace">
                 {navigationCollapsed ? <button type="button" className="publication-navigation-rail" onClick={() => setNavigationCollapsed(false)} title="Show table of contents"><PanelLeftOpen size={17} /><span>Contents</span></button> : navigation}
                 <main className="publication-document-canvas" id="publication-document-content">
+                  {sourceIsOffice && officeLayoutProofAvailable && metadata.layout_warning ? <div className="publication-reader-notice" role="status"><TriangleAlert size={16} /><span>Rendition review advised: {metadata.layout_warning}</span></div> : null}
                   {metadata.image_only ? <div className="publication-reader-notice"><TriangleAlert size={17} /><span>This PDF has no dependable text layer. Original-layout mode preserves every page, table, figure, signature, form appearance, and approval mark.</span></div> : null}
                   {viewMode === "layout" ? (
-                    sourceIsOffice && !officeLayoutProofAvailable ? <PublicationDocxLayoutViewer fileUrl={browserOfficeSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} /> : viewerPdfPath ? <PublicationPdfLayoutViewer
+                    sourceIsOffice && !officeLayoutProofAvailable ? <section className="publication-office-unavailable" role="status">
+                      <div className="publication-office-unavailable__heading"><TriangleAlert size={19} /><strong>Word page-layout rendition not ready</strong></div>
+                      <p>{metadata.layout_status === "FAILED"
+                        ? "The document cannot currently be displayed with a verified page layout."
+                        : "The original Word file is retained. The PDF reading rendition is being prepared."}</p>
+                      {metadata.layout_error ? <p className="publication-office-unavailable__error">{metadata.layout_error}</p> : null}
+                      {layoutRetryError ? <p className="publication-office-unavailable__error">{layoutRetryError}</p> : null}
+                      <div className="publication-office-unavailable__actions">
+                        <button type="button" onClick={() => void downloadPdf()} disabled={downloadBusy}><Download size={15} /> Download original Word file</button>
+                        {metadata.layout_status === "FAILED" ? <button type="button" onClick={() => void retryOfficeLayout()} disabled={layoutRetryBusy}>{layoutRetryBusy ? "Retrying…" : "Retry rendition (Document Control)"}</button> : null}
+                        <button type="button" onClick={() => setViewMode("text")} disabled={!textAvailable}>Open accessible text</button>
+                        <button type="button" onClick={() => setShowApproximateOfficePreview((value) => !value)}>{showApproximateOfficePreview ? "Close approximate preview" : "Open approximate Word preview"}</button>
+                      </div>
+                      {showApproximateOfficePreview ? <div className="publication-office-unavailable__preview">
+                        <p>This browser preview is approximate. Page breaks, figures and tables may differ from the original Word file. It is not the controlled layout.</p>
+                        <PublicationDocxLayoutViewer fileUrl={browserOfficeSourcePath} title={metadata.title} zoom={docxZoom} onTextFallback={() => setViewMode("text")} />
+                      </div> : null}
+                    </section> : viewerPdfPath ? <PublicationPdfLayoutViewer
                       fileUrl={viewerPdfPath}
                       originalDownloadUrl={downloadPath || viewerPdfPath}
                       originalDownloadLabel={originalDownloadLabel}
