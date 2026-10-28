@@ -21,7 +21,7 @@ from amodb.apps.doc_control.workspace_service import (
 from amodb.database import get_db
 from amodb.security import get_current_active_user
 from . import models
-from .office_layout import precompute_office_layout_assets, office_layout_pdf_path, office_layout_pdf_checksum, OfficeLayoutDerivative, _source_checksum
+from .office_layout import precompute_office_layout_assets, office_layout_pdf_path, office_layout_pdf_checksum, OfficeLayoutDerivative, _source_checksum, _office_layout_lock
 from .office_rendition import begin_rendition, complete_rendition
 from .office_rendition import rendition_payload, now
 
@@ -53,6 +53,7 @@ def layout_status(
     user: account_models.User = Depends(get_current_active_user),
 ):
     tenant, _manual, revision = _context(db, tenant_slug, manual_id, revision_id, user)
+    require_control_user(user)
     if not can_read_manual(user, get_profile(db, tenant, manual_id)):
         raise HTTPException(status_code=403, detail="Document access denied")
     _office_source(revision)
@@ -165,14 +166,15 @@ async def upload_word_export_pdf(
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
-    try:
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-    # The PDF fingerprint sidecar must be recomputed after replacement.
-    target.with_suffix(f"{target.suffix}.sha256.json").unlink(missing_ok=True)
-    if office_layout_pdf_checksum(target) != digest:
-        raise HTTPException(status_code=409, detail="PDF rendition integrity verification failed")
+    with _office_layout_lock(target):
+        try:
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        # The PDF fingerprint sidecar must be recomputed after replacement.
+        target.with_suffix(f"{target.suffix}.sha256.json").unlink(missing_ok=True)
+        if office_layout_pdf_checksum(target) != digest:
+            raise HTTPException(status_code=409, detail="PDF rendition integrity verification failed")
     row = begin_rendition(db, revision)
     derivative = OfficeLayoutDerivative(
         path=target, page_count=pages, size_bytes=len(content),

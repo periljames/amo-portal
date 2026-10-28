@@ -66,7 +66,7 @@ export default function DocumentMicrosoftFilePanel({
           <label><span>New controlled revision number</span><input value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="e.g. 04" /></label>
           <label><span>Issue number</span><input value={issue} onChange={(event) => setIssue(event.target.value)} placeholder="e.g. 01" /></label>
           <button type="button" className="dc-button dc-button--primary" disabled={busy || !revision.trim() || (selected.imported && !selected.newer_version_available)} onClick={() => void action(async () => {
-            const next = await importMicrosoftDocument(tenant, manualId, revision.trim(), issue.trim(), selected.observed_etag);
+            await importMicrosoftDocument(tenant, manualId, revision.trim(), issue.trim(), selected.observed_etag);
             setSuccess("SharePoint version imported as DMS draft " + revision.trim() + ". Continue with the controlled review workflow.");
             setLink(await getMicrosoftDocument(tenant, manualId));
             setRevision(""); onChanged();

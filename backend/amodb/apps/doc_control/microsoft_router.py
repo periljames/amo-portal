@@ -6,7 +6,6 @@ creates a DMS revision; publication continues through normal Document Control.
 from __future__ import annotations
 
 import hashlib
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from io import BytesIO

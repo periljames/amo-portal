@@ -8,6 +8,7 @@ on every open.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 import json
 import logging
@@ -281,7 +282,7 @@ def normalize_office_source_to_docx(content: bytes, filename: str | None, *, tim
         return payload
 
 
-def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
+def _prepare_office_layout_pdf_unlocked(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
     source = _source_path(revision)
     checksum = _source_checksum(revision, source)
     target = office_layout_pdf_path(revision)
@@ -355,6 +356,36 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
         pdf_sha256=_pdf_checksum(target),
         created=True,
     )
+
+
+
+
+@contextmanager
+def _office_layout_lock(target: Path):
+    """Serialize conversion of a revision's single checksum-bound PDF proof.
+
+    Both ingestion workers and reader-driven requests can request the proof.
+    Concurrent LibreOffice processes must not replace one another's output.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = target.with_name(target.name + ".lock")
+    with lock_file.open("a+b") as handle:
+        if os.name != "nt":
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name != "nt":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
+    target = office_layout_pdf_path(revision)
+    if target is None:
+        raise OfficeLayoutError("Office layout target could not be resolved")
+    with _office_layout_lock(target):
+        return _prepare_office_layout_pdf_unlocked(revision, timeout_seconds=timeout_seconds)
 
 
 def precompute_office_layout_assets(revision_id: str) -> None:

@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
