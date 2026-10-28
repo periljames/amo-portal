@@ -34,6 +34,8 @@ import DocumentControlShell, {
   useDocumentControlRoute,
 } from "./DocumentControlShell";
 import DocumentControlRecordActions, { type DocumentWorkspaceView } from "./DocumentControlRecordActions";
+import DocumentMicrosoftFilePanel from "./DocumentMicrosoftFilePanel";
+import DocumentWordRenditionPanel from "./DocumentWordRenditionPanel";
 import "./dmsDocumentWorkspace.css";
 
 const TABS: Array<[DocumentWorkspaceView, string, typeof BookOpen]> = [
@@ -218,7 +220,7 @@ export default function DocumentControlRecordPage() {
         </nav>
 
         {activeView === "overview" ? <OverviewView detail={detail} onOpenResponsibilities={() => navigate(`${basePath}/library/${document.id}?governance=assignments`)} /> : null}
-        {activeView === "content" ? <ContentView detail={detail} readerBasePath={readerBasePath} /> : null}
+        {activeView === "content" ? <ContentView detail={detail} tenant={tenant} readerBasePath={readerBasePath} canControl={canControl} onChanged={() => void load()} /> : null}
         {activeView === "changes" ? <ChangesView detail={detail} /> : null}
         {activeView === "workflow" ? <WorkflowView detail={detail} /> : null}
         {activeView === "distribution" ? <DistributionView detail={detail} /> : null}
@@ -271,12 +273,14 @@ function OverviewView({ detail, onOpenResponsibilities }: { detail: DocumentDeta
   </div>;
 }
 
-function ContentView({ detail, readerBasePath }: { detail: DocumentDetailResponse; readerBasePath: string }) {
+function ContentView({ detail, tenant, readerBasePath, canControl, onChanged }: { detail: DocumentDetailResponse; tenant: string; readerBasePath: string; canControl: boolean; onChanged: () => void }) {
   const current = detail.document.latest_revision;
   return <div className="dms-document__stack">
     <DocumentControlSection title="Current controlled content" description="The source file remains the authoritative visual artifact.">
       {current ? <div className="dms-document__current-content"><FileDiff size={22} /><div><strong>{currentRevisionLabel(detail)}</strong><p>{current.source_filename || "Controlled source"} · {current.source_type || "Unknown format"} · {current.source_page_count || "—"} pages</p><small>{current.source_sha256 ? `SHA-256 ${current.source_sha256.slice(0, 20)}…` : "Checksum not available"}</small></div><a className="dc-button dc-button--primary" href={`${readerBasePath}/${detail.document.id}/rev/${current.id}/read`}><BookOpen size={14} /> Read</a></div> : <DocumentControlEmpty title="No source revision" message="Upload a controlled source revision before the document can enter lifecycle review." />}
     </DocumentControlSection>
+    {canControl && current?.source_type?.toUpperCase() === "DOCX" ? <DocumentWordRenditionPanel tenant={tenant} manualId={detail.document.id} revisionId={current.id} /> : null}
+    {canControl ? <DocumentMicrosoftFilePanel tenant={tenant} manualId={detail.document.id} onChanged={onChanged} /> : null}
     <SimpleTable title="Revision history" description="Immutable publication history and controlled draft revisions." empty="No revision history exists." headers={["Issue / revision", "Status", "Effective", "Source", "Integrity", "Action"]} rows={detail.revisions.map((revision) => [<><strong>Issue {revision.issue_number || "—"} · Rev {revision.revision_number}</strong><small>{revision.id}</small></>, <DocumentControlStatus status={revision.status} kind={statusKind(revision.status)} />, revision.effective_date || "—", <><strong>{revision.source_type || "—"}</strong><small>{revision.source_filename || "No source filename"}</small></>, <><strong>{revision.immutable ? "Immutable" : "Working revision"}</strong><small>{revision.source_sha256 ? `${revision.source_sha256.slice(0, 12)}…` : "No checksum"}</small></>, <a className="dc-button" href={`${readerBasePath}/${detail.document.id}/rev/${revision.id}/read`}><BookOpen size={14} /> Read</a>])} />
   </div>;
 }
