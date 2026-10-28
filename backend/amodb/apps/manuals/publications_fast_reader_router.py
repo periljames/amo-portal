@@ -20,6 +20,7 @@ from amodb.security import get_current_active_user
 from . import models
 from .core_router import _audit, _tenant_by_slug
 from .office_layout import OfficeLayoutError, office_layout_pdf_checksum, office_layout_pdf_path, precompute_office_layout_assets, prepare_office_layout_pdf
+from .office_rendition import rendition_payload
 
 
 router = APIRouter(
@@ -196,6 +197,7 @@ def _reader_metadata(
             office_layout_sha256 = office_layout_pdf_checksum(office_layout_path)
         except (OfficeLayoutError, OSError):
             office_layout_ready = False
+    rendition_state = rendition_payload(db, revision) if source_type in {"DOCX", "DOC", "ODT", "RTF"} else None
     if source_type == "PDF" and source_path:
         rendered_url = (
             f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/stream.pdf"
@@ -213,10 +215,10 @@ def _reader_metadata(
         source_exact = False
         layout_renderer = "OFFICE_PDF_PROOF"
     elif office_layout_supported:
-        rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
+        rendered_url = ""
         rendered_size = 0
         source_exact = False
-        layout_renderer = "OFFICE_BROWSER_FALLBACK"
+        layout_renderer = "OFFICE_NOT_READY"
     else:
         rendered_url = f"/manuals/t/{tenant_slug}/{manual.id}/rev/{revision.id}/rendered.pdf?v={cache_key}"
         rendered_size = 0
@@ -259,6 +261,10 @@ def _reader_metadata(
         "layout_proof_supported": office_layout_supported,
         "layout_proof_available": office_layout_ready,
         "layout_proof_ready": office_layout_ready,
+        "layout_status": (rendition_state or {}).get("status", "READY" if office_layout_ready else "QUEUED") if source_type in {"DOCX", "DOC", "ODT", "RTF"} else "NOT_APPLICABLE",
+        "layout_error": (rendition_state or {}).get("error") if source_type in {"DOCX", "DOC", "ODT", "RTF"} else None,
+        "layout_warning": (rendition_state or {}).get("warning") if source_type in {"DOCX", "DOC", "ODT", "RTF"} else None,
+        "layout_verified": bool((rendition_state or {}).get("verified_at")),
         "image_only": image_only,
         "text_char_count": text_char_count,
         "citation_current": 0,

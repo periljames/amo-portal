@@ -22,6 +22,7 @@ from amodb.apps.doc_control.workspace_service import require_control_user as _re
 _core._require_manual_control_user = _require_control_user
 
 from .approved_intake_router import router as _approved_intake_router
+from .office_rendition_router import router as _office_rendition_router
 from .knowledge_reader_access_router import router as _knowledge_reader_access_router
 from .knowledge_reader_router import router as _knowledge_reader_router
 from .revision_contract_router import router as _revision_contract_router
@@ -45,6 +46,7 @@ router = APIRouter()
 # Guards, stable revision contracts and precomputed capability routes precede core
 # routes because Starlette resolves identical paths in declaration order.
 router.include_router(_upload_guard_router)
+router.include_router(_office_rendition_router)
 router.include_router(_revision_contract_router)
 router.include_router(_pdf_reader_precomputed_router)
 router.include_router(_pdf_reader_form_override_router)

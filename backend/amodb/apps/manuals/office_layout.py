@@ -105,6 +105,15 @@ def _validate_pdf(path: Path) -> None:
     with path.open("rb") as handle:
         if handle.read(5) != b"%PDF-":
             raise OfficeLayoutError("Office layout conversion produced an invalid PDF")
+    try:
+        import fitz
+        with fitz.open(str(path)) as document:
+            if document.page_count < 1:
+                raise OfficeLayoutError("Office conversion produced an empty PDF")
+    except OfficeLayoutError:
+        raise
+    except Exception as exc:
+        raise OfficeLayoutError("Office layout PDF cannot be opened safely") from exc
 
 
 def _pdf_checksum(path: Path) -> str:
@@ -349,29 +358,40 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
 
 
 def precompute_office_layout_assets(revision_id: str) -> None:
-    """Materialize the stable Office layout proof once after source upload."""
+    """Persist the conversion outcome; a source upload is never silently rewritten."""
     from amodb.database import WriteSessionLocal
     from . import models
+    from .office_rendition import begin_rendition, complete_rendition, fail_rendition
 
     db = WriteSessionLocal()
     try:
-        revision = (
-            db.query(models.ManualRevision)
-            .filter(models.ManualRevision.id == revision_id)
-            .first()
-        )
+        revision = db.query(models.ManualRevision).filter(models.ManualRevision.id == revision_id).first()
         if revision is None:
             LOGGER.warning("Office layout precompute skipped: revision %s not found", revision_id)
             return
-        raw = str(getattr(revision, "source_storage_path", "") or "").strip()
+        raw = str(revision.source_storage_path or "").strip()
         if not raw or Path(raw).suffix.lower() not in SUPPORTED_OFFICE_EXTENSIONS:
             return
-        derivative = prepare_office_layout_pdf(revision)
-        revision.source_page_count = derivative.page_count
-        db.add(revision)
+        rendition = begin_rendition(db, revision)
         db.commit()
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+            revision.source_page_count = derivative.page_count
+            complete_rendition(db, rendition, revision, derivative)
+            db.add(revision)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            rendition = db.query(models.ManualRendition).filter(
+                models.ManualRendition.revision_id == revision_id,
+                models.ManualRendition.rendition_type == "PDF",
+            ).first()
+            if rendition:
+                fail_rendition(db, rendition, exc)
+                db.commit()
+            LOGGER.exception("Office layout precompute failed for revision %s", revision_id)
     except Exception:
         db.rollback()
-        LOGGER.exception("Office layout precompute failed for revision %s", revision_id)
+        LOGGER.exception("Office layout processing failed for revision %s", revision_id)
     finally:
         db.close()
