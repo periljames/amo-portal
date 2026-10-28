@@ -34,12 +34,11 @@ function route(tenant: string, path: string): string {
 }
 
 async function request<T>(path: string, method = "GET", payload?: object): Promise<T> {
+  const headers = new Headers(authHeaders());
+  if (payload) headers.set("Content-Type", "application/json");
   const response = await portalFetch(getApiBaseUrl() + path, {
     method,
-    headers: {
-      ...authHeaders(),
-      ...(payload ? { "Content-Type": "application/json" } : {}),
-    },
+    headers,
     ...(payload ? { body: JSON.stringify(payload) } : {}),
     credentials: "same-origin",
   });
