@@ -37,7 +37,6 @@ import {
   getPublicationReaderBootstrap,
   getPublicationReaderContent,
   getPublicationReaderMetadata,
-  retryPublicationOfficeLayout,
   readCachedPublicationBootstrap,
   readPersistedPublicationBootstrap,
   searchPublicationReader,
@@ -231,8 +230,6 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const [readingWidth, setReadingWidth] = useState<ReadingWidth>(() => (window.localStorage.getItem("amo-publication-reader-width") as ReadingWidth) || "fit");
   const [docxZoom, setDocxZoom] = useState(() => window.localStorage.getItem("amo-publication-docx-zoom") || "fit");
   const [showApproximateOfficePreview, setShowApproximateOfficePreview] = useState(false);
-  const [layoutRetryBusy, setLayoutRetryBusy] = useState(false);
-  const [layoutRetryError, setLayoutRetryError] = useState("");
   const [blocksBySection, setBlocksBySection] = useState<Record<string, ExtendedReadPayload["blocks"]>>({});
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -773,21 +770,6 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
   const contextLabel = viewMode === "layout" ? `${activeSectionLabel} · page ${currentPdfPage}` : activeSectionLabel;
   const layoutLabel = sourceIsPdf ? "Original layout" : sourceIsOffice ? (officeLayoutProofAvailable ? "Word PDF rendition" : "Word rendition status") : "PDF proof";
   const textLabel = "Accessible text";
-  const retryOfficeLayout = async () => {
-    if (!tenant || !manualId || !revId || layoutRetryBusy) return;
-    setLayoutRetryBusy(true);
-    setLayoutRetryError("");
-    try {
-      await retryPublicationOfficeLayout(tenant, manualId, revId);
-      setShowApproximateOfficePreview(false);
-      const next = await getPublicationReaderMetadata(tenant, manualId, revId);
-      setMetadata(next);
-    } catch (caught) {
-      setLayoutRetryError(caught instanceof Error ? caught.message : "The rendition could not be retried.");
-    } finally {
-      setLayoutRetryBusy(false);
-    }
-  };
 
   const content = (
     <div className={`publication-reader-page publication-reader-theme--${readerTheme} publication-reader-width--${readingWidth} ${navigationCollapsed ? "publication-reader-page--nav-collapsed" : ""}`}>
@@ -806,7 +788,7 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
               <button type="button" onClick={() => void copyCitation()}><ClipboardCopy size={16} /> {copied ? "Copied" : "Citation"}</button>
               {isPublished && acknowledgement?.required && acknowledgement.pending ? <button type="button" className="publication-acknowledgement-action" disabled={acknowledgementBusy} onClick={() => void acknowledgePublication()}><BadgeCheck size={16} /> {acknowledgementBusy ? "Recording…" : "Acknowledge"}</button> : null}
               <button type="button" className="primary" disabled={downloadBusy} onClick={() => void downloadPdf()}><Download size={16} /> {downloadBusy ? "Preparing…" : `${sourceIsOffice ? `Download original ${originalSourceExtension}` : "Download PDF"} (${formatFileSize(sourceIsOffice ? metadata.source_size_bytes : metadata.rendered_pdf_size_bytes || metadata.source_size_bytes)})`}</button>
-              <button type="button" onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>
+              <button type="button" disabled={!printablePdfPath} onClick={() => void openPrintablePdf()}><Printer size={16} /> Print</button>
               <button type="button" className={governanceOpen ? "active" : ""} onClick={() => setGovernanceOpen(true)}><ShieldCheck size={16} /> Governance</button>
               <button type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode || tenant)}/document-control/library/${encodeURIComponent(manualId || "")}?tab=changes`)}>Report problem</button>
               {headerUtilities ? <div className="publication-document-header__utilities">{headerUtilities}</div> : null}
@@ -855,10 +837,10 @@ export default function PublicationsReaderPage({ headerUtilities }: { headerUtil
                         ? "The document cannot currently be displayed with a verified page layout."
                         : "The original Word file is retained. The PDF reading rendition is being prepared."}</p>
                       {metadata.layout_error ? <p className="publication-office-unavailable__error">{metadata.layout_error}</p> : null}
-                      {layoutRetryError ? <p className="publication-office-unavailable__error">{layoutRetryError}</p> : null}
+                      
                       <div className="publication-office-unavailable__actions">
                         <button type="button" onClick={() => void downloadPdf()} disabled={downloadBusy}><Download size={15} /> Download original Word file</button>
-                        {["FAILED", "QUEUED"].includes(metadata.layout_status || "") ? <button type="button" onClick={() => void retryOfficeLayout()} disabled={layoutRetryBusy}>{layoutRetryBusy ? "Requesting…" : "Request rendition (Document Control)"}</button> : null}
+                        {metadata.layout_status === "FAILED" ? <p role="status">Contact Document Control to retry or provide a Word-exported PDF. Your original DOCX remains available.</p> : null}
                         <button type="button" onClick={() => setViewMode("text")} disabled={!textAvailable}>Open accessible text</button>
                         <button type="button" onClick={() => setShowApproximateOfficePreview((value) => !value)}>{showApproximateOfficePreview ? "Close approximate preview" : "Open approximate Word preview"}</button>
                       </div>
