@@ -378,8 +378,12 @@ def precompute_office_layout_assets(revision_id: str) -> None:
             models.ManualRendition.rendition_type == "PDF",
         ).first()
         if existing and existing.converter == "Author-supplied Microsoft Word PDF export":
-            if existing.pdf_sha256 and office_layout_pdf_path(revision) and office_layout_pdf_checksum(office_layout_pdf_path(revision)) == existing.pdf_sha256:
+            proof_path = office_layout_pdf_path(revision)
+            if proof_path and proof_path.is_file() and existing.pdf_sha256 and office_layout_pdf_checksum(proof_path) == existing.pdf_sha256:
                 return
+            # Do not silently replace an author-approved visual proof with a
+            # different engine's rendition when the retained proof is missing.
+            raise OfficeLayoutError("Author-supplied Word PDF proof is missing or has changed")
         rendition = begin_rendition(db, revision)
         db.commit()
         try:
