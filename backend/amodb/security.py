@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable, Union, Set, Sequence
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.dependencies.utils import get_parameterless_sub_dependant
 from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordBearer
@@ -303,6 +303,10 @@ def get_current_user(
             session_expiry = session_expiry.replace(tzinfo=timezone.utc)
         if (
             str(auth_session.user_id) != str(user.id)
+            or (
+                not bool(getattr(user, "is_superuser", False))
+                and str(auth_session.amo_id or "") != str(user.amo_id or "")
+            )
             or auth_session.revoked_at is not None
             or session_expiry is None
             or session_expiry <= datetime.now(timezone.utc)
@@ -319,13 +323,17 @@ def get_current_user(
         else:
             issued_at_dt = None
         revoked_dt = revoked_at if revoked_at.tzinfo else revoked_at.replace(tzinfo=timezone.utc)
-        # JWT libraries commonly serialise iat to whole seconds while the
-        # database stores token_revoked_at with microsecond precision. Without a
-        # small leeway, a token issued immediately after login can be rejected
-        # when a previous logout happened in the same second. Successful login
-        # also clears token_revoked_at, but the leeway protects concurrent tabs
-        # and legacy rows.
-        if issued_at_dt is None or issued_at_dt + timedelta(seconds=2) <= revoked_dt:
+        # Managed sessions carry a microsecond-precision creation timestamp,
+        # so revocation is exact rather than a two-second grace period. Legacy
+        # unmanaged JWTs are conservatively rejected in the boundary second.
+        if auth_session is not None:
+            created_at = auth_session.created_at
+            if created_at is None:
+                raise _credentials_exception()
+            created_at = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            if created_at <= revoked_dt:
+                raise _credentials_exception()
+        elif issued_at_dt is None or issued_at_dt <= revoked_dt:
             raise _credentials_exception()
 
     setattr(user, "auth_session_id", auth_session_id)
@@ -336,6 +344,7 @@ def get_current_user(
 def get_current_active_user(
     current_user: account_models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    request: Request = None,
 ) -> account_models.User:
     """Ensure the writer-side user is active and attach tenant context.
 
@@ -348,6 +357,28 @@ def get_current_active_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user account",
         )
+    # Every route using this dependency must refuse suspended tenants, even
+    # when an access JWT was issued before the administrative action.
+    if not bool(getattr(current_user, "is_superuser", False)):
+        tenant = db.get(account_models.AMO, current_user.amo_id) if current_user.amo_id else None
+        if tenant is None or tenant.is_active is not True:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant is inactive")
+
+    # A first-login token is limited to getting onboarding state, identity,
+    # completing the password change, and signing out. Frontend redirects
+    # alone are not an authorization boundary.
+    if getattr(current_user, "must_change_password", False):
+        permitted = {
+            ("GET", "/auth/me"),
+            ("GET", "/accounts/onboarding/status"),
+            ("POST", "/auth/password-change"),
+            ("POST", "/auth/logout"),
+        }
+        if request is None or (request.method.upper(), request.url.path.rstrip("/")) not in permitted:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Change the temporary password before accessing this resource.",
+            )
     CURRENT_ACTOR_ID.set(str(current_user.id))
     active_amo_id = current_user.amo_id
     effective_amo_id = current_user.amo_id
@@ -476,8 +507,6 @@ def require_module_access(
         # Standing AMO administrators are a tenant privilege assigned by the
         # platform superuser. Their module administration is broad by default;
         # module-specific regulated decision gates still apply downstream.
-        if is_tenant_admin(current_user):
-            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user
@@ -491,6 +520,12 @@ def require_module_access(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unknown portal module access boundary",
             )
+        from amodb.entitlements import enforce_tenant_module
+        enforce_tenant_module(db, amo_id=str(current_user.amo_id), module_key=normalized_module)
+        # An AMO administrator can manage every *licensed* module; this
+        # standing role is not a substitute for a subscription.
+        if is_tenant_admin(current_user):
+            return current_user
         required = f"portal.{normalized_module}.{normalized_level}"
         if access_control.user_has_capability(db, user=current_user, capability_code=required):
             return current_user
@@ -530,8 +565,6 @@ def require_any_module_access(
         # and configure every licensed tenant module until the platform
         # superuser removes their standing overlay. Operational decision gates
         # inside each module remain authoritative.
-        if is_tenant_admin(current_user):
-            return current_user
         if getattr(current_user, "is_superuser", False):
             if normalized_level == "view":
                 return current_user
@@ -546,7 +579,23 @@ def require_any_module_access(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unknown portal module access boundary",
             )
+        from amodb.entitlements import enforce_tenant_module
+        licensed_modules = []
         for module_code in normalized_modules:
+            try:
+                enforce_tenant_module(db, amo_id=str(current_user.amo_id), module_key=module_code)
+                licensed_modules.append(module_code)
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_403_FORBIDDEN:
+                    raise
+        if not licensed_modules:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="None of the requested modules is commercially entitled for this tenant.",
+            )
+        if is_tenant_admin(current_user):
+            return current_user
+        for module_code in licensed_modules:
             if access_control.user_has_capability(
                 db, user=current_user, capability_code=f"portal.{module_code}.{normalized_level}"
             ):

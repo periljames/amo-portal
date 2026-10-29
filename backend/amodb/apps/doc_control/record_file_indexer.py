@@ -159,8 +159,14 @@ def index_record(tenant_id: str, record_id: str, root: Path) -> None:
         db.commit()
 
     try:
-        path = Path(stored_path).resolve()
-        if root.resolve() not in path.parents or not path.is_file():
+        if str(stored_path).startswith("s3://"):
+            from amodb import storage as shared_storage
+            path = shared_storage.materialize(stored_path)
+        else:
+            path = Path(stored_path).resolve()
+            if root.resolve() not in path.parents:
+                raise FileNotFoundError("Stored record is outside its trusted vault")
+        if not path.is_file():
             raise FileNotFoundError("Stored record is unavailable")
         text_value, extracted = extract_file(path, filename, mime)
         failure = None

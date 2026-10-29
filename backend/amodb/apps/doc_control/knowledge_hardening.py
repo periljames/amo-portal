@@ -271,31 +271,49 @@ def _create_documentation_record_hardened(
     safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or "completed.pdf")
     if not safe_filename.lower().endswith(".pdf"):
         safe_filename += ".pdf"
-    target_dir = (
-        knowledge_service.RECORD_ROOT
-        / manual_tenant.slug
-        / knowledge_service.normalize_code(template.code).lower()
-        / date_token
-    )
-    target_dir.mkdir(parents=True, exist_ok=True)
-
+    # Keep legacy disk mode for existing offline installations. Multi-node
+    # deployments retain the exact PDF through the quota-accounted S3 adapter
+    # without ever treating a worker-local path as its permanent record.
+    from amodb import storage as shared_storage
+    record_number = _new_record_number(template.code, date_token=date_token)
     path: Path | None = None
-    record_number = ""
-    for _ in range(10):
-        record_number = _new_record_number(template.code, date_token=date_token)
-        candidate = target_dir / f"{record_number}_{safe_filename}"
-        try:
-            with candidate.open("xb") as artifact:
-                artifact.write(content)
-            path = candidate
-            break
-        except FileExistsError:
-            continue
-    if path is None:
-        raise knowledge_service.HTTPException(
-            status_code=409,
-            detail="A unique retained-record artifact path could not be allocated",
+    stored_reference = ""
+    if shared_storage.shared_storage_enabled():
+        from amodb.apps.platform import storage_quota_upload
+        key = (
+            f"documentation-generated-records/{manual_tenant.amo_id}/"
+            f"{template.id}/{date_token}/{record_number}_{safe_filename}"
         )
+        saved = storage_quota_upload.put_bytes(
+            db, tenant_id=str(manual_tenant.amo_id), actor_id=str(actor_id),
+            key=key, content=content, content_type="application/pdf",
+            operation_id=f"documentation-record:{manual_tenant.amo_id}:{record_number}",
+        )
+        stored_reference = saved.uri
+    else:
+        target_dir = (
+            knowledge_service.RECORD_ROOT
+            / manual_tenant.slug
+            / knowledge_service.normalize_code(template.code).lower()
+            / date_token
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for _ in range(10):
+            record_number = _new_record_number(template.code, date_token=date_token)
+            candidate = target_dir / f"{record_number}_{safe_filename}"
+            try:
+                with candidate.open("xb") as artifact:
+                    artifact.write(content)
+                path = candidate
+                break
+            except FileExistsError:
+                continue
+        if path is None:
+            raise knowledge_service.HTTPException(
+                status_code=409,
+                detail="A unique retained-record artifact path could not be allocated",
+            )
+        stored_reference = str(path)
 
     row = km.DocumentationRecord(
         tenant_id=manual_tenant.amo_id,
@@ -311,7 +329,7 @@ def _create_documentation_record_hardened(
             "source_quote": reference.source_quote if reference else None,
         },
         payload_json=dict(payload or {}),
-        artifact_storage_path=str(path),
+        artifact_storage_path=stored_reference,
         artifact_filename=safe_filename,
         artifact_mime_type="application/pdf",
         artifact_sha256=hashlib.sha256(content).hexdigest(),
@@ -329,10 +347,14 @@ def _create_documentation_record_hardened(
     try:
         db.flush()
     except Exception:
-        try:
+        if stored_reference.startswith("s3://"):
+            try:
+                shared_storage.delete(stored_reference)
+            except Exception:
+                pass
+        elif path is not None:
             path.unlink(missing_ok=True)
-        finally:
-            raise
+        raise
     return row
 
 

@@ -181,16 +181,22 @@ def test_office_processing_does_not_block_async_routes_and_capabilities_inspect_
     assert '"reader_source_sha256": inspection.source_sha256' in capability_router
 
 
-def test_background_pdf_cache_is_checksum_bound_and_automatic() -> None:
+def test_background_pdf_cache_is_checksum_bound_and_never_remounts_an_active_reader() -> None:
     bridge = _source(ENTRY)
     cache = _source(ROOT / "frontend/src/pages/manuals/pdfSourceCache.ts")
     fast_reader = _source(FAST_READER)
 
     assert "savePdfSourceOffline(" in bridge
     assert "backgroundCacheTimer" in bridge
-    assert "await mount(live, true, true)" in bridge
     assert "readCachedPdfSource(" in bridge
     assert "preferCachedBytes" in bridge
+    # The offline copy is still selected when an existing verified cache is
+    # available on initial open. But background completion must not swap an
+    # open PDF.js document in the middle of a page jump or text-field edit.
+    assert "await mount(live, true, alreadyOffline)" in bridge
+    background_completion = bridge.split("void savePdfSourceOffline(", 1)[1].split("}).catch(", 1)[0]
+    assert 'setOfflineState("AVAILABLE")' in background_completion
+    assert "await mount(" not in background_completion
     assert 'window.addEventListener("offline"' in bridge
     assert "X-Reader-SHA256" in cache
     assert "AES-GCM" in cache

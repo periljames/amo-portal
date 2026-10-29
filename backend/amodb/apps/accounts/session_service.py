@@ -74,6 +74,82 @@ def _user_agent_hash(value: str | None) -> str | None:
     return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def revoke_user_sessions(db: Session, *, user: models.User, reason: str) -> datetime:
+    """Revoke every active staff browser session and both refresh stores.
+
+    Caller commits this in the SAME transaction as password/account changes.
+    Never reset token_revoked_at on subsequent logins: it is an audit boundary.
+    """
+    from sqlalchemy import select
+
+    now = _utcnow()
+    user.token_revoked_at = now
+    session_ids = select(models.PortalAuthSession.id).where(
+        models.PortalAuthSession.user_id == str(user.id)
+    )
+    db.query(models.RefreshSessionToken).filter(
+        models.RefreshSessionToken.session_id.in_(session_ids),
+        models.RefreshSessionToken.revoked_at.is_(None),
+    ).update({"status": "REVOKED", "revoked_at": now}, synchronize_session=False)
+    db.query(models.PortalAuthSession).filter(
+        models.PortalAuthSession.user_id == str(user.id),
+        models.PortalAuthSession.revoked_at.is_(None),
+    ).update(
+        {"revoked_at": now, "revoked_reason": reason[:64]},
+        synchronize_session=False,
+    )
+    db.query(models.PortalRefreshSession).filter(
+        models.PortalRefreshSession.user_id == str(user.id),
+        models.PortalRefreshSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    db.add(user)
+    return now
+
+
+def revoke_tenant_sessions(db: Session, *, amo_id: str, reason: str) -> datetime:
+    """Suspend an AMO and end all tenant staff sessions in one transaction."""
+    from sqlalchemy import select
+
+    now = _utcnow()
+    session_ids = select(models.PortalAuthSession.id).where(
+        models.PortalAuthSession.amo_id == str(amo_id)
+    )
+    db.query(models.RefreshSessionToken).filter(
+        models.RefreshSessionToken.session_id.in_(session_ids),
+        models.RefreshSessionToken.revoked_at.is_(None),
+    ).update({"status": "REVOKED", "revoked_at": now}, synchronize_session=False)
+    db.query(models.PortalAuthSession).filter(
+        models.PortalAuthSession.amo_id == str(amo_id),
+        models.PortalAuthSession.revoked_at.is_(None),
+    ).update(
+        {"revoked_at": now, "revoked_reason": reason[:64]},
+        synchronize_session=False,
+    )
+    db.query(models.PortalRefreshSession).filter(
+        models.PortalRefreshSession.amo_id == str(amo_id),
+        models.PortalRefreshSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    db.query(models.User).filter(
+        models.User.amo_id == str(amo_id),
+        models.User.is_superuser.is_(False),
+    ).update({"token_revoked_at": now}, synchronize_session=False)
+    return now
+
+
+def _user_refresh_authorized(session: models.PortalAuthSession, user: models.User) -> bool:
+    """Apply the same revocation and tenant-activity boundaries as access JWTs."""
+    if not user.is_active:
+        return False
+    if not bool(getattr(user, "is_superuser", False)):
+        if user.amo is None or user.amo.is_active is not True:
+            return False
+        if str(session.amo_id or "") != str(user.amo_id or ""):
+            return False
+    revoked_at = _aware(getattr(user, "token_revoked_at", None))
+    created_at = _aware(session.created_at)
+    return revoked_at is None or (created_at is not None and created_at > revoked_at)
+
+
 def create_session(
     db: Session,
     *,
@@ -174,7 +250,7 @@ def rotate_session(
                 .filter(models.User.id == session.user_id)
                 .first()
             )
-            if user is None or not user.is_active:
+            if user is None or not _user_refresh_authorized(session, user):
                 raise RefreshRejected("Account is unavailable.")
             return RotatedSession(session.id, replacement_raw, session_expiry, user)
 
@@ -216,7 +292,7 @@ def rotate_session(
         .filter(models.User.id == session.user_id)
         .first()
     )
-    if user is None or not user.is_active:
+    if user is None or not _user_refresh_authorized(session, user):
         session.revoked_at = now
         session.revoked_reason = "account_unavailable"
         db.commit()

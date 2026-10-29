@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.apps.audit import models as audit_models
 from amodb.database import SessionLocal, close_session_safely, get_db
-from amodb.security import JWT_ALGORITHM, SECRET_KEY, get_user_by_id
+from amodb.security import get_current_user, get_current_active_user
 from .broker import EventEnvelope, broker, format_sse, keepalive_message
 
 router = APIRouter(prefix="/api", tags=["events"])
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api", tags=["events"])
 REPLAY_RETENTION_DAYS = 7
 REPLAY_MAX_EVENTS = 500
 DURABLE_SWEEP_SECONDS = 3.0
+STREAM_REAUTHORIZE_SECONDS = max(5.0, float(os.getenv("EVENT_STREAM_REAUTHORIZE_SECONDS", "15")))
 DURABLE_SWEEP_MAX_EVENTS = 250
 
 
@@ -52,31 +53,25 @@ def _credentials_exception() -> HTTPException:
     )
 
 
-def _get_user_from_token(token: str, db: Session) -> account_models.User:
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise _credentials_exception()
-    except JWTError:
-        raise _credentials_exception()
-    user = get_user_by_id(db, user_id)
-    if user is None:
-        raise _credentials_exception()
-    if not getattr(user, "is_active", False):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user account")
-    effective_amo_id = user.amo_id
-    if getattr(user, "is_superuser", False):
-        context = (
-            db.query(account_models.UserActiveContext)
-            .filter(account_models.UserActiveContext.user_id == user.id)
-            .first()
-        )
-        if context and context.active_amo_id:
-            effective_amo_id = context.active_amo_id
-    setattr(user, "effective_amo_id", effective_amo_id)
-    return user
+def _get_user_from_token(
+    token: str, db: Session, request: Request | None = None,
+) -> account_models.User:
+    # Use the identical session, revocation, tenant and first-password policy
+    # as normal API authentication. Do not implement a second JWT validator.
+    user = get_current_user(token=token, db=db)
+    return get_current_active_user(current_user=user, db=db, request=request)
 
+
+def _stream_still_authorized(token: str, amo_id: str, request: Request) -> bool:
+    """Reauthorize long-running SSE before further broker/durable delivery."""
+    db = SessionLocal()
+    try:
+        current = _get_user_from_token(token, db, request)
+        return str(getattr(current, "effective_amo_id", None) or getattr(current, "amo_id", "")) == amo_id
+    except HTTPException:
+        return False
+    finally:
+        close_session_safely(db)
 
 def _bearer_token_from_request(request: Request) -> str:
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -94,7 +89,7 @@ def get_current_active_user_from_transport(
     request: Request,
     db: Session = Depends(get_db),
 ) -> account_models.User:
-    return _get_user_from_token(_bearer_token_from_request(request), db)
+    return _get_user_from_token(_bearer_token_from_request(request), db, request)
 
 
 def _event_to_row(event: audit_models.AuditEvent) -> ActivityEventRead:
@@ -247,7 +242,7 @@ def _prepare_stream_bootstrap(
     """
     db = SessionLocal()
     try:
-        user = _get_user_from_token(_bearer_token_from_request(request), db)
+        user = _get_user_from_token(_bearer_token_from_request(request), db, request)
         effective_amo_id = getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", "")
         amo_id = str(effective_amo_id)
         last_event_id = request.headers.get("last-event-id") or request.query_params.get("lastEventId")
@@ -297,9 +292,20 @@ async def _event_generator(
         effective_amo_id = str(getattr(user, "effective_amo_id", None) or getattr(user, "amo_id", ""))
         last_durable_sweep = time.monotonic()
         last_keepalive = time.monotonic()
+        last_reauthorization = 0.0
+        token = _bearer_token_from_request(request)
         while True:
             if await request.is_disconnected():
                 break
+            # Previously accepted streams must stop after revocation, password
+            # reset or suspension; checking only on initial connection is unsafe.
+            now = time.monotonic()
+            if now - last_reauthorization >= STREAM_REAUTHORIZE_SECONDS:
+                if not await asyncio.to_thread(
+                    _stream_still_authorized, token, effective_amo_id, request,
+                ):
+                    break
+                last_reauthorization = now
 
             now = time.monotonic()
             until_sweep = max(0.05, DURABLE_SWEEP_SECONDS - (now - last_durable_sweep))

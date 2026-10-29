@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -108,7 +107,7 @@ def upload_control_loop_attachment(
     _assert_evidence_manage(db, ctx)
     car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id, lock=True)
     _require_mutable_car(car)
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=ctx.amo_id, db=db)
     attachment = models.CARAttachment(
         car_id=car.id,
         filename=original_name,
@@ -152,9 +151,8 @@ def download_control_loop_attachment(
     )
     if attachment is None:
         raise HTTPException(status_code=404, detail="Attachment not found.")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(path=file_path, filename=attachment.filename, media_type=attachment.content_type or "application/octet-stream")
 
 
@@ -184,7 +182,10 @@ def delete_control_loop_attachment(
         car_id=car.id,
         attachment_id=attachment.id,
     )
-    file_ref = attachment.file_ref
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=ctx.amo_id):
+        raise HTTPException(status_code=409, detail="Retained RCA evidence cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id, amo_id=ctx.amo_id, db=db)
     db.delete(attachment)
     audit_services.log_event(
         db,
@@ -198,8 +199,4 @@ def delete_control_loop_attachment(
         metadata=_audit_metadata(request),
     )
     db.commit()
-    try:
-        Path(file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
     return None

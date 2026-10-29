@@ -1,0 +1,70 @@
+name: Venspera Runtime Role Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "deploy/saas/postgres-runtime-role.sql"
+      - ".github/workflows/venspera-runtime-role-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-runtime-privileges:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: venspera_role_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d venspera_role_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: venspera_role_test
+      PGPASSWORD: local-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: |
+          command -v psql >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -y postgresql-client
+          }
+      - name: Apply SQL as privileged migration role
+        run: psql -v ON_ERROR_STOP=1 -f deploy/saas/postgres-runtime-role.sql
+      - name: Verify runtime has DML but no ownership or privilege escalation
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE public.venspera_runtime_ci_probe (id integer PRIMARY KEY);
+          DO $verify$
+          DECLARE safe_role boolean;
+          BEGIN
+            SELECT NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
+                   AND NOT rolbypassrls AND NOT rolinherit
+            INTO safe_role
+            FROM pg_roles WHERE rolname = 'venspera_runtime';
+            IF safe_role IS DISTINCT FROM TRUE THEN
+              RAISE EXCEPTION 'Runtime role has unsafe PostgreSQL privileges';
+            END IF;
+            IF NOT (
+              has_table_privilege('venspera_runtime', 'public.venspera_runtime_ci_probe', 'SELECT')
+              AND has_table_privilege('venspera_runtime', 'public.venspera_runtime_ci_probe', 'INSERT')
+              AND has_table_privilege('venspera_runtime', 'public.venspera_runtime_ci_probe', 'UPDATE')
+              AND has_table_privilege('venspera_runtime', 'public.venspera_runtime_ci_probe', 'DELETE')
+            ) THEN
+              RAISE EXCEPTION 'Runtime role lacks required schema DML privileges';
+            END IF;
+          END $verify$;
+          DROP TABLE public.venspera_runtime_ci_probe;
+          SQL

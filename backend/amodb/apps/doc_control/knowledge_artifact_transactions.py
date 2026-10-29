@@ -16,7 +16,9 @@ _original_create_documentation_record = knowledge_service.create_documentation_r
 
 def _track_pending_artifact(session: Session, path_value: str) -> None:
     paths = session.info.setdefault(_PENDING_ARTIFACTS_KEY, set())
-    paths.add(str(Path(path_value).resolve()))
+    # Shared-object URIs must stay intact; Path.resolve corrupts s3:// into
+    # a meaningless worker-local directory path.
+    paths.add(path_value if str(path_value).startswith("s3://") else str(Path(path_value).resolve()))
 
 
 def _clear_pending_artifacts(session: Session) -> None:
@@ -27,10 +29,14 @@ def _cleanup_pending_artifacts(session: Session) -> None:
     paths = set(session.info.pop(_PENDING_ARTIFACTS_KEY, set()))
     for path_value in paths:
         try:
-            Path(path_value).unlink(missing_ok=True)
-        except OSError:
-            # Cleanup must never mask the transaction error. Operations can use the
-            # persisted audit/error logs to investigate a filesystem permission fault.
+            if str(path_value).startswith("s3://"):
+                from amodb import storage as shared_storage
+                shared_storage.delete(path_value)
+            else:
+                Path(path_value).unlink(missing_ok=True)
+        except Exception:
+            # Do not hide the original failed commit. S3 orphan sweeps can
+            # reconcile these rare remote-deletion failures independently.
             continue
 
 

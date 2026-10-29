@@ -513,6 +513,9 @@ export default function PdfReaderCoreV4({
   const dirtyRef = useRef(false);
   const editedPagesRef = useRef<number[]>([]);
   const currentPageRef = useRef(Math.max(1, initialPage));
+  // Physical PDF scrolling must not overwrite a human's unfinished page jump.
+  const pageInputEditingRef = useRef(false);
+  const pageInputDirtyRef = useRef(false);
   const appliedExternalNavigationRef = useRef("");
   const documentLoadedRef = useRef(false);
   const pendingPageRef = useRef<number | null>(null);
@@ -660,7 +663,9 @@ export default function PdfReaderCoreV4({
     if (next === currentPageRef.current) return;
     currentPageRef.current = next;
     setCurrentPage(next);
-    setPageInput(String(next));
+    if (!(pageInputEditingRef.current && pageInputDirtyRef.current)) {
+      setPageInput(String(next));
+    }
     onPageChange?.(next);
 
     if (!fastScrollingRef.current) {
@@ -740,6 +745,8 @@ export default function PdfReaderCoreV4({
   const jump = useCallback((requested: number, behavior: "auto" | "smooth" = "auto") => {
     if (!pageCount) return;
     const page = clampPdfValue(requested, 1, pageCount);
+    pageInputEditingRef.current = false;
+    pageInputDirtyRef.current = false;
     pendingPageRef.current = page;
     setNavigationTarget(page);
     fastScrollingRef.current = false;
@@ -1370,12 +1377,35 @@ export default function PdfReaderCoreV4({
             value={pageInput}
             aria-label="Page number"
             inputMode="numeric"
-            onChange={(event: ChangeEvent<HTMLInputElement>) => (
-              setPageInput(event.target.value.replace(/\D+/g, ""))
-            )}
-            onBlur={() => jump(Number(pageInput || currentPage))}
+            onFocus={() => {
+              pageInputEditingRef.current = true;
+              pageInputDirtyRef.current = false;
+            }}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              pageInputEditingRef.current = true;
+              pageInputDirtyRef.current = true;
+              setPageInput(event.target.value.replace(/\D+/g, ""));
+            }}
+            onBlur={(event) => {
+              if (pageInputEditingRef.current && pageInputDirtyRef.current) {
+                jump(Number(event.currentTarget.value || currentPageRef.current));
+              } else {
+                setPageInput(String(currentPageRef.current));
+              }
+              pageInputEditingRef.current = false;
+              pageInputDirtyRef.current = false;
+            }}
             onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-              if (event.key === "Enter") jump(Number(pageInput || currentPage));
+              if (event.key === "Enter") {
+                event.preventDefault();
+                jump(Number(event.currentTarget.value || currentPageRef.current));
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                pageInputEditingRef.current = false;
+                pageInputDirtyRef.current = false;
+                setPageInput(String(currentPageRef.current));
+                event.currentTarget.blur();
+              }
             }}
           />
           <span>of {pageCount || "—"}</span>
