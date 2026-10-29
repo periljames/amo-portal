@@ -410,7 +410,7 @@ export function qmsTrainingPath(amoCode: string, view = "dashboard"): string {
 }
 
 export function qmsNavigationItems(amoCode: string): Array<QmsModuleRoute & { path: string }> {
-  return MODULES.map((module) => ({
+  return MODULES.filter(module => !["documents", "aerodoc", "mail-identity"].includes(module.id)).map((module) => ({
     ...module,
     path: qmsModulePath(amoCode, module.id),
   }));

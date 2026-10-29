@@ -9,7 +9,7 @@ from typing import Callable, Optional
 from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, lazyload
 
 from amodb.database import get_read_db, get_write_db
 from amodb.security import get_current_active_user
@@ -306,7 +306,7 @@ def _assert_quality_module_available(db: Session, *, amo_id: str) -> None:
     Quality deep link or API call.
     """
     subscription = (
-        db.query(account_models.ModuleSubscription)
+        db.query(account_models.ModuleSubscription).options(lazyload("*"))
         .filter(
             account_models.ModuleSubscription.amo_id == str(amo_id),
             account_models.ModuleSubscription.module_code == "quality",
@@ -346,7 +346,7 @@ def set_postgres_tenant_context(db: Session, *, amo_id: str, user_id: str) -> No
 
 def _resolve_amo(db: Session, amo_code: str) -> account_models.AMO:
     amo = (
-        db.query(account_models.AMO)
+        db.query(account_models.AMO).options(lazyload("*"))
         .filter(
             account_models.AMO.is_active.is_(True),
             (account_models.AMO.amo_code == amo_code) | (account_models.AMO.login_slug == amo_code),

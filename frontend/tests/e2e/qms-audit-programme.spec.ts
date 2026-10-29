@@ -1,16 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// Audit scheduling acceptance uses a future working day. A fixed 2026-08-15
-// became a past date, which HTML validity correctly rejected before the
-// conflict API was called.
-const scheduleDate = new Date();
-scheduleDate.setUTCDate(scheduleDate.getUTCDate() + 30);
-while ([0, 6].includes(scheduleDate.getUTCDay())) {
-  scheduleDate.setUTCDate(scheduleDate.getUTCDate() + 1);
-}
-const SCHEDULE_DATE = scheduleDate.toISOString().slice(0, 10);
-const PROGRAMME_YEAR = scheduleDate.getUTCFullYear();
-
 function futureToken(): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp: 4_102_444_800 })}.signature`;
@@ -37,19 +26,19 @@ function universeItem() {
 function programme(id = "programme-1", status = "APPROVED") {
   return {
     id,
-    programme_ref: id === "programme-1" ? `AP-${PROGRAMME_YEAR}-BASE-R01` : `AP-${PROGRAMME_YEAR}-CREATED-R01`,
-    programme_series: id === "programme-1" ? `AP-${PROGRAMME_YEAR}-BASE` : `AP-${PROGRAMME_YEAR}-CREATED`,
-    programme_year: PROGRAMME_YEAR,
+    programme_ref: id === "programme-1" ? "AP-2026-BASE-R01" : "AP-2026-CREATED-R01",
+    programme_series: id === "programme-1" ? "AP-2026-BASE" : "AP-2026-CREATED",
+    programme_year: 2026,
     revision_no: 1,
-    title: id === "programme-1" ? `Internal Audits (${PROGRAMME_YEAR})` : `Internal Audits (${PROGRAMME_YEAR})`,
+    title: id === "programme-1" ? "Internal Audits (2026)" : "Internal Audits (2026)",
     assurance_model: "HYBRID",
     continuous_monitoring_enabled: true,
     optimizer_version: "HYBRID_ASSURANCE_V1",
     objectives: ["Verify continuing conformity and Quality-system effectiveness."],
     regulatory_basis: ["MPM Quality Audit Programme"],
     status,
-    period_start: `${PROGRAMME_YEAR}-01-01`,
-    period_end: `${PROGRAMME_YEAR}-12-31`,
+    period_start: "2026-01-01",
+    period_end: "2026-12-31",
     owner_user_id: "quality-user-a",
     supersedes_programme_id: null,
     approved_by_user_id: status === "APPROVED" ? "quality-user-a" : null,
@@ -89,8 +78,8 @@ function programme(id = "programme-1", status = "APPROVED") {
       mandatory_surveillance: true,
       recurrence: "ANNUAL",
       custom_interval_days: null,
-      target_start: SCHEDULE_DATE,
-      target_end: SCHEDULE_DATE,
+      target_start: "2026-08-15",
+      target_end: "2026-08-15",
       state: "PLANNED",
       prioritization_basis: [{
         driver: "HYBRID_ASSURANCE",
@@ -147,7 +136,7 @@ function optimizer() {
       recommended_in_current_programme: true,
       in_programme: true,
       programme_item_id: "programme-item-1",
-      next_recommended_due: SCHEDULE_DATE,
+      next_recommended_due: "2026-08-15",
       target_start: "2026-08-01",
       target_end: "2026-08-29",
       requires_amendment: false,
@@ -168,9 +157,9 @@ function schedulingQueue() {
   return {
     items: [{
       programme_id: "programme-1",
-      programme_ref: `AP-${PROGRAMME_YEAR}-BASE-R01`,
+      programme_ref: "AP-2026-BASE-R01",
       programme_status: "APPROVED",
-      programme_year: PROGRAMME_YEAR,
+      programme_year: 2026,
       programme_revision_no: 1,
       programme_item_id: "programme-item-1",
       universe_item_id: "universe-1",
@@ -179,8 +168,8 @@ function schedulingQueue() {
       title: "Maintenance Department Audit",
       recurrence: "ANNUAL",
       mandatory_surveillance: true,
-      target_start: SCHEDULE_DATE,
-      target_end: SCHEDULE_DATE,
+      target_start: "2026-08-15",
+      target_end: "2026-08-15",
       prioritization_basis: [],
     }],
     total: 1,
@@ -376,7 +365,7 @@ async function prepare(page: Page, options?: { programmes?: ReturnType<typeof pr
           message: "The proposed Quality commitment conflicts with active personnel or location allocations.",
           conflicts: [{
             subject_type: "AUDIT_SCHEDULE", subject_id: "existing-1", title: "Hangar surveillance",
-            start_date: SCHEDULE_DATE, end_date: SCHEDULE_DATE, start_time: "09:00:00", end_time: "10:00:00",
+            start_date: "2026-08-15", end_date: "2026-08-15", start_time: "09:00:00", end_time: "10:00:00",
             location: "Hangar 1", conflicting_user_ids: ["quality-user-a"], reason: "Responsible personnel or attendees overlap.",
           }],
         } }) });
@@ -399,7 +388,7 @@ async function prepare(page: Page, options?: { programmes?: ReturnType<typeof pr
       current = scheduled;
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({
         id: "schedule-1", amo_id: "amo-a", title: "Maintenance Department Audit", domain: "AMO", kind: "INTERNAL",
-        audit_scope_id: "scope-internal", audit_scope_code: "INT", frequency: "ANNUAL", next_due_date: SCHEDULE_DATE,
+        audit_scope_id: "scope-internal", audit_scope_code: "INT", frequency: "ANNUAL", next_due_date: "2026-08-15",
         start_time: "09:00:00", end_time: "10:00:00", duration_days: 1, timezone_name: "Africa/Nairobi", location: "Hangar 1",
         lifecycle_status: "ACTIVE", version: 1, conflicts: [],
       }) });
@@ -445,7 +434,7 @@ test("opens programme workspace, coverage areas, and methodology info drawer", a
   await expect(page.getByLabel("Audit Programme workspace")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Programme workspace sections" })).toBeVisible();
   // The selected programme is shown in the matrix selector, not as a free-standing heading.
-  const matrix = page.getByLabel(`${PROGRAMME_YEAR} audit programme calendar`);
+  const matrix = page.getByLabel("2026 audit programme calendar");
   await expect(matrix).toBeVisible();
   await expect(matrix.locator(".qms-programme-matrix__programme-select select")).toHaveValue("programme-1");
   await expect(page.getByText("Maintenance Department Audit", { exact: true }).first()).toBeVisible();
@@ -474,7 +463,7 @@ test("creates a hybrid draft without a methodology choice and requires a reason 
   await expect(page.getByLabel(/Compliance baseline/i)).toBeVisible();
   await page.getByRole("button", { name: "Create draft programme" }).click();
 
-  await expect(page.getByLabel(`${PROGRAMME_YEAR} audit programme calendar`).locator(".qms-programme-matrix__programme-select select")).toHaveValue("programme-created");
+  await expect(page.getByLabel("2026 audit programme calendar").locator(".qms-programme-matrix__programme-select select")).toHaveValue("programme-created");
 
   await page.getByRole("button", { name: "Approval" }).click();
   const submitReview = page.getByRole("button", { name: "Submit for Quality review" });
@@ -498,7 +487,7 @@ test("programme requirement uses planner conflict gate before schedule lineage i
   await expect(page.getByRole("dialog", { name: "Schedule on Calendar" })).toBeVisible();
   await expect(page.getByLabel("Schedule audit programme requirement")).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
-  await expect(page.getByLabel("Date")).toHaveValue(SCHEDULE_DATE);
+  await expect(page.getByLabel("Date")).toHaveValue("2026-08-15");
   await page.getByLabel("Location").selectOption("HANGAR_1");
   await page.getByLabel("Lead auditor").selectOption("quality-user-a");
   await page.getByRole("button", { name: "Create authoritative schedule" }).click();
@@ -520,9 +509,12 @@ test("programme schedule deep-link stays inside Audit Assurance chrome", async (
     { waitUntil: "domcontentloaded" },
   );
 
-  await expect(page.getByRole("navigation", { name: "QMS page menus" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Assurance", exact: true })).toBeVisible();
-  // The deep link uses the canonical Assurance shell; this page no longer exposes legacy tabs.
+  const qmsMenu = page.getByRole("navigation", { name: "QMS page menus" });
+  await expect(qmsMenu).toBeVisible({ timeout: 15_000 });
+  await qmsMenu.getByRole("button", { name: "Assurance", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Assurance pages", exact: true })).toBeVisible();
+  // The deep link uses the canonical Assurance menu, not the removed legacy tabs/rail.
+  await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Schedule programme requirement", exact: true })).toBeVisible();
   await expect(page.getByLabel("Frequency")).toHaveValue("ANNUAL");
 });

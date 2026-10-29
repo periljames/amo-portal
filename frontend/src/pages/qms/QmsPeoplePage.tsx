@@ -699,8 +699,9 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
     <section className={`qms-authz qms-people qms-surface-root${!selfServiceOnly && effectiveTab === "people" && selectedPersonKey ? " qms-authz--person-open" : ""}${effectiveTab === "cases" && selectedCaseId ? " qms-authz--case-open" : ""}`} aria-label="QMS People and authorization control">
       <header className="qms-authz-header">
         <div>
-          <h1 className="qms-authz-page-heading">People & authorization</h1>
-          <p className="qms-authz-page-description">Authorization governance: prepare and review evidence, record controlled decisions, and track permissions without bypassing independent approval.</p>
+          <h1 className="qms-authz-page-heading">Authorization governance</h1>
+          <p className="qms-authz-page-subtitle">Authorization governance: controlled nominations, competence evidence, independent decisions and periodic reviews.</p>
+
         </div>
         <button type="button" className="qms-authz-button qms-authz-button--ghost" onClick={refresh} disabled={pageLoading || busy}>
           <RefreshCw size={16} /> Refresh
@@ -792,7 +793,7 @@ const QmsPeoplePage: React.FC<Props> = ({ amoCode }) => {
           <article className="qms-authz-card qms-authz-detail">
             {!selfServiceOnly && selectedPersonKey ? <div className="qms-authz-mobile-person-actions">
               <button type="button" className="qms-authz-mobile-back" onClick={() => setSelectedPersonKey("")}>← All people</button>
-              {canPrepare ? <button type="button" className="qms-authz-button qms-authz-mobile-nominate" onClick={() => setNominateOpen(true)}>Nominate</button> : null}
+              {canPrepare && <button type="button" className="qms-authz-mobile-nominate" onClick={() => setNominateOpen(true)}><UserCheck size={16} /> Nominate</button>}
             </div> : null}
             {personQuery.isPending && activePersonKey ? <p><InlineLoading label={"Loading person…"}/></p> : personDetail ? (
               <>

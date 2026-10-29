@@ -1,0 +1,22 @@
+# Post-merge frontend integration review
+
+Reviewed main merge `963f20436` (PR #568) against the previously deployed `6b78f31e0`. The application diff spans 56 files, principally CAR investigation, individual corrective actions, invitations, evidence and independent review, with People/audit styling and regression tests.
+
+## Repairs and deployment
+
+- The running API predated the merge. Its generic fallback returned HTTP 200 register objects for investigation, Pareto and invitation-access URLs. The database was still at `extprov_261019_oversight`. A fresh logical backup was copied and checksum-verified before applying the additive `quality_car_rca_261022` migration. The merged backend was restarted; all three endpoint families now return their authoritative response shapes.
+- Frontend response contracts reject generic fallback objects and malformed investigation/action collections instead of presenting an apparently empty controlled record or crashing. These checks cover internal and public investigation reads/saves, invitation access reads and retained Pareto lists. Failure/retry has browser coverage.
+- CAR readers without `qms.reports.view` no longer request the restricted source-analysis endpoint. Quality review authority and server-controlled transitions remain unchanged.
+- Investigation detail, source analysis and new Quality actions use disclosures. Reviewer controls share RCA field/table styling, narratives wrap, empty actions use a short message, and switching CARs clears the previous investigation and decision notes. Pareto switching clears old snapshots and successful retry clears the error state.
+- A production object-store probe verified write, materialization and SHA-256 retrieval, then removed only its own probe. The one existing tenant CAR attachment passed the backfill dry run and was copied/verified into tenant-scoped storage; its original file was preserved. Its actual browser download completed successfully after migration. No CAR status, finding, approval or operational response was changed for this review.
+
+## Executed checks
+
+- Production build, TypeScript, modal-layer checks and heavy-route isolation passed. Final visual build also passed; deployed entry is `index-C_sJQ95b.js`. Existing bundle-size warnings remain.
+- 190 frontend unit checks passed across Quality, route loaders, invite expiry and the four new response-contract tests. The new contracts are included in `test:quality`.
+- 36 backend checks passed across CAR governance, RCA negative contracts and report outputs. Existing deprecation/cache warnings remain.
+- Browser coverage totals 27 distinct scenarios: 20 passed in the broad sweep, and all eight focused CAR/role scenarios passed in the final run (one overlaps the broad sweep). This includes all 33 shared QMS register views, Settings, retention, reply-address controls, update handling, navigation, provider qualification, reports/downloads, mobile layout, CAR control/report analysis and auditor/Quality Officer/Accountable Executive roles.
+- Initial browser failures were investigated: the cold CAR heading needed the existing 15-second route-load allowance; CAR mocks lacked the new authoritative projection/access fields; the download mock omitted the production CORS exposure of Content-Disposition; role fixtures omitted checklist assessments and referenced the old People heading and old fieldwork buttons. Fixtures and interactions now match the actual contracts and table controls; authority assertions were retained.
+- Live headed Chromium used the authorized staff administrator on the public Tailscale portal. Actual CAR review, compact empty state, mobile action controls, People governance and public invitation layouts were visually inspected. The actual invitation was opened in a separate unauthenticated browser context on desktop and mobile, without submitting a response. CAR detail and public mobile pages had no horizontal document overflow or visible error alerts. Live investigation/Pareto/access reads returned 200, and the existing three CARs remained present.
+
+Screenshots, downloads and command logs are retained under ignored `.artifacts/merged-main-*`; credentials and invitation tokens are excluded from this record. Fixture/browser checks do not certify every unexercised production lifecycle, actual email delivery, concurrent devices, large interrupted uploads or disaster recovery. Production approval/closure was deliberately not performed on existing operational records.

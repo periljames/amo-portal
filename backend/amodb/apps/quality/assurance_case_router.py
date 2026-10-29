@@ -375,11 +375,30 @@ def conclude_effectiveness(
         QualityEffectivenessPlan.amo_id == ctx.amo_id,
         QualityEffectivenessPlan.case_id == case.id,
         QualityEffectivenessPlan.id == plan_id,
-    ).with_for_update().first()
+    ).with_for_update(of=QualityEffectivenessPlan).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Effectiveness plan not found.")
     if plan.status == "CONCLUDED":
         raise HTTPException(status_code=409, detail="Effectiveness conclusions are immutable. Reopen the case and create a new plan for a new observation window.")
+    if plan.source_type == "CAR":
+        # For CAR-specific effectiveness plans, the designated reviewer must
+        # perform the conclusion and must be independent of the implementer.
+        from . import models as quality_models
+        from uuid import UUID as _UUID
+        try:
+            source_car_id = _UUID(str(plan.source_id))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="Effectiveness plan has an invalid CAR linkage.") from exc
+        source_car = db.query(quality_models.CorrectiveActionRequest).filter(
+            quality_models.CorrectiveActionRequest.amo_id == ctx.amo_id,
+            quality_models.CorrectiveActionRequest.id == source_car_id,
+        ).first()
+        if source_car is None:
+            raise HTTPException(status_code=404, detail="Linked CAR not found in this tenant.")
+        if not plan.responsible_reviewer_user_id or ctx.user_id != plan.responsible_reviewer_user_id:
+            raise HTTPException(status_code=403, detail="Only the independently appointed effectiveness reviewer may record the conclusion.")
+        if ctx.user_id == source_car.assigned_to_user_id:
+            raise HTTPException(status_code=403, detail="CAR implementer cannot independently conclude effectiveness.")
     if plan.planned_review_date > date.today():
         raise HTTPException(status_code=409, detail="The planned observation window has not reached its review date.")
     plan.status = "CONCLUDED"; plan.conclusion = payload.conclusion; plan.conclusion_rationale = payload.rationale.strip()
@@ -396,5 +415,13 @@ def conclude_effectiveness(
         reason=f"Effectiveness concluded {payload.conclusion}: {payload.rationale.strip()}",
         actor_user_id=ctx.user_id, before=before,
     )
+    if plan.source_type == "CAR":
+        from .car_feedback import record_shared_feedback
+        from amodb.apps.accounts.models import User
+        reviewer = db.query(User).filter(User.id == ctx.user_id, User.amo_id == ctx.amo_id).first()
+        record_shared_feedback(db, source_car, f"Effectiveness: {payload.conclusion}. {payload.rationale.strip()}", user=reviewer)
     db.commit()
+    if plan.source_type == "CAR":
+        from .car_feedback import feedback_changed
+        feedback_changed(source_car, ctx.user_id)
     return {"case": _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=case_id), detail=True), "effectiveness_plan": _plan_dict(plan)}

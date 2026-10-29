@@ -1153,6 +1153,32 @@ body[data-color-scheme="dark"] .qa-audits-list__grid-shell.ag-theme-alpine,
   flex: 0 0 auto;
   gap: 0.2rem;
 }
+.qa-register-grid-page__analysis-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  min-height: 36px;
+  padding: .35rem .6rem;
+  border: 1px solid var(--qms-line, #d4dce4);
+  border-radius: .42rem;
+  background: var(--qms-panel, #fff);
+  color: var(--qms-text, #27313b);
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qa-register-grid-page__analysis-link:hover,
+.qa-register-grid-page__analysis-link:focus-visible {
+  border-color: var(--accent-primary, #087f78);
+  color: var(--accent-primary, #087f78);
+}
+@media (max-width: 700px) {
+  .qa-register-grid-page__analysis-link { min-width: 44px; min-height: 44px; padding: .4rem; }
+  .qa-register-grid-page__analysis-link span { display: none; }
+}
+
 
 .qa-register-grid-page__summary {
   align-items: baseline;

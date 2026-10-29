@@ -155,7 +155,7 @@ test("People uses authorization cases and does not duplicate audit assignment wo
   });
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "People & authorization", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authorization governance", exact: true })).toBeVisible();
   await page.locator(".qms-authz-tabs").getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByText("Amina Wanjiku", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
@@ -268,7 +268,7 @@ test("People read access does not expose mutation controls to a Quality Auditor"
   }, "AUDITOR");
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "People & authorization", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Authorization governance", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "My Authorization", exact: true })).toBeVisible();
   await expect(page.locator(".qms-authz-tabs").getByRole("button", { name: "People", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Authorization Cases", exact: true })).toHaveCount(0);

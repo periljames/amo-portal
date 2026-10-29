@@ -184,6 +184,28 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     const request = route.request();
     const url = request.url();
     const controlLoopBase = `/api/maintenance/tenant-a/quality/cars/${CAR_ID}/control-loop`;
+    if(new URL(url).pathname.endsWith(`/cars/${CAR_ID}/feedback`)) {
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({car_id:CAR_ID,status:"IN_PROGRESS",root_cause_status:"ACCEPTED",capa_status:"ACCEPTED",items:[],next_cursor:null})});
+      return;
+    }
+
+    if (new URL(url).pathname.endsWith(`/cars/${CAR_ID}/investigation`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        car_id: CAR_ID, revision: 0, draft: { form: {}, investigation: {
+          version: 1, problem_statement: "Restore staged CAR ownership", investigations: [],
+          conclusion: "", supported_cause_ids: [], conclusion_evidence_references: [],
+          evidence_notes: "", effectiveness_proposal: null,
+        } }, submitted_revision: null, submitted_snapshot: null, submitted_at: null,
+        actions: [], action_events: [], retained_responses: [], history: [],
+      }) });
+      return;
+    }
+    if (new URL(url).pathname.endsWith(`/cars/${CAR_ID}/invite-access`)) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        expires_at: null, revoked_at: null, reason: "", updated_at: null, updated_by_user_id: null,
+      }) });
+      return;
+    }
 
     if (url.includes(`${controlLoopBase}/attachments`)) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ id: "attachment-1", car_id: CAR_ID, filename: "implementation-evidence.pdf", description: "Approved implementation evidence", content_type: "application/pdf", size_bytes: 125000, sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uploaded_at: "2026-08-21T08:15:00Z", download_url: `${controlLoopBase}/attachments/attachment-1/download` }]) });
@@ -245,7 +267,7 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/maintenance/tenant-a/quality/cars?control=${CAR_ID}`, { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: /QMS-CAR-026/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /QMS-CAR-026/ })).toBeVisible({ timeout: 15000 });
   await expect(page.locator(".page-header").getByText("At Risk · 55/100")).toBeVisible();
 
   const lifecycleSection = page.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");

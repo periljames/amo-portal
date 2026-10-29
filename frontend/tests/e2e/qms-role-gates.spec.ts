@@ -153,7 +153,7 @@ function liveSession() {
   };
 }
 
-test("assigned AUDITOR can save fieldwork and raise a finding but cannot manage the programme", async ({ page }) => {
+test("assigned AUDITOR can enter fieldwork and raise a finding but cannot manage the programme", async ({ page }) => {
   const checklistRow = {
     checklist_item_id: ITEM_ID,
     audit_id: AUDIT_ID,
@@ -167,6 +167,12 @@ test("assigned AUDITOR can save fieldwork and raise a finding but cannot manage 
     finding_id: null,
     auditor_notes: null,
     evidence_references: [],
+    assessment: {
+      applicability: "UNVERIFIED", applicability_reason: null, applicability_basis: [],
+      documentary_status: "UNVERIFIED", implementation_status: "UNVERIFIED", field_verification_status: "UNVERIFIED",
+      evidence_ids: [], document_revision_ids: [], regulation_refs: [], procedure_refs: [],
+      conflicts: [], missing_evidence: [], fieldwork_requirements: [], ai_analysis: null,
+    },
     governance_id: null,
     entity_version: 1,
     updated_by_user_id: null,
@@ -191,9 +197,9 @@ test("assigned AUDITOR can save fieldwork and raise a finding but cannot manage 
   await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/live`, { waitUntil: "domcontentloaded" });
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
   await expect(live).toBeVisible({ timeout: 30_000 });
-  await expect(live.getByRole("button", { name: "Save note" })).toBeEnabled();
-  await expect(live.getByRole("button", { name: "NCR" })).toBeEnabled();
-  await live.getByRole("button", { name: "NCR" }).click();
+  await expect(live.getByRole("textbox", { name: "Remarks for question 1", exact: true })).toBeEditable();
+  await expect(live.getByRole("radio", { name: "NCR — question 1", exact: true })).toBeEnabled();
+  await live.getByRole("radio", { name: "NCR — question 1", exact: true }).click();
   const finding = page.getByRole("dialog", { name: "Raise finding" });
   await expect(finding).toBeVisible();
   await finding.getByLabel("Classification").selectOption("LEVEL_2");
@@ -223,6 +229,7 @@ function readyCarControl() {
 
 test("QUALITY_OFFICER can work the CAR control loop and prepare authorization cases without final approval authority", async ({ page }) => {
   await prepare(page, "QUALITY_OFFICER", (route, path) => {
+    if(path.endsWith(`/quality/cars/${CAR_ID}/feedback`)) return json(route,{car_id:CAR_ID,status:"IN_PROGRESS",root_cause_status:"ACCEPTED",capa_status:"ACCEPTED",items:[],next_cursor:null});
     if (path.endsWith(`/quality/cars/${CAR_ID}/control-loop`)) return json(route, readyCarControl());
     if (path.endsWith("/quality/cars/assignees")) return json(route, [{ id: "owner-1", full_name: "Responsible Manager", email: "owner@tenant-a.test", role: "MAINTENANCE_MANAGER", department_name: "Maintenance" }]);
     if (path.endsWith(`/quality/cars/${CAR_ID}/responses`)) return json(route, []);
@@ -245,9 +252,9 @@ test("QUALITY_OFFICER can work the CAR control loop and prepare authorization ca
         home_role: "AUDITOR", department: "Quality", workforce_status: "Active",
         authorizations: [], open_cases: 0,
       }],
-      total: 1,
+      total: 1, limit: 100, offset: 0, has_more: false,
     });
-    if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0 });
+    if (path.endsWith("/quality/people/authorization-control/cases")) return json(route, { items: [], total: 0, limit: 100, offset: 0, has_more: false });
     if (path.endsWith("/quality/people/authorization-control/reviews")) return json(route, { items: [] });
     if (path.endsWith("/quality/people/authorization-control/authorizations")) return json(route, { items: [] });
     if (path.endsWith("/quality/people/rules")) return json(route, { items: [{
@@ -265,7 +272,7 @@ test("QUALITY_OFFICER can work the CAR control loop and prepare authorization ca
   await expect(page.getByRole("button", { name: "Close CAR" })).toBeDisabled();
 
   await page.goto("/maintenance/tenant-a/quality?workspace=people", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "People & Authorization Control", exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Authorization governance", exact: true })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "People", exact: true }).click();
   await expect(page.getByRole("button", { name: "Nominate", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Batch nominate", exact: true })).toBeVisible();

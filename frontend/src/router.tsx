@@ -11,6 +11,7 @@ import { classifyQmsPath, type QmsPathClassification } from "./pages/qms/routes/
 import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
+const QmsReportsPage = lazy(() => import("./pages/qms/QmsReportsPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
@@ -271,6 +272,13 @@ export const AppRouter: React.FC = () => {
     return <Navigate to={`/maintenance/${amo}/quality/calendar/week`} replace />;
   }
 
+  if (qmsRoute.kind === "known" && qmsRoute.module?.id === "reports" && new URLSearchParams(location.search).get("analysis") !== "1") return <Suspense fallback={<div role="status">Loading reports…</div>}><WorkspaceRequireAuth><QmsReportsPage /></WorkspaceRequireAuth></Suspense>;
+  if (qmsRoute.kind === "known" && ["documents", "aerodoc"].includes(qmsRoute.module?.id || "") && !isSupportedDocumentReaderPath(location.pathname)) {
+    const parts = pathSegments(location.pathname);
+    const view = parts.at(-1);
+    const target = ["change-requests", "approvals"].includes(view || "") ? "changes" : view === "distribution" ? "distribution" : view === "compliance" ? "compliance" : "library";
+    return <Navigate to={`/maintenance/${encodeURIComponent(qmsRoute.amoCode || "")}/document-control/${target}`} replace />;
+  }
   if (isSupportedCarPerformanceReportPath(location.pathname)) return <QmsCarPerformanceReportRouteSurface />;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;

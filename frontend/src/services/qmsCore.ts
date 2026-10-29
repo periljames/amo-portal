@@ -147,6 +147,9 @@ export interface QMSAuditScopeOut {
   created_by_user_id?: string | null;
   created_at: string;
   updated_at: string;
+  reference_date_label?: string | null;
+  sequence_digits?: number;
+  next_reference?: string | null;
   /** Audits issued this calendar year for the tenant family + scope unit. */
   issued_this_year?: number;
   /** Next sequence that would be reserved for this scope this year. */
@@ -2063,6 +2066,7 @@ export async function qmsForwardCarExtensionRequest(
 
 export interface CARInviteOut {
   deadline_change_requires_review?: boolean;
+  structured_rca_required?: boolean;
   car_id: string;
   invite_token: string;
   invite_url: string;
@@ -2268,8 +2272,8 @@ export async function qmsRequestCarAccess(
     "I can support resolution of this CAR. Please review and assign write access if appropriate."
   ).trim();
   return qmsAddCarAction(carId, {
-    action_type: "ASSIGNMENT",
-    message: cleanMessage || "CAR access requested.",
+    action_type: "COMMENT",
+    message: `Access request: ${cleanMessage || "CAR access requested."}`,
   });
 }
 

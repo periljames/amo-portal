@@ -1,3 +1,5 @@
+import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
+import "./qms-reports.css";
 import Pagination from "../../components/shared/Pagination";
 import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 // src/pages/qms/QmsModuleWorkspacePage.tsx
@@ -419,7 +421,7 @@ const QMS_MODULES: ModuleMeta[] = [
       { label: "Distribution", path: "documents/distribution" },
       { label: "Obsolete", path: "documents/obsolete", tone: "warning" },
     ],
-    taskHint: "Keep controlled documents inside QMS instead of running a separate document-control navigation branch.",
+    taskHint: "Controlled documents are managed in Document Control.",
     createEnabled: true,
     lifecycle: [
       { label: "Draft", path: "documents/library", description: "Create or revise document." },
@@ -660,6 +662,7 @@ function routeToUrl(amoCode: string, route: string): string {
     const suffix = cleanRoute.slice("training-competence".length).replace(/^\/+/, "");
     return `/maintenance/${amoCode}/training/competence${suffix ? `/${suffix}` : ""}`;
   }
+  if (cleanRoute.startsWith("documents")) return `/maintenance/${amoCode}/document-control/library`;
   return `/maintenance/${amoCode}/quality${cleanRoute ? `/${cleanRoute}` : ""}`;
 }
 
@@ -741,7 +744,6 @@ function SignalCards({ amoCode, dashboard }: { amoCode: string; dashboard: QmsDa
     { label: "Overdue CARs", value: counterValue(dashboard, "overdue_cars"), icon: AlertTriangle, to: "cars/overdue", tone: "danger" },
     { label: "CARs due soon", value: counterValue(dashboard, "cars_due_soon"), icon: CalendarDays, to: "cars/due-soon", tone: "warning" },
     { label: "Open findings", value: counterValue(dashboard, "open_findings"), icon: ClipboardList, to: "findings/register" },
-    { label: "Draft documents", value: counterValue(dashboard, "draft_documents"), icon: FileText, to: "documents/library" },
     { label: "Expired training", value: counterValue(dashboard, "training_expired_records"), icon: Users, to: "training-competence/overdue", tone: "warning" },
   ];
   return (
@@ -763,7 +765,7 @@ function ModuleNavigation({ amoCode, activeKey }: { amoCode: string; activeKey: 
   return (
     <section className="qms-ops-module-strip" aria-label="QMS modules">
       {CATEGORIES.map((category) => {
-        const modules = QMS_MODULES.filter((module) => module.category === category);
+        const modules = QMS_MODULES.filter((module) => module.category === category && !["documents", "aerodoc"].includes(module.key));
         const group = MODULE_GROUPS[category];
         return (
           <div key={category} className="qms-ops-module-strip__group">
@@ -1620,7 +1622,6 @@ function CockpitWorkspace({ amoCode, dashboard, loading }: { amoCode: string; da
         <div className="qms-ops-priority-list">
           <Link to={routeToUrl(amoCode, "cars/overdue")}><AlertTriangle size={16} /> Overdue CARs <strong>{counterValue(dashboard, "overdue_cars")}</strong></Link>
           <Link to={routeToUrl(amoCode, "audits/plan")}><CalendarDays size={16} /> Audit plan due soon <strong>{counterValue(dashboard, "audits_due_soon")}</strong></Link>
-          <Link to={routeToUrl(amoCode, "documents/library")}><FileText size={16} /> Draft documents <strong>{counterValue(dashboard, "draft_documents")}</strong></Link>
           <Link to={routeToUrl(amoCode, "training-competence/overdue")}><Users size={16} /> Expired training <strong>{counterValue(dashboard, "training_expired_records")}</strong></Link>
         </div>
       </SectionCard>
@@ -1810,7 +1811,7 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
         {dashboardError ? <InlineError message={dashboardError} onAction={loadDashboard} /> : null}
         <SourceErrorsNotice errors={dashboard?.source_errors} />
 
-        {module.key !== "calendar" ? (
+        {module.key === "cockpit" ? (
           <>
             <section className="qms-ops-hero">
               <div className="qms-ops-hero__copy">
@@ -1825,6 +1826,7 @@ export default function QmsModuleWorkspacePage(): React.ReactElement {
           </>
         ) : null}
 
+        {module.key !== "cockpit" && <QmsSectionTabs amoCode={amoCode} />}
         {module.key === "cockpit" ? (
           <CockpitWorkspace amoCode={amoCode} dashboard={dashboard} loading={dashboardState === "loading"} />
         ) : (

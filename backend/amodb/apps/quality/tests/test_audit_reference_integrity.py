@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import importlib
-from contextlib import contextmanager
 from datetime import date
 
+import pytest
 from sqlalchemy import inspect
-from sqlalchemy.exc import IntegrityError
 from starlette.requests import Request
 
 from amodb.apps.accounts import models as account_models
@@ -13,6 +12,13 @@ from amodb.apps.quality import models as quality_models
 from amodb.apps.quality import schemas as quality_schemas
 
 quality_router = importlib.import_module("amodb.apps.quality.router")
+
+
+@pytest.fixture(autouse=True)
+def fixed_reference_clock(monkeypatch):
+    from amodb.apps.quality import numbering
+    monkeypatch.setattr(numbering, "server_date", lambda: date(2026, 3, 19))
+    monkeypatch.setattr(quality_router, "reference_server_date", lambda: date(2026, 3, 19))
 
 
 def _request() -> Request:
@@ -79,57 +85,16 @@ def test_generate_audit_reference_increments_existing_scope(db_session):
     assert ref_sequence == 5
 
 
-def test_generate_audit_reference_retries_first_insert_race():
-    class FakeCounter:
-        def __init__(self, last_value: int):
-            self.last_value = last_value
-
-    class FakeQuery:
-        def __init__(self, responses):
-            self._responses = responses
-
-        def filter(self, *args, **kwargs):
-            return self
-
-        def with_for_update(self):
-            return self
-
-        def first(self):
-            return self._responses.pop(0)
-
-    class FakeSession:
-        def __init__(self):
-            self.responses = [None, FakeCounter(0)]
-            self.flush_attempts = 0
-
-        def query(self, *args, **kwargs):
-            return FakeQuery(self.responses)
-
-        @contextmanager
-        def begin_nested(self):
-            yield
-
-        def add(self, obj):
-            return None
-
-        def flush(self):
-            self.flush_attempts += 1
-            if self.flush_attempts == 1:
-                raise IntegrityError("insert", {}, Exception("duplicate counter scope"))
-
-    fake_db = FakeSession()
-
-    audit_ref, unit_code, ref_year, ref_sequence = quality_router._generate_audit_reference(
-        fake_db,
-        amo_id="amo-1",
-        target_date=date(2026, 3, 19),
-        reference_family="QAR",
-    )
-
-    assert audit_ref == "QAR/MO/26/001"
-    assert unit_code == "MO"
-    assert ref_year == 26
-    assert ref_sequence == 1
+def test_missing_counter_reconciles_issued_references_including_deleted_records(db_session):
+    from datetime import datetime, timezone
+    amo = account_models.AMO(amo_code="RECOVER", name="Recover", login_slug="recover")
+    db_session.add(amo)
+    db_session.flush()
+    db_session.add(quality_models.QMSAudit(amo_id=amo.id, domain=quality_models.QMSDomain.AMO, kind=quality_models.QMSAuditKind.INTERNAL, audit_ref="QAR/MO/26/009", reference_family="QAR", unit_code="MO", ref_year=26, ref_sequence=9, title="Deleted audit", deleted_at=datetime.now(timezone.utc)))
+    db_session.flush()
+    reference, _, _, sequence = quality_router._generate_audit_reference(db_session, amo_id=amo.id, target_date=date(2026, 3, 19))
+    assert reference == "QAR/MO/26/010"
+    assert sequence == 10
 
 
 def test_two_amos_with_same_display_unit_code_can_create_same_human_ref_without_collision(db_session):
@@ -203,3 +168,11 @@ def test_bulk_findings_endpoint_scopes_to_current_amo(db_session):
     findings = quality_router.list_findings_bulk(db=db_session, current_user=user_a, domain=quality_models.QMSDomain.AMO, audit_ids=None)
     assert len(findings) == 1
     assert findings[0].audit_id == audit_a.id
+
+
+def test_planned_date_does_not_override_server_reference_year(db_session):
+    amo = account_models.AMO(amo_code="SERVER", name="Server date", login_slug="server")
+    db_session.add(amo); db_session.flush()
+    reference, _, year, _ = quality_router._generate_audit_reference(db_session, amo_id=amo.id, target_date=date(2031, 12, 31))
+    assert reference == "QAR/MO/26/001"
+    assert year == 26

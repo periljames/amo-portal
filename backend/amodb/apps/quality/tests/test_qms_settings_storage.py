@@ -44,6 +44,8 @@ class SettingsDB:
 
 @pytest.fixture
 def context(monkeypatch):
+    monkeypatch.setattr(router, "sync_workflow_prefix", lambda *args: None)
+    monkeypatch.setattr(router, "lock_numbering", lambda *args: None)
     monkeypatch.setattr(router, "set_postgres_tenant_context", lambda *args, **kwargs: None)
     monkeypatch.setattr(router, "_table_columns", lambda db, table: db.columns)
     monkeypatch.setattr(router, "_log_qms_activity", lambda *args, **kwargs: None)
@@ -77,5 +79,22 @@ def test_rejects_non_object_configuration_before_writing(context):
     db = SettingsDB()
     with pytest.raises(HTTPException) as error:
         router.update_qms_settings(None, {"workflow_rules": ["invalid"]}, context, db)
+    assert error.value.status_code == 422
+    assert not db.committed
+
+
+def test_atomic_settings_conflict_preserves_current_values(context):
+    db = SettingsDB({"id": "existing", "payload": {"numbering_rules": {"audit_prefix": "NEW"}}})
+    with pytest.raises(HTTPException) as error:
+        router.update_qms_settings(None, {"numbering_rules": {"audit_prefix": "QA"}, "expected_settings": {"numbering_rules": {"audit_prefix": "OLD"}}}, context, db)
+    assert error.value.status_code == 409
+    assert not db.committed
+
+
+@pytest.mark.parametrize("rules", [{"audit_prefix": "A"}, {"car_prefix": "a/b"}, {"sequence_digits": 2}, {"sequence_digits": True}, {"car_prefix": "QAR"}, {"finding_prefix": ""}])
+def test_invalid_reference_formats_cannot_be_saved(context, rules):
+    db = SettingsDB()
+    with pytest.raises(HTTPException) as error:
+        router.update_qms_settings(None, {"numbering_rules": rules}, context, db)
     assert error.value.status_code == 422
     assert not db.committed

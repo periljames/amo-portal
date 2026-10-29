@@ -8,13 +8,15 @@ import EmailAddressList from "../../components/forms/EmailAddressList";
 import { validEmailList } from "../../components/forms/emailAddresses";
 import { qmsMailIdentityApi, type QmsMailIdentity, type QmsMailIdentityUpdate, type QmsMailTestResult } from "../../services/qmsMailIdentity";
 import "./qmsMailIdentity.css";
+import { SettingsFeedback, SettingsSaveButton } from "./QmsSettingsFeedback";
+import { settingsError } from "./settingsError";
 
 type SenderChoice = "SHARED" | "CUSTOM";
 type ReplyChoice = "QUALITY_ROLES" | "CUSTOM";
 
 const initialReason = "QMS mailing identity configuration approved by Quality management";
 
-export default function QmsMailIdentityPage(): React.ReactElement {
+export default function QmsMailIdentityPage({ embedded = false }: { embedded?: boolean } = {}): React.ReactElement {
   const { amoCode = "" } = useParams<{ amoCode: string }>();
   const [settings, setSettings] = useState<QmsMailIdentity | null>(null);
   const [draft, setDraft] = useState<QmsMailIdentityUpdate>({
@@ -47,7 +49,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
     try {
       apply(await qmsMailIdentityApi.get(amoCode));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(settingsError(cause, "Mail configuration could not be confirmed. Your entries are retained."));
     } finally {
       setLoading(false);
     }
@@ -58,7 +60,13 @@ export default function QmsMailIdentityPage(): React.ReactElement {
   const visibleFrom = senderChoice === "SHARED" ? (settings?.shared_sender || "") : draft.from_email;
   const domain = draft.from_email.includes("@") ? draft.from_email.split("@").pop()?.toLowerCase() || "" : "";
   const customApproved = senderChoice !== "CUSTOM" || (settings?.custom_domains.includes(domain) ?? false);
-  const canSave = Boolean(
+  const dirty = Boolean(settings && (
+    draft.from_name.trim() !== settings.from_name || draft.enabled !== settings.enabled
+    || senderChoice !== settings.sender_mode || replyChoice !== settings.reply_mode
+    || (senderChoice === "CUSTOM" && draft.from_email.trim() !== settings.from_email)
+    || (replyChoice === "CUSTOM" && draft.reply_to.trim() !== settings.reply_to)
+  ));
+  const canSave = Boolean(dirty &&
     settings?.can_manage && !loading && !busy && draft.from_name.trim().length >= 2
     && draft.reason.trim().length >= 8 && visibleFrom
     && customApproved && (senderChoice !== "CUSTOM" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.from_email))
@@ -79,9 +87,9 @@ export default function QmsMailIdentityPage(): React.ReactElement {
         reply_to: replyChoice === "QUALITY_ROLES" ? "" : draft.reply_to.trim(),
       });
       apply(result);
-      setNotice("QMS sender identity saved. Venspera continues to manage Resend credentials and verified domains.");
+      setNotice("QMS sender identity saved.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(settingsError(cause, "Mail configuration could not be confirmed. Your entries are retained."));
     } finally {
       setBusy(null);
     }
@@ -97,24 +105,23 @@ export default function QmsMailIdentityPage(): React.ReactElement {
       const result = await qmsMailIdentityApi.test(amoCode);
       setTestResult(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(settingsError(cause, "Mail configuration could not be confirmed. Your entries are retained."));
     } finally {
       setBusy(null);
     }
   };
 
-  return (
-    <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
-      <main className="qms-mail" aria-labelledby="qms-mail-title">
+  const Container = embedded ? "section" : "main";
+  const content = (
+      <Container className={`qms-mail${embedded ? " qms-mail--embedded" : ""}`} aria-labelledby="qms-mail-title">
         <header className="qms-mail__header">
           <div>
-            <h1 id="qms-mail-title">Notification mailing identity</h1>
+            {embedded ? <h2 id="qms-mail-title">Email sender & replies</h2> : <h1 id="qms-mail-title">Notification mailing identity</h1>}
           </div>
           <button type="button" onClick={() => void load()} disabled={loading || Boolean(busy)}><RefreshCw size={16} /> Refresh</button>
         </header>
 
-        {error && <div className="qms-mail__message qms-mail__message--error" role="alert">{error}</div>}
-        {notice && <div className="qms-mail__message" role="status">{notice}</div>}
+        {!settings && <SettingsFeedback message={error} error><button type="button" onClick={() => void load()}>Retry loading mail settings</button></SettingsFeedback>}
         {loading && <p><InlineLoading label={"Loading the tenant's current mail configuration…"}/></p>}
 
         {settings && !loading && (
@@ -134,7 +141,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
             {!settings.can_manage && <div className="qms-mail__message qms-mail__message--warning">Only your Quality Manager or tenant Administrator may change mailing settings.</div>}
 
             <div className="qms-mail__grid">
-              <form className="qms-mail__card" onSubmit={(event) => void save(event)}>
+              <form className="qms-mail__card" onChangeCapture={() => { setNotice(""); setError(""); }} onSubmit={(event) => void save(event)}>
                 <div className="qms-mail__card-heading"><MailCheck size={20} /><h2>Sending identity</h2></div>
                 <label className="qms-mail__field"><span>Display name</span>
                   <input value={draft.from_name} onChange={(e) => setDraft(v => ({ ...v, from_name: e.target.value }))} minLength={2} maxLength={150} disabled={!settings.can_manage || Boolean(busy)} required />
@@ -173,7 +180,7 @@ export default function QmsMailIdentityPage(): React.ReactElement {
                 <label className="qms-mail__field"><span>Configuration change reason</span>
                   <textarea rows={2} minLength={8} maxLength={500} required value={draft.reason} onChange={(e) => setDraft(v => ({ ...v, reason: e.target.value }))} disabled={!settings.can_manage || Boolean(busy)} />
                 </label>
-                <div className="qms-mail__actions"><button className="qms-mail__primary" type="submit" disabled={!canSave}>{busy === "save" ? "Saving…" : "Save mailing identity"}</button></div>
+                <SettingsFeedback message={error || notice} error={Boolean(error)} onDismiss={() => { setError(""); setNotice(""); }} /><div className="qms-mail__actions"><SettingsSaveButton type="submit" busy={busy === "save"} saved={Boolean(notice)} disabled={!canSave}>{busy === "save" ? "Saving..." : "Save mailing identity"}</SettingsSaveButton></div>
               </form>
 
               <aside className="qms-mail__side">
@@ -201,13 +208,13 @@ export default function QmsMailIdentityPage(): React.ReactElement {
                 <section className="qms-mail__card">
                   <h2>Governance</h2>
                   <p>Only Venspera assigns custom sender domains. Tenant Quality management controls its sender name, approved address, and Reply-To. Provider API keys never leave platform administration.</p>
-                  <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/settings`}>Back to QMS settings</Link>
+                  {!embedded && <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/settings`}>Back to QMS settings</Link>}
                 </section>
               </aside>
             </div>
           </>
         )}
-      </main>
-    </DepartmentLayout>
+      </Container>
   );
+  return embedded ? content : <DepartmentLayout amoCode={amoCode} activeDepartment="quality">{content}</DepartmentLayout>;
 }

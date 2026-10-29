@@ -698,34 +698,10 @@ def _derive_car_unit_code(db: Session, amo_id: Optional[str]) -> str:
 def _next_car_number(db: Session, program: CARProgram, amo_id: Optional[str] = None) -> str:
     if not amo_id:
         raise ValueError("amo_id is required for CAR numbering")
-    today = date.today()
-    family = "CAR" if program == CARProgram.QUALITY else "RCAR"
-    unit_code = _derive_car_unit_code(db, amo_id)
-    ref_year = today.year % 100
-    counter = (
-        db.query(models.QMSAuditReferenceCounter)
-        .filter(
-            models.QMSAuditReferenceCounter.amo_id == amo_id,
-            models.QMSAuditReferenceCounter.reference_family == family,
-            models.QMSAuditReferenceCounter.unit_code == unit_code,
-            models.QMSAuditReferenceCounter.ref_year == ref_year,
-        )
-        .with_for_update(nowait=False)
-        .first()
-    )
-    if not counter:
-        counter = models.QMSAuditReferenceCounter(
-            amo_id=amo_id,
-            reference_family=family,
-            unit_code=unit_code,
-            ref_year=ref_year,
-            last_value=0,
-        )
-        db.add(counter)
-        db.flush()
-    counter.last_value += 1
-    counter.updated_at = datetime.now(timezone.utc)
-    return f"{family}/{unit_code}/{ref_year:02d}/{counter.last_value:03d}"
+    from .numbering import read_rules, reserve_reference
+    rules = read_rules(db, amo_id)
+    family = rules.get("car_prefix", "CAR") if program == CARProgram.QUALITY else rules.get("reliability_car_prefix", "RCAR")
+    return reserve_reference(db, amo_id=amo_id, family=family, unit=_derive_car_unit_code(db, amo_id), digits=rules.get("sequence_digits", 3), date_format=rules.get("date_format", "YY"))
 
 
 def create_car(
@@ -788,12 +764,14 @@ def add_car_action(
     action_type: CARActionType,
     message: str,
     actor_user_id: Optional[str],
+    visibility: str = "INTERNAL",
 ) -> models.CARActionLog:
     log = models.CARActionLog(
         car=car,
         action_type=action_type,
         message=message,
         actor_user_id=actor_user_id,
+        visibility=visibility,
     )
     db.add(log)
     return log
@@ -833,6 +811,7 @@ def generate_car_form_pdf(
     invite_url: str,
     requested_by_name: Optional[str] = None,
     assigned_to_name: Optional[str] = None,
+    archive_copy: bool = False,
 ) -> Path:
     if importlib.util.find_spec("reportlab") is None:
         raise RuntimeError(
@@ -847,7 +826,7 @@ def generate_car_form_pdf(
     from reportlab.lib.utils import simpleSplit  # type: ignore[import-not-found]
     from reportlab.pdfgen import canvas  # type: ignore[import-not-found]
 
-    output_path = CAR_FORM_OUTPUT_DIR / f"car_form_{car.id}.pdf"
+    output_path = CAR_FORM_OUTPUT_DIR / (f"car_form_archive_{car.id}.pdf" if archive_copy else f"car_form_{car.id}.pdf")
     page_width, page_height = letter
     pdf = canvas.Canvas(str(output_path), pagesize=letter)
 
@@ -896,22 +875,27 @@ def generate_car_form_pdf(
             pdf.showPage()
             cursor_y = page_height - margin
 
-    qr_widget = qr.QrCodeWidget(invite_url)
-    bounds = qr_widget.getBounds()
-    qr_width = bounds[2] - bounds[0]
-    qr_height = bounds[3] - bounds[1]
-    qr_size = 1.4 * inch
-    drawing = Drawing(
-        qr_size,
-        qr_size,
-        transform=[qr_size / qr_width, 0, 0, qr_size / qr_height, 0, 0],
-    )
-    drawing.add(qr_widget)
-    qr_x = page_width - margin - qr_size
-    qr_y = margin
-    renderPDF.draw(drawing, pdf, qr_x, qr_y)
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(qr_x, qr_y - 0.2 * inch, "Scan to access CAR online")
+    if invite_url and not archive_copy:
+        qr_widget = qr.QrCodeWidget(invite_url)
+        bounds = qr_widget.getBounds()
+        qr_width = bounds[2] - bounds[0]
+        qr_height = bounds[3] - bounds[1]
+        qr_size = 1.4 * inch
+        drawing = Drawing(
+            qr_size,
+            qr_size,
+            transform=[qr_size / qr_width, 0, 0, qr_size / qr_height, 0, 0],
+        )
+        drawing.add(qr_widget)
+        qr_x = page_width - margin - qr_size
+        qr_y = margin
+        renderPDF.draw(drawing, pdf, qr_x, qr_y)
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(qr_x, qr_y - 0.2 * inch, "Scan to access CAR online")
+    
+    else:
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(margin, margin, "Controlled archive copy - access through authorized Quality workspace.")
 
     pdf.showPage()
     pdf.save()

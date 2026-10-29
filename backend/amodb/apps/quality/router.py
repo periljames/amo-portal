@@ -1,5 +1,6 @@
 # backend/amodb/apps/quality/router.py
 from __future__ import annotations
+from .numbering import server_date as reference_server_date, read_rules as read_reference_rules, reference_date as format_reference_date
 
 from amodb.utils.download_names import download_name
 
@@ -22,7 +23,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Request, Response, Header, Form, Body
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import and_, func, or_, cast, String
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, lazyload
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from amodb.entitlements import require_module
@@ -430,42 +431,13 @@ def _generate_audit_reference(
     if not amo_id:
         raise HTTPException(status_code=400, detail="AMO scope is required to generate audit references")
 
+    from .numbering import read_rules, reserve_reference, server_date
+    rules = read_rules(db, amo_id)
     unit_code = _normalize_scope_code(audit_scope_code) or "MO"
-    ref_year = (target_date or date.today()).year % 100
-    for _ in range(5):
-        counter = (
-            db.query(models.QMSAuditReferenceCounter)
-            .filter(
-                models.QMSAuditReferenceCounter.amo_id == amo_id,
-                models.QMSAuditReferenceCounter.reference_family == reference_family,
-                models.QMSAuditReferenceCounter.unit_code == unit_code,
-                models.QMSAuditReferenceCounter.ref_year == ref_year,
-            )
-            .with_for_update()
-            .first()
-        )
-        if counter:
-            counter.last_value += 1
-            ref_sequence = counter.last_value
-            audit_ref = f"{reference_family}/{unit_code}/{ref_year:02d}/{ref_sequence:03d}"
-            return audit_ref, unit_code, ref_year, ref_sequence
-
-        try:
-            with db.begin_nested():
-                db.add(
-                    models.QMSAuditReferenceCounter(
-                        amo_id=amo_id,
-                        reference_family=reference_family,
-                        unit_code=unit_code,
-                        ref_year=ref_year,
-                        last_value=0,
-                    )
-                )
-                db.flush()
-        except IntegrityError:
-            continue
-
-    raise HTTPException(status_code=409, detail="Unable to reserve an audit reference. Please retry.")
+    issued_on = server_date()
+    ref_year = issued_on.year % 100
+    reference = reserve_reference(db, amo_id=amo_id, family=reference_family, unit=unit_code, issued_on=issued_on, digits=rules.get("sequence_digits", 3), date_format=rules.get("date_format", "YY"))
+    return reference, unit_code, ref_year, int(reference.rsplit("/", 1)[1])
 
 
 def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -> date:
@@ -565,7 +537,7 @@ def _normalized_upload_mime(file: UploadFile) -> str:
     return (file.content_type or "").split(";", 1)[0].strip().lower()
 
 
-def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
+def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str) -> tuple[str, str, str, int]:
     original_name = _sanitize_attachment_filename(file.filename or "attachment.bin")
     ext = Path(original_name).suffix.lower()
     mime = _normalized_upload_mime(file)
@@ -597,7 +569,12 @@ def _store_car_attachment(car_id: UUID, file: UploadFile) -> tuple[Path, str, st
         target_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Attachment is empty.")
 
-    return target_path, original_name, digest.hexdigest(), total
+    from .car_rca_storage import store_car_file
+    try:
+        object_uri = store_car_file(target_path, amo_id=amo_id, car_id=car_id, content_type=mime)
+    finally:
+        target_path.unlink(missing_ok=True)
+    return object_uri, original_name, digest.hexdigest(), total
 
 
 def _store_finding_attachment(finding_id: UUID, file: UploadFile) -> tuple[Path, str, str, int]:
@@ -782,6 +759,10 @@ def _audit_reference_family_for_amo(
     amo_id: str,
     actor_user_id: Optional[str] = None,
 ) -> str:
+    from .numbering import read_rules
+    override = read_rules(db, amo_id).get("audit_prefix")
+    if override:
+        return _normalize_audit_reference_family(override)
     settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=actor_user_id)
     return _normalize_audit_reference_family(getattr(settings, "audit_reference_family", None))
 
@@ -792,8 +773,16 @@ def _scope_out(
     issued_this_year: int = 0,
     next_sequence: int = 1,
     last_value: int = 0,
+    reference_family: str = "QAR",
+    reference_rules: Optional[dict] = None,
 ) -> QMSAuditScopeOut:
+    rules = reference_rules or {}
+    date_label = format_reference_date(reference_server_date(), rules.get("date_format", "YY"))
+    digits = rules.get("sequence_digits", 3)
     return QMSAuditScopeOut(
+        reference_date_label=date_label,
+        sequence_digits=digits,
+        next_reference=f"{reference_family}/{scope.code}/{date_label}/{max(1, int(next_sequence or 1)):0{digits}d}",
         id=scope.id,
         amo_id=scope.amo_id,
         code=scope.code,
@@ -1897,6 +1886,8 @@ def update_quality_workflow_settings(
     if not _is_quality_admin(current_user):
         raise HTTPException(status_code=403, detail="Only Quality Managers or AMO Admins can update Quality workflow settings")
     amo_id = str(_current_amo_id(current_user))
+    from .numbering import lock_numbering
+    lock_numbering(db, amo_id)
     settings = _get_or_create_workflow_settings(db, amo_id=amo_id, actor_user_id=current_user.id)
     data = payload.model_dump(exclude_unset=True)
     before = _settings_out(settings).model_dump(mode="json")
@@ -1916,6 +1907,8 @@ def update_quality_workflow_settings(
         settings.auto_escalation_enabled = bool(data["auto_escalation_enabled"])
     if "audit_reference_family" in data and data["audit_reference_family"] is not None:
         settings.audit_reference_family = _normalize_audit_reference_family(data["audit_reference_family"])
+        from .numbering import sync_legacy_prefix
+        sync_legacy_prefix(db, amo_id, settings.audit_reference_family, current_user.id)
     settings.updated_by_user_id = current_user.id
     audit_services.log_event(
         db,
@@ -3161,7 +3154,7 @@ def list_audit_scopes(
         query = query.filter(models.QMSAuditScope.is_active == active)
     scopes = query.order_by(models.QMSAuditScope.sort_order.asc(), models.QMSAuditScope.code.asc()).all()
     family = _audit_reference_family_for_amo(db, amo_id=str(amo_id), actor_user_id=current_user.id)
-    ref_year = date.today().year % 100
+    ref_year = reference_server_date().year % 100
     usage = _scope_usage_by_code(
         db,
         amo_id=str(amo_id),
@@ -3169,9 +3162,10 @@ def list_audit_scopes(
         ref_year=ref_year,
         scope_codes=[str(scope.code) for scope in scopes],
     )
+    reference_rules = read_reference_rules(db, str(amo_id))
     return [
         _scope_out(
-            scope,
+            scope, reference_family=family, reference_rules=reference_rules,
             issued_this_year=usage.get(str(scope.code).upper(), (0, 1, 0))[0],
             next_sequence=usage.get(str(scope.code).upper(), (0, 1, 0))[1],
             last_value=usage.get(str(scope.code).upper(), (0, 1, 0))[2],
@@ -3217,10 +3211,10 @@ def create_audit_scope(
         db,
         amo_id=str(amo_id),
         reference_family=family,
-        ref_year=date.today().year % 100,
+        ref_year=reference_server_date().year % 100,
         scope_codes=[str(scope.code)],
     ).get(str(scope.code).upper(), (0, 1, 0))
-    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
+    return _scope_out(scope, reference_family=family, reference_rules=read_reference_rules(db, str(amo_id)), issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 @router.patch("/audits/scopes/{scope_id}", response_model=QMSAuditScopeOut)
@@ -3267,10 +3261,10 @@ def update_audit_scope(
         db,
         amo_id=str(amo_id),
         reference_family=family,
-        ref_year=date.today().year % 100,
+        ref_year=reference_server_date().year % 100,
         scope_codes=[str(scope.code)],
     ).get(str(scope.code).upper(), (0, 1, 0))
-    return _scope_out(scope, issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
+    return _scope_out(scope, reference_family=family, reference_rules=read_reference_rules(db, str(amo_id)), issued_this_year=usage[0], next_sequence=usage[1], last_value=usage[2])
 
 
 # -----------------------------
@@ -4920,7 +4914,6 @@ def update_audit(
             setattr(audit, field, changes[field])
             if field == "planned_start":
                 planned_start_changed = True
-                reference_needs_regeneration = True
 
     if prospective_start is not None:
         audit.planned_start_time = prospective_start_time
@@ -5018,24 +5011,19 @@ def update_audit(
 
 
 def _next_audit_finding_ref(db: Session, audit: models.QMSAudit) -> str:
+    from .numbering import lock_numbering, read_rules
+    lock_numbering(db, f"{audit.amo_id}:finding:{audit.id}")
+    rules = read_rules(db, audit.amo_id)
     prefix = (audit.audit_ref or "QAR").strip() or "QAR"
-    max_seq = 0
-    refs = (
-        db.query(models.QMSAuditFinding.finding_ref)
-        .filter(
-            models.QMSAuditFinding.amo_id == audit.amo_id,
-            models.QMSAuditFinding.audit_id == audit.id,
-        )
-        .all()
-    )
-    for (ref,) in refs:
-        match = re.search(r"(?:F|FIND)[-/]?(\d+)$", ref or "", re.IGNORECASE)
-        if match:
-            try:
-                max_seq = max(max_seq, int(match.group(1)))
-            except ValueError:
-                continue
-    return f"{prefix}-F-{max_seq + 1:03d}"[:64]
+    marker = rules.get("finding_prefix", "F")
+    digits = rules.get("sequence_digits", 3)
+    stem = f"{prefix}-{marker}-"
+    refs = db.query(models.QMSAuditFinding.finding_ref).filter(models.QMSAuditFinding.amo_id == audit.amo_id, models.QMSAuditFinding.audit_id == audit.id).all()
+    maximum = max((int(ref[len(stem):]) for (ref,) in refs if ref and ref.startswith(stem) and ref[len(stem):].isdigit()), default=0)
+    reference = f"{stem}{maximum + 1:0{digits}d}"
+    if len(reference) > 64:
+        raise HTTPException(422, "The finding reference exceeds 64 characters. Shorten the configured prefix.")
+    return reference
 
 
 def _car_priority_for_finding_level(level: FindingLevel) -> models.CARPriority:
@@ -6188,7 +6176,7 @@ def list_car_assignees(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     q = (
-        db.query(account_models.User, account_models.Department)
+        db.query(account_models.User, account_models.Department).options(lazyload("*"))
         .outerjoin(
             account_models.Department,
             and_(
@@ -6243,6 +6231,26 @@ def update_car(
     data = payload.model_dump(exclude_unset=True)
     if not data:
         return car
+
+    # Closure timestamps and governed deadlines are decisions with their own
+    # permission, evidence and audit workflows. Generic CAR edits must not
+    # manufacture a closure timestamp or rewrite an approved control schedule.
+    if "closed_at" in data:
+        raise HTTPException(
+            status_code=409,
+            detail="The CAR closure timestamp is system-managed. Complete closure through the authorized CAR workflow.",
+        )
+    if {"due_date", "target_closure_date"} & data.keys():
+        from .car_control_loop_models import QualityCARControlProfile
+        governed = db.query(QualityCARControlProfile.id).filter(
+            QualityCARControlProfile.amo_id == car.amo_id,
+            QualityCARControlProfile.car_id == car.id,
+        ).first()
+        if governed is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Governed CAR deadlines can only be amended through a controlled deadline-change request and approval.",
+            )
 
     previous_assignee = car.assigned_to_user_id
     changed_status = False
@@ -6860,6 +6868,8 @@ def get_car_invite_by_token(invite_token: str, request: Request, db: Session = D
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return _car_invite_payload(car, request=request, db=db)
 
 
@@ -6879,6 +6889,8 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
     text_fields = {
@@ -6924,6 +6936,10 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     # the same CAR from appearing twice.
     latest_existing = _car_invite_latest_response(db, car.id)
     if latest_existing is not None and _car_response_was_recalled(db, car.id, latest_existing) and not _car_submission_was_opened(db, car.id, latest_existing):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest_existing, reason="Earlier recalled submission superseded by a replacement.")
         db.delete(latest_existing)
         db.flush()
 
@@ -6934,13 +6950,9 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     if _car_has_evidence(db, car):
         car.evidence_received_at = submitted_at
 
-    add_car_action(
-        db=db,
-        car=car,
-        action_type=models.CARActionType.COMMENT,
-        message="Auditee submitted CAR response via invite link",
-        actor_user_id=None,
-    )
+    from .car_feedback import record_shared_feedback
+    record_shared_feedback(db, car, "Auditee submitted CAR response via invite link",
+        actor_name=payload.submitted_by_name or "Invited respondent", actor_kind="AUDITEE")
 
     response = models.CARResponse(
         car_id=car.id,
@@ -7011,12 +7023,18 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     state = _car_invite_state(db, car)
     if not state["can_recall"]:
         raise HTTPException(status_code=409, detail=state["locked_reason"] or "This submission can no longer be recalled.")
 
     latest = _car_invite_latest_response(db, car.id)
     if latest is not None and not _car_submission_was_opened(db, car.id, latest):
+        from .car_rca_router import retain_recalled_car_response
+        from .tenant_security import set_postgres_tenant_context
+        set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+        retain_recalled_car_response(db, car, latest, reason="Respondent recalled submitted CAR before Quality opened the review.")
         db.delete(latest)
         db.flush()
 
@@ -7026,13 +7044,9 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
     car.capa_status = "PENDING"
     from .car_response_workflow import sync_response_milestones
     sync_response_milestones(db, car, actor_user_id=None)
-    add_car_action(
-        db=db,
-        car=car,
-        action_type=models.CARActionType.COMMENT,
-        message=f"{CAR_INVITE_RECALLED_PREFIX} before auditor review",
-        actor_user_id=None,
-    )
+    from .car_feedback import record_shared_feedback
+    record_shared_feedback(db, car, f"{CAR_INVITE_RECALLED_PREFIX} before auditor review",
+        actor_name="Invited respondent", actor_kind="AUDITEE")
     audit = None
     if car.finding_id:
         audit = _audit_for_finding(db, car.finding_id, amo_id=car.amo_id)
@@ -7080,6 +7094,8 @@ def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return [_serialize_attachment(invite_token, attachment) for attachment in car.attachments]
 
 
@@ -7101,9 +7117,11 @@ def upload_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
 
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
@@ -7139,6 +7157,8 @@ def update_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7169,6 +7189,8 @@ def delete_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
     attachment = (
         db.query(models.CARAttachment)
@@ -7177,10 +7199,10 @@ def delete_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     remaining_attachment = (
         db.query(models.CARAttachment.id)
@@ -7209,6 +7231,8 @@ def download_car_invite_attachment(
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     attachment = (
         db.query(models.CARAttachment)
         .filter(
@@ -7219,9 +7243,8 @@ def download_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(
         path=file_path,
         filename=attachment.filename,
@@ -7238,6 +7261,8 @@ def download_car_invite_form(invite_token: str, request: Request, db: Session = 
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     try:
         payload = _car_invite_payload(car, request=request, db=db)
         output_path = generate_car_form_pdf(car, invite_url=str(payload.get("invite_url") or ""))
@@ -7259,12 +7284,16 @@ def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
     )
     if not car:
         raise HTTPException(status_code=404, detail="Invite not found")
-    return (
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
+    rows = (
         db.query(models.CARActionLog)
         .filter(models.CARActionLog.car_id == car.id)
+        .filter(models.CARActionLog.visibility == "SHARED")
         .order_by(models.CARActionLog.created_at.desc())
         .all()
     )
+    return [CARActionOut.model_validate(row).model_copy(update={"actor_user_id": None}) for row in rows]
 
 
 @router.get("/cars/{car_id}/attachments", response_model=List[CARAttachmentOut])
@@ -7333,7 +7362,7 @@ def upload_car_attachment(
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="Closed or cancelled CAR evidence is read-only.")
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file)
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
         car_id=car.id,
@@ -7383,9 +7412,8 @@ def download_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    file_path = Path(attachment.file_ref)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing on server.")
+    from .car_rca_storage import car_attachment_path
+    file_path = car_attachment_path(attachment.file_ref, car_id=car.id, expected_sha256=attachment.sha256)
     return FileResponse(path=file_path, filename=attachment.filename, media_type=attachment.content_type or "application/octet-stream")
 
 
@@ -7403,10 +7431,10 @@ def delete_car_attachment(
     attachment = db.query(models.CARAttachment).filter(models.CARAttachment.id == attachment_id, models.CARAttachment.car_id == car.id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    try:
-        Path(attachment.file_ref).unlink(missing_ok=True)
-    except Exception:
-        pass
+    from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
+    if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
+        raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
     db.delete(attachment)
     audit_services.log_event(
         db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="qms_car_attachment", entity_id=str(attachment_id), action="deleted", metadata=_audit_metadata(request)
@@ -7597,6 +7625,14 @@ def review_car_response(
         car.capa_review_note = (payload.capa_review_note or "").strip() or None
 
     _, outcome = _sync_car_review_state(db, car, actor_user_id=get_actor())
+    from .car_feedback import record_shared_feedback, feedback_changed
+    # Snapshot each decision/reason before a later review can replace current fields.
+    for label, decision, reason in (
+        ("Root cause", payload.root_cause_status, payload.root_cause_review_note),
+        ("Corrective action plan", payload.capa_status, payload.capa_review_note),
+    ):
+        if decision:
+            record_shared_feedback(db, car, f"{label}: {decision}. {(reason or '').strip()}", user=current_user)
     if outcome == "closed":
         note_msg = f"CAR {car.car_number} accepted and closed. The linked finding was verified."
     elif outcome == "accepted_pending_evidence":
@@ -7626,13 +7662,7 @@ def review_car_response(
         )
 
     if payload.message:
-        add_car_action(
-            db=db,
-            car=car,
-            action_type=models.CARActionType.COMMENT,
-            message=payload.message.strip(),
-            actor_user_id=get_actor(),
-        )
+        record_shared_feedback(db, car, payload.message.strip(), user=current_user)
 
     if note_msg:
         _notify_user(
@@ -7660,6 +7690,7 @@ def review_car_response(
     )
     db.commit()
     db.refresh(car)
+    feedback_changed(car, current_user.id)
     return car
 
 
@@ -7843,6 +7874,8 @@ def add_car_action_log(
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
+    if payload.action_type != models.CARActionType.COMMENT or not payload.message.strip():
+        raise HTTPException(status_code=422, detail="Activity comments cannot manufacture system decisions or empty history entries.")
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
 

@@ -936,6 +936,7 @@ class CorrectiveActionRequest(Base):
 
 class CARActionLog(Base):
     __tablename__ = "quality_car_actions"
+    __table_args__ = (UniqueConstraint("car_id", "client_message_id", name="uq_car_activity_client_message"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
@@ -954,6 +955,12 @@ class CARActionLog(Base):
     )
     message = Column(Text, nullable=False)
     actor_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
+
+    # Existing activity stays internal unless deliberately shared with the invite holder.
+    visibility = Column(String(16), nullable=False, default="INTERNAL", server_default="INTERNAL")
+    actor_kind = Column(String(16), nullable=False, default="STAFF", server_default="STAFF")
+    actor_name = Column(String(255), nullable=True)
+    client_message_id = Column(String(80), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 

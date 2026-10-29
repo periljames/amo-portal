@@ -32,7 +32,6 @@ import {
   canManageAuditScopes,
   DEFAULT_AUDIT_REFERENCE_FAMILY,
   emptyAuditScopeForm,
-  formatAuditReferenceExample,
   normalizeAuditReferenceFamily,
   type AuditScopeDefaultKind,
   type AuditScopeFormState,
@@ -124,7 +123,9 @@ const QualityAuditScopesPage: React.FC = () => {
   const inactiveCount = scopes.length - activeCount;
   const exampleScopeCode = selectedScope?.code || form?.code || "SCOPE";
   const exampleSequence = selectedScope?.next_sequence ?? 1;
-  const liveExample = formatAuditReferenceExample(referenceFamily, exampleScopeCode, new Date().getFullYear(), exampleSequence);
+  const referenceTemplate = selectedScope || scopes[0];
+  const referenceExample = (code: string, sequence: number) => referenceTemplate?.reference_date_label ? `${referenceFamily}/${code}/${referenceTemplate.reference_date_label}/${String(sequence).padStart(referenceTemplate.sequence_digits || 3, "0")}` : "Server reference preview unavailable";
+  const liveExample = referenceExample(exampleScopeCode, exampleSequence);
 
   const saveScope = useMutation({
     mutationFn: async (next: AuditScopeFormState) => {
@@ -369,7 +370,7 @@ const QualityAuditScopesPage: React.FC = () => {
                   <div><dt>Default audit type</dt><dd>{humanise(selectedScope.default_kind)}</dd></div>
                   <div><dt>Sort order</dt><dd>{selectedScope.sort_order}</dd></div>
                   <div><dt>Issued this year</dt><dd>{selectedScope.issued_this_year ?? 0}</dd></div>
-                  <div><dt>Next reference</dt><dd><code>{formatAuditReferenceExample(referenceFamily, selectedScope.code, new Date().getFullYear(), selectedScope.next_sequence ?? 1)}</code></dd></div>
+                  <div><dt>Next reference</dt><dd><code>{referenceExample(selectedScope.code, selectedScope.next_sequence ?? 1)}</code></dd></div>
                   <div><dt>Counter last value</dt><dd>{selectedScope.last_value ?? 0}</dd></div>
                   <div><dt>Description</dt><dd>{selectedScope.description || "No description recorded."}</dd></div>
                 </dl>

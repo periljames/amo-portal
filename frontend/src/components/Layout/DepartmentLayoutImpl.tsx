@@ -4,6 +4,8 @@ import React, {
   useMemo,
   useRef,
   useState,
+  lazy,
+  Suspense,
 } from "react";
 import PortalUpdateMenuItem from "../feedback/PortalUpdateMenuItem";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -22,6 +24,7 @@ import {
   FileText,
   Gauge,
   GraduationCap,
+  Grid2X2,
   Home,
   LogOut,
   Mail,
@@ -73,6 +76,8 @@ import { BrandLogo } from "../Brand/BrandLogo";
 import { BrandProvider } from "../Brand/BrandProvider";
 import LiveStatusIndicator from "../realtime/LiveStatusIndicator";
 import { MessagingHeaderLaunchers } from "../messaging/MessagingHub";
+import { getPortalApps } from "../../app/portalApps";
+const PortalAppSelector = lazy(() => import("./PortalAppSelector"));
 
 type Props = {
   amoCode: string;
@@ -365,6 +370,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
   const { density, setDensity, motion, setMotion } = usePortalAppearance();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [appsOpen, setAppsOpen] = useState(false);
   const [pinned, setPinned] = useState(() => readBoolean(pinnedKey, false));
   const [wideNavigation, setWideNavigation] = useState(() => window.matchMedia("(min-width: 901px)").matches);
   const pinnedVisible = pinned && wideNavigation;
@@ -402,8 +408,11 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
       activeDepartment,
       adminModeActive: Boolean(adminProfile?.active),
     }),
-    [activeDepartment, adminProfile?.active, amoCode, currentUser, standingAdmin],
+    [activeDepartment, adminProfile?.active, amoCode, currentUser],
   );
+  const apps = getPortalApps({amoCode,user:currentUser,contextDepartment:activeDepartment,adminModeActive:Boolean(adminProfile?.active)});
+  const openApps = () => { setDrawerOpen(false); setProfileOpen(false); setAppsOpen(true); };
+  const closeApps = () => {setAppsOpen(false);requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.tenant-shell__topbar button[aria-label="Switch app"]')?.focus({preventScroll:true}));};
   const leaves = useMemo(() => leafItems(navigation), [navigation]);
   const homePath = navigation[0]?.items.find((item) => item.id === "home")?.path || `/maintenance/${encodeURIComponent(amoCode)}`;
   const assignedWorkPath = leaves.find((item) => item.path.includes("/inbox/"))?.path || homePath;
@@ -646,7 +655,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               id="tenant-navigation"
               aria-label={activeDepartment === "quality" ? "QMS navigation" : "Portal navigation drawer"}
               aria-hidden={!drawerVisible}
-              inert={!drawerVisible}
+              inert={!drawerVisible || appsOpen}
               role={!pinnedVisible ? "dialog" : undefined}
               aria-modal={!pinnedVisible && drawerVisible ? true : undefined}
             >
@@ -669,6 +678,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               </header>
 
               <div className="tenant-shell__nav-tools">
+                <button type="button" className="tenant-shell__apps-button" onClick={openApps}><Grid2X2 size={18}/> Apps <ChevronRight size={14}/></button>
                 <label className="tenant-shell__search">
                   <Search size={15} aria-hidden="true" />
                   <span className="sr-only">Search navigation</span>
@@ -697,7 +707,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
               {pinnedVisible ? <button type="button" className="tenant-shell__resize-handle" onPointerDown={startResize} aria-label="Resize navigation" title="Drag to resize navigation" /> : null}
             </aside>
 
-            <div className="tenant-shell__workspace" inert={drawerOpen && !pinnedVisible}>
+            <div className="tenant-shell__workspace" inert={appsOpen || (drawerOpen && !pinnedVisible)}>
               <header className="tenant-shell__topbar">
                 <div className="tenant-shell__topbar-start">
                   <button type="button" className="tenant-shell__menu-button" onClick={() => pinnedVisible ? setPinned(false) : setDrawerOpen((value) => !value)} aria-label={drawerVisible ? "Close navigation" : "Open navigation"} aria-expanded={drawerVisible} aria-controls="tenant-navigation">
@@ -712,6 +722,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                 </div>
 
                 <div className="tenant-shell__topbar-actions">
+                  <button type="button" className="tenant-shell__apps-button" onClick={openApps} aria-label="Switch app" title="Switch app"><Grid2X2 size={18}/><span>Apps</span></button>
                   <LiveStatusIndicator compact />
                   <button type="button" className="tenant-shell__icon-button tenant-shell__assigned-work" onClick={() => navigateFromDrawer(assignedWorkPath)} aria-label="Assigned work" title="Assigned work"><ClipboardCheck size={17} /></button>
                   <MessagingHeaderLaunchers />
@@ -728,6 +739,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                     {profileOpen ? (
                       <div className="tenant-shell__profile-menu" role="menu">
                         <PortalUpdateMenuItem />
+                        <button type="button" role="menuitem" onClick={openApps}><Grid2X2 size={15}/> Switch app</button>
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(assignedWorkPath); }}><ClipboardCheck size={15} /> Assigned work</button>
                         <button type="button" role="menuitem" onClick={() => { setProfileOpen(false); navigate(`/maintenance/${encodeURIComponent(amoCode)}/profile`); }}><User size={15} /> View profile</button>
                         {adminProfile?.eligible || standingAdmin ? (
@@ -801,7 +813,7 @@ const DepartmentLayoutImpl: React.FC<Props> = ({
                 </div>
               </main>
             </div>
-
+            {appsOpen ? <div className="portal-apps-boundary"><PortalErrorBoundary inline title="Apps could not be opened" onExit={closeApps} exitLabel="Back to work"><Suspense fallback={<div className="portal-apps-loading" role="status">Opening apps… <button type="button" onClick={closeApps}>Cancel</button></div>}><PortalAppSelector apps={apps} pathname={location.pathname} tenantName={brand.name || amoCode.toUpperCase()} onClose={closeApps} onSelect={path=>{setAppsOpen(false);navigate(path);}}/></Suspense></PortalErrorBoundary></div> : null}
           </div>
         )}
       </BrandContext.Consumer>

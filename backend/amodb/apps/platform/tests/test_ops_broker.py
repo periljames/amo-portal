@@ -30,9 +30,13 @@ def test_broker_refresh_rate_is_independent_of_subscriber_count():
 
         await asyncio.gather(*(consume_one() for _ in range(100)))
         await asyncio.sleep(0.08)
-        health = broker.health()
+        live_health = broker.health()
+        assert live_health["running"] is True
+        # Capture final counters only after quiescing the asynchronous producer.
+        # Otherwise another refresh may begin between health() and stop() and
+        # invalidate an exact count even though each refresh is correctly counted.
         await broker.stop()
-        return health
+        return broker.health()
 
     health = asyncio.run(scenario())
     assert calls < 20, "100 subscribers must not produce 100x refresh work"

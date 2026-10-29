@@ -154,8 +154,8 @@ export async function qmsAddCarAction(carId: string, payload: CARActionCreate): 
 export async function qmsRequestCarAccess(carId: string, message?: string): Promise<CARActionOut> {
   const cleanMessage = (message || "I can support resolution of this CAR. Please review and assign write access if appropriate.").trim();
   return qmsAddCarAction(carId, {
-    action_type: "ASSIGNMENT",
-    message: cleanMessage || "CAR access requested.",
+    action_type: "COMMENT",
+    message: `Access request: ${cleanMessage || "CAR access requested."}`,
   });
 }
 

@@ -39,16 +39,18 @@ export type QmsMailTestResult = {
 
 export const qmsMailIdentityApi = {
   get: (amoCode: string) =>
-    apiRequest<QmsMailIdentity>(qualityPath(amoCode, "/mail-identity"), { cacheTtlMs: 0 }),
+    apiRequest<QmsMailIdentity>(qualityPath(amoCode, "/mail-identity"), { cacheTtlMs: 0, headers: { "X-AMO-Silent-Error": "1" } }),
   save: (amoCode: string, change: QmsMailIdentityUpdate) =>
     apiRequest<QmsMailIdentity>(qualityPath(amoCode, "/mail-identity"), {
       method: "PUT",
+      headers: { "X-AMO-Silent-Error": "1" },
       body: JSON.stringify(change),
       cacheTtlMs: 0,
     }),
   test: (amoCode: string) =>
     apiRequest<QmsMailTestResult>(qualityPath(amoCode, "/mail-identity/test"), {
       method: "POST",
+      headers: { "X-AMO-Silent-Error": "1" },
       cacheTtlMs: 0,
     }),
 };

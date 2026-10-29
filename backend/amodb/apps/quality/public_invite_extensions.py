@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import Field
 from sqlalchemy import text
@@ -42,6 +42,7 @@ class CARInviteWithAuditReportOut(CARInviteOut):
 
     audit_report_download_url: Optional[str] = Field(default=None, max_length=1024)
     deadline_change_requires_review: bool = False
+    structured_rca_required: bool = False
 
 
 _extension_router = APIRouter(prefix="/quality", tags=["Quality / Public CAR"])
@@ -65,6 +66,8 @@ def _car_for_token(db: Session, invite_token: str, *, lock: bool = False) -> mod
     car = (query.with_for_update(of=models.CorrectiveActionRequest) if lock else query).first()
     if not car:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
+    from .car_rca_router import assert_invite_access
+    assert_invite_access(db, car)
     return car
 
 
@@ -175,10 +178,20 @@ def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, paylo
 def get_car_invite_with_report(
     invite_token: str,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Referrer-Policy"] = "no-referrer"
     car = _car_for_token(db, invite_token)
     payload = _car_invite_payload(car, request=request, db=db)
+    # A bearer token must not mint access to sibling CARs. Multiple-CAR access
+    # uses only tokens explicitly delivered to the responder.
+    payload["related_cars"] = []
+    from .tenant_security import set_postgres_tenant_context
+    from .car_rca_router import structured_rca_required
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+    payload["structured_rca_required"] = structured_rca_required(db, car)
     audit = _audit_for_car(car)
     report_path = _issued_report_path(db, audit)
     payload["audit_report_download_url"] = (
@@ -210,6 +223,15 @@ def submit_car_invite_with_detailed_response(
     ):
         raise HTTPException(status_code=409, detail="The agreed CAR deadline requires a Quality extension decision. Submit your response without changing the deadline.")
     _persist_detailed_response_fields(car, payload)
+    # Keep structured RCA submission in the existing CAR response transaction,
+    # without requiring legacy CARs to invent causal nodes retroactively.
+    from .tenant_security import set_postgres_tenant_context
+    from .car_rca_router import submit_rca_document
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+    submit_rca_document(
+        db, car, payload.root_cause if payload.root_cause is not None else car.root_cause,
+        responder_email=payload.submitted_by_email,
+    )
 
     # Prevent the compatibility handler from re-applying its historical 500
     # character default to the four narrative fields. The same SQLAlchemy session

@@ -9,6 +9,7 @@ import {
   Eye,
   ClipboardCheck,
   ClipboardList,
+  BarChart3,
   ExternalLink,
   Filter,
   Info,
@@ -30,7 +31,7 @@ import {
   type QualityWorkflowSettingsOut,
 } from "../../services/qms";
 import { auditNavigationHref } from "./auditNavigation";
-import { qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
+import { qmsBasePath, qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
 import { parseQmsRegisterFilters, withQmsQuery, buildPreservedQmsQuery } from "../qms/routes/qmsQueryState";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
@@ -351,6 +352,13 @@ const QualityAuditRegisterPage: React.FC = () => {
             </form>
 
             <div className="qa-register-grid-page__tools">
+              {hasQmsRolePermission("qms.reports.view") && (
+                <button type="button" className="qa-register-grid-page__analysis-link"
+                  title="Open source-backed findings and CAR analysis" aria-label="Analysis"
+                  onClick={() => navigate(qmsBasePath(amoCode) + "/reports/car-performance")}>
+                  <BarChart3 size={16} aria-hidden /><span>Analysis</span>
+                </button>
+              )}
               <details
                 ref={infoRef}
                 className="qa-register-grid-page__popover"
@@ -463,15 +471,6 @@ const QualityAuditRegisterPage: React.FC = () => {
             <div className="qa-register-grid-page__summary">
               {registerQuery.isFetching && !registerQuery.isLoading ? <span className="qa-register-grid-page__refreshing"><RefreshCw size={13} aria-hidden /> Updating</span> : null}
               {hasFilters ? <button type="button" onClick={clearFilters}>Clear filters</button> : null}
-              {hasQmsRolePermission("qms.reports.view") ? (
-                <button
-                  type="button"
-                  onClick={() => navigate(qmsModulePath(amoCode, "reports", "car-performance"))}
-                  title="Analyse findings and corrective-action performance"
-                >
-                  Analysis
-                </button>
-              ) : null}
             </div>
           </div>
 

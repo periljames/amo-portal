@@ -37,6 +37,8 @@ from . import assurance_case_models as _assurance_case_models  # noqa: F401,E402
 from . import intelligence_models as _intelligence_models  # noqa: F401,E402
 from . import audit_preparation_models as _audit_preparation_models  # noqa: F401,E402
 from . import car_control_loop_models as _car_control_loop_models  # noqa: F401,E402
+from . import car_rca_models as _car_rca_models  # noqa: F401,E402
+from . import car_feedback_router as _car_feedback_router  # noqa: F401,E402
 from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded after the base router is complete.
@@ -82,6 +84,13 @@ from . import planner_assignment_guard_router as _planner_assignment_guard_route
 from . import planner_assignment_lifecycle_guard as _planner_assignment_lifecycle_guard  # noqa: F401,E402
 from . import car_control_loop_router as _car_control_loop_router  # noqa: F401,E402
 from . import car_control_loop_guard_router as _car_control_loop_guard_router  # noqa: F401,E402
+from . import car_rca_router as _car_rca_router  # noqa: F401,E402
+from . import car_rca_pareto_router as _car_rca_pareto_router  # noqa: F401,E402
+
+# New RCA routes reuse the canonical CAR and public invitation families.
+# Their prefixes are relative to the existing parent routers; there is no
+# second CAR state machine or permissive employee API.
+public_router.include_router(_car_rca_router.public_router)
 
 
 def _include_once(parent: APIRouter, child: APIRouter, unique_path_fragment: str) -> None:
@@ -202,6 +211,11 @@ _include_once(
     _car_control_loop_router.router,
     "/api/maintenance/{amo_code}/quality/cars/{car_id}/control-loop",
 )
+
+_canonical_router.router.include_router(_car_rca_router.router)
+_canonical_router.router.include_router(_car_feedback_router.router)
+public_router.include_router(_car_feedback_router.public_router)
+_canonical_router.router.include_router(_car_rca_pareto_router.router)
 
 # Deadline decisions and escalation evaluation enforce sequence and stale-request
 # guards for their public control-loop operations.

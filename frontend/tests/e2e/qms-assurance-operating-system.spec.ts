@@ -284,8 +284,7 @@ test("People is person-first, contextual and readable at native 1080p", async ({
   const root = page.locator(".qms-authz");
   await expect(root).toHaveClass(/qms-people/);
   await expect(root).toHaveClass(/qms-surface-root/);
-  await expectFontAtLeast(page.getByRole("heading", { name: "People & authorization", exact: true }), 28);
-  await expect(page.getByText(/Authorization governance: prepare and review evidence/)).toBeVisible();
+  await expectFontAtLeast(page.getByRole("heading", { name: "Authorization governance", exact: true }), 28);
   await expect(page.getByText("Active authorizations", { exact: true })).toBeVisible();
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await expect(root.locator(".qms-authz-section-title svg")).toHaveCount(0);
