@@ -90,8 +90,18 @@ async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"
   await page.goto(`/maintenance/${data.amo_slug}/quality/cars?carId=${data.car_loop_id}`);
   await page.getByRole("button", {name:"Review response",exact:true}).click({timeout:30000});
   const dialog=page.getByRole("dialog",{name:"Review corrective action response"});
-  await dialog.getByLabel("Root cause decision",{exact:true}).selectOption(decision);
-  await dialog.getByLabel("Corrective action decision",{exact:true}).selectOption(decision);
+  await expect(dialog).toBeVisible({timeout:30000});
+  // The governed modal renders the labelled fields in its own form. Scope
+  // decisions to the exact visible label and native select, rather than
+  // relying on an accessible-name lookup that did not resolve in Chromium.
+  const rootDecision=dialog.locator("label").filter({hasText:/^Root cause decision/}).locator("select");
+  const actionDecision=dialog.locator("label").filter({hasText:/^Corrective action decision/}).locator("select");
+  await expect(rootDecision).toBeVisible();
+  await expect(actionDecision).toBeVisible();
+  await rootDecision.selectOption(decision);
+  await actionDecision.selectOption(decision);
+  await expect(rootDecision).toHaveValue(decision);
+  await expect(actionDecision).toHaveValue(decision);
   await dialog.getByLabel("Root cause review note",{exact:true}).fill(rootReason);
   await dialog.getByLabel("Corrective action review note",{exact:true}).fill(actionReason);
   await dialog.getByLabel("Message to auditee",{exact:true}).fill(`Quality ${decision.toLowerCase()}: review the retained reasons and next action.`);
