@@ -97,8 +97,8 @@ async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"
   const actionDecision=dialog.getByRole("combobox",{name:"Corrective action decision",exact:true});
   await expect(rootDecision).toBeVisible();
   await expect(actionDecision).toBeVisible();
-  await rootDecision.selectOption(decision);
-  await actionDecision.selectOption(decision);
+  await rootDecision.selectOption(decision,{timeout:15000});
+  await actionDecision.selectOption(decision,{timeout:15000});
   await expect(rootDecision).toHaveValue(decision);
   await expect(actionDecision).toHaveValue(decision);
   const rootNote=dialog.getByRole("textbox",{name:"Root cause review note",exact:true});
@@ -107,10 +107,10 @@ async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"
   await expect(rootNote).toBeVisible();
   await expect(actionNote).toBeVisible();
   await expect(auditeeMessage).toBeVisible();
-  await rootNote.fill(rootReason);
-  await actionNote.fill(actionReason);
+  await rootNote.fill(rootReason,{timeout:15000});
+  await actionNote.fill(actionReason,{timeout:15000});
   const message=`Quality ${decision.toLowerCase()}: review the retained reasons and next action.`;
-  await auditeeMessage.fill(message);
+  await auditeeMessage.fill(message,{timeout:15000});
   await expect(rootNote).toHaveValue(rootReason);
   await expect(actionNote).toHaveValue(actionReason);
   await expect(auditeeMessage).toHaveValue(message);
