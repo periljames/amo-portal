@@ -1054,13 +1054,13 @@ const QualityCarsPage: React.FC = () => {
               </label>
             </div>
             <label htmlFor="car-review-root-note">Root cause review note
-              <textarea id="car-review-root-note" className="input" rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
+              <textarea id="car-review-root-note" aria-label="Root cause review note" className="input" rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
             </label>
             <label htmlFor="car-review-action-note">Corrective action review note
-              <textarea id="car-review-action-note" className="input" rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
+              <textarea id="car-review-action-note" aria-label="Corrective action review note" className="input" rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
             </label>
             <label htmlFor="car-review-auditee-message">Message to auditee
-              <textarea id="car-review-auditee-message" className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
+              <textarea id="car-review-auditee-message" aria-label="Message to auditee" className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
             </label>
 
             <div className="qms-card">
