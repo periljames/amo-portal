@@ -91,11 +91,10 @@ async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"
   await page.getByRole("button", {name:"Review response",exact:true}).click({timeout:30000});
   const dialog=page.getByRole("dialog",{name:"Review corrective action response"});
   await expect(dialog).toBeVisible({timeout:30000});
-  // The governed modal renders the labelled fields in its own form. Scope
-  // decisions to the exact visible label and native select, rather than
-  // relying on an accessible-name lookup that did not resolve in Chromium.
-  const rootDecision=dialog.locator("label").filter({hasText:/^Root cause decision/}).locator("select");
-  const actionDecision=dialog.locator("label").filter({hasText:/^Corrective action decision/}).locator("select");
+  // Verify the review form's explicit label-to-control associations as well
+  // as the independent accepted/rejected values and the persisted decision.
+  const rootDecision=dialog.getByRole("combobox",{name:"Root cause decision",exact:true});
+  const actionDecision=dialog.getByRole("combobox",{name:"Corrective action decision",exact:true});
   await expect(rootDecision).toBeVisible();
   await expect(actionDecision).toBeVisible();
   await rootDecision.selectOption(decision);
