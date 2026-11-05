@@ -1,0 +1,66 @@
+name: Venspera Shared S3 Multi-Node Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "backend/amodb/storage.py"
+      - "backend/amodb/apps/platform/storage_quota*"
+      - "backend/amodb/apps/platform/tests/test_s3_multinode_acceptance.py"
+      - "backend/amodb/apps/quality/audit_report_composition.py"
+      - ".github/workflows/venspera-shared-s3-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minio-cross-node-restoration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite+pysqlite:///:memory:
+      ALLOW_SQLITE_FOR_TESTS: "1"
+      SECRET_KEY: s3-multinode-ci-secret
+      PYTHONPATH: backend
+      AMO_STORAGE_BACKEND: s3
+      AMO_REQUIRE_SHARED_STORAGE: "true"
+      AMO_STORAGE_S3_BUCKET: venspera-object-acceptance
+      AMO_STORAGE_S3_PREFIX: acceptance
+      AMO_STORAGE_S3_REGION: us-east-1
+      AMO_STORAGE_S3_ENDPOINT_URL: http://127.0.0.1:9000
+      AMO_STORAGE_S3_ADDRESSING_STYLE: path
+      AWS_ACCESS_KEY_ID: minio-local-ci
+      AWS_SECRET_ACCESS_KEY: minio-ci-test-only-not-production
+      STORAGE_MINIO_ACCEPTANCE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Start isolated S3-compatible storage
+        run: |
+          docker run -d --name venspera-minio \
+            -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minio-local-ci \
+            -e MINIO_ROOT_PASSWORD=minio-ci-test-only-not-production \
+            cgr.dev/chainguard/minio:latest server /data
+          for i in {1..40}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker logs venspera-minio
+          exit 1
+      - name: Install backend runtime and test dependencies
+        run: python -m pip install -r backend/requirements.txt pytest pytest-asyncio
+      - name: Verify two-node S3 durability and tamper detection
+        run: python -m pytest -q backend/amodb/apps/platform/tests/test_s3_multinode_acceptance.py
+      - name: Verify full-tenant recovery verifier safety contracts
+        run: |
+          python -m compileall -q backend/amodb/scripts/verify_tenant_object_recovery.py backend/amodb/scripts/backfill_tenant_object_storage.py
+          python -m pytest -q backend/amodb/apps/platform/tests/test_storage_recovery_verifier.py
+      - name: Clean up isolated object store
+        if: always()
+        run: docker rm -f venspera-minio || true

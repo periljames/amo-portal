@@ -90,11 +90,30 @@ async function reviewThroughUi(page: Page, data: Fixture, decision: "ACCEPTED"|"
   await page.goto(`/maintenance/${data.amo_slug}/quality/cars?carId=${data.car_loop_id}`);
   await page.getByRole("button", {name:"Review response",exact:true}).click({timeout:30000});
   const dialog=page.getByRole("dialog",{name:"Review corrective action response"});
-  await dialog.getByLabel("Root cause decision",{exact:true}).selectOption(decision);
-  await dialog.getByLabel("Corrective action decision",{exact:true}).selectOption(decision);
-  await dialog.getByLabel("Root cause review note",{exact:true}).fill(rootReason);
-  await dialog.getByLabel("Corrective action review note",{exact:true}).fill(actionReason);
-  await dialog.getByLabel("Message to auditee",{exact:true}).fill(`Quality ${decision.toLowerCase()}: review the retained reasons and next action.`);
+  await expect(dialog).toBeVisible({timeout:30000});
+  // Verify the review form's explicit label-to-control associations as well
+  // as the independent accepted/rejected values and the persisted decision.
+  const rootDecision=dialog.getByRole("combobox",{name:"Root cause decision",exact:true});
+  const actionDecision=dialog.getByRole("combobox",{name:"Corrective action decision",exact:true});
+  await expect(rootDecision).toBeVisible();
+  await expect(actionDecision).toBeVisible();
+  await rootDecision.selectOption(decision,{timeout:15000});
+  await actionDecision.selectOption(decision,{timeout:15000});
+  await expect(rootDecision).toHaveValue(decision);
+  await expect(actionDecision).toHaveValue(decision);
+  const rootNote=dialog.getByRole("textbox",{name:"Root cause review note",exact:true});
+  const actionNote=dialog.getByRole("textbox",{name:"Corrective action review note",exact:true});
+  const auditeeMessage=dialog.getByRole("textbox",{name:"Message to auditee",exact:true});
+  await expect(rootNote).toBeVisible();
+  await expect(actionNote).toBeVisible();
+  await expect(auditeeMessage).toBeVisible();
+  await rootNote.fill(rootReason,{timeout:15000});
+  await actionNote.fill(actionReason,{timeout:15000});
+  const message=`Quality ${decision.toLowerCase()}: review the retained reasons and next action.`;
+  await auditeeMessage.fill(message,{timeout:15000});
+  await expect(rootNote).toHaveValue(rootReason);
+  await expect(actionNote).toHaveValue(actionReason);
+  await expect(auditeeMessage).toHaveValue(message);
   await page.screenshot({path:`test-results/car-feedback-review-${decision.toLowerCase()}.png`,fullPage:true});
   const response=page.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/review`)&&r.request().method()==="POST");
   await dialog.getByRole("button",{name:"Record review decision",exact:true}).click();

@@ -11,6 +11,11 @@ on:
       - "backend/amodb/apps/quality/tests/test_car_rca_phase3_contract.py"
       - "backend/amodb/apps/quality/tests/test_public_invite_extensions.py"
       - "backend/amodb/apps/quality/car_rca_router.py"
+      - "backend/amodb/apps/quality/car_rca_storage.py"
+      - "backend/amodb/apps/quality/backfill_car_evidence.py"
+      - "backend/amodb/apps/quality/car_control_loop_evidence_guard.py"
+      - "backend/amodb/apps/quality/router.py"
+      - "backend/amodb/apps/quality/tests/test_car_quota_storage_integration.py"
       - "backend/amodb/apps/quality/car_closure_guards.py"
       - "backend/amodb/apps/quality/transitions.py"
       - "backend/amodb/apps/quality/__init__.py"
@@ -123,6 +128,7 @@ jobs:
           amodb/apps/quality/tests/test_car_control_loop_governance.py
           amodb/apps/quality/tests/test_public_invite_extensions.py
           amodb/apps/quality/tests/test_car_rca_phase3_contract.py
+          amodb/apps/quality/tests/test_car_quota_storage_integration.py
 
   postgres-contract:
     runs-on: ubuntu-latest

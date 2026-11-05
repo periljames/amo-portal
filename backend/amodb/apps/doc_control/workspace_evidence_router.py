@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_db
 from amodb.security import get_current_active_user
@@ -355,12 +356,28 @@ async def upload_document_evidence_asset(
     mime_type = _validate_file_signature(filename, content)
     sha256 = hashlib.sha256(content).hexdigest()
     date_token = datetime.utcnow().strftime("%Y%m%d")
-    target_dir = EVIDENCE_ROOT / tenant.slug.lower() / manual.id / date_token
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = (target_dir / f"{uuid.uuid4().hex}_{filename}").resolve()
-    if EVIDENCE_ROOT not in path.parents:
-        raise HTTPException(status_code=500, detail="Evidence storage path could not be resolved safely")
-    path.write_bytes(content)
+    if shared_storage.shared_storage_enabled():
+        try:
+            from amodb.apps.platform import storage_quota_upload
+            persisted = storage_quota_upload.put_bytes(
+                db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
+                content=content,
+                key=f"doc-control-evidence/{tenant.amo_id}/{manual.id}/{date_token}/{uuid.uuid4().hex}_{filename}",
+                content_type=mime_type,
+            )
+            if int(persisted.size_bytes) != len(content):
+                raise IOError("Object size mismatch")
+            stored_reference = persisted.uri
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Controlled evidence shared-storage write failed") from exc
+    else:
+        target_dir = EVIDENCE_ROOT / tenant.slug.lower() / manual.id / date_token
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = (target_dir / f"{uuid.uuid4().hex}_{filename}").resolve()
+        if EVIDENCE_ROOT not in path.parents:
+            raise HTTPException(status_code=500, detail="Evidence storage path could not be resolved safely")
+        path.write_bytes(content)
+        stored_reference = str(path)
     row = em.DocumentEvidenceAsset(
         tenant_id=tenant.amo_id,
         manual_id=manual.id,
@@ -371,7 +388,7 @@ async def upload_document_evidence_asset(
         mime_type=mime_type,
         size_bytes=len(content),
         sha256=sha256,
-        storage_path=str(path),
+        storage_path=stored_reference,
         description=(description or "").strip() or None,
         uploaded_by_user_id=current_user.id,
         source_context_json={
@@ -401,7 +418,13 @@ async def upload_document_evidence_asset(
         db.commit()
     except Exception:
         db.rollback()
-        path.unlink(missing_ok=True)
+        if stored_reference.startswith("s3://"):
+            try:
+                shared_storage.delete(stored_reference)
+            except Exception:
+                pass
+        else:
+            Path(stored_reference).unlink(missing_ok=True)
         raise
     db.refresh(row)
     return _serialize(tenant.slug, row)
@@ -437,9 +460,15 @@ def download_document_evidence_asset(
         category=row.category,
         user=current_user,
     )
-    path = Path(row.storage_path).resolve()
-    if EVIDENCE_ROOT not in path.parents or not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="The retained evidence file is unavailable")
+    if str(row.storage_path).startswith("s3://"):
+        try:
+            path = shared_storage.materialize(row.storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="The retained evidence file is unavailable") from exc
+    else:
+        path = Path(row.storage_path).resolve()
+        if EVIDENCE_ROOT not in path.parents or not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="The retained evidence file is unavailable")
     if hashlib.sha256(path.read_bytes()).hexdigest() != row.sha256:
         raise HTTPException(
             status_code=409,

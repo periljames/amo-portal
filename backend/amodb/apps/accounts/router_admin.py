@@ -36,7 +36,7 @@ from amodb.apps.tasks import models as task_models
 from amodb.security import get_current_active_user, require_admin, require_roles
 from amodb.apps.platform import models as platform_models
 from amodb.apps.platform import services as platform_services
-from . import access_control, models, schemas, services, role_registry
+from . import access_control, models, schemas, services, role_registry, session_service
 from .personnel_import import import_personnel_rows, parse_people_sheet
 
 router = APIRouter(prefix="/accounts/admin", tags=["accounts_admin"])
@@ -1590,6 +1590,7 @@ def deactivate_amo(
     if not amo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AMO not found.")
     amo.is_active = False
+    session_service.revoke_tenant_sessions(db, amo_id=str(amo.id), reason="tenant_suspended")
     db.add(amo)
     db.commit()
     audit_services.create_audit_event(
@@ -2526,6 +2527,7 @@ def command_disable_user(
     user.is_active = False
     user.deactivated_at = datetime.now(timezone.utc)
     user.deactivated_reason = "disabled_by_admin_command"
+    session_service.revoke_user_sessions(db, user=user, reason="account_disabled")
     db.add(user)
     _emit_user_command_event(
         db,
@@ -2567,8 +2569,7 @@ def command_revoke_access(
     current_user: models.User = Depends(require_admin),
 ):
     user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
-    now = datetime.now(timezone.utc)
-    user.token_revoked_at = now
+    now = session_service.revoke_user_sessions(db, user=user, reason="admin_revocation")
     db.add(user)
     _emit_user_command_event(
         db,
@@ -2588,9 +2589,8 @@ def command_force_password_reset(
     current_user: models.User = Depends(require_admin),
 ):
     user = _get_managed_user_or_404(db, current_user=current_user, user_id=user_id)
-    now = datetime.now(timezone.utc)
     user.must_change_password = True
-    user.token_revoked_at = now
+    now = session_service.revoke_user_sessions(db, user=user, reason="forced_password_reset")
     db.add(user)
     _emit_user_command_event(
         db,

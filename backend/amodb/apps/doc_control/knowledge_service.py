@@ -13,6 +13,7 @@ from typing import Iterable
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.manuals import models as manual_models
 from amodb.database import WriteSessionLocal
@@ -221,7 +222,10 @@ def _has_acroform(revision: manual_models.ManualRevision | None) -> bool:
     path_value = str(getattr(revision, "source_storage_path", "") or "") if revision else ""
     if not path_value or str(getattr(revision, "source_type_enum", "")).upper().endswith("DOCX"):
         return False
-    path = Path(path_value).resolve()
+    try:
+        path = shared_storage.materialize(path_value, expected_sha256=revision.source_sha256) if path_value.startswith("s3://") else Path(path_value).resolve()
+    except Exception:
+        return False
     if not path.exists() or path.suffix.lower() != ".pdf":
         return False
     try:
@@ -557,7 +561,10 @@ def _source_pdf(revision: manual_models.ManualRevision):
     path_value = str(revision.source_storage_path or "")
     if not path_value or str(getattr(revision.source_type_enum, "value", revision.source_type_enum or "")).upper() != "PDF":
         return None
-    path = Path(path_value).resolve()
+    try:
+        path = shared_storage.materialize(path_value, expected_sha256=revision.source_sha256) if path_value.startswith("s3://") else Path(path_value).resolve()
+    except Exception:
+        return None
     if not path.exists():
         return None
     try:
@@ -865,10 +872,23 @@ def create_documentation_record(
     safe_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or f"{record_number}.pdf")
     if not safe_filename.lower().endswith(".pdf"):
         safe_filename += ".pdf"
-    target_dir = RECORD_ROOT / manual_tenant.slug / normalize_code(template.code).lower() / date_token
-    target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / f"{record_number}_{safe_filename}"
-    path.write_bytes(content)
+    if shared_storage.shared_storage_enabled():
+        from amodb.apps.platform import storage_quota_upload
+        from uuid import uuid4
+        record_number = f"{normalize_code(template.code) or 'REC'}-{date_token}-{uuid4().hex[:20].upper()}"
+        retained = storage_quota_upload.put_bytes(
+            db, tenant_id=str(manual_tenant.amo_id), actor_id=str(actor_id),
+            key=f"documentation-generated-records/{manual_tenant.amo_id}/{template.id}/{date_token}/{record_number}_{safe_filename}",
+            content=content, content_type="application/pdf",
+            operation_id=f"documentation-record:{manual_tenant.amo_id}:{record_number}",
+        )
+        storage_reference = retained.uri
+    else:
+        target_dir = RECORD_ROOT / manual_tenant.slug / normalize_code(template.code).lower() / date_token
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{record_number}_{safe_filename}"
+        path.write_bytes(content)
+        storage_reference = str(path)
     row = km.DocumentationRecord(
         tenant_id=manual_tenant.amo_id,
         record_number=record_number,
@@ -883,7 +903,7 @@ def create_documentation_record(
             "source_quote": reference.source_quote if reference else None,
         },
         payload_json=dict(payload or {}),
-        artifact_storage_path=str(path),
+        artifact_storage_path=storage_reference,
         artifact_filename=safe_filename,
         artifact_mime_type="application/pdf",
         artifact_sha256=hashlib.sha256(content).hexdigest(),

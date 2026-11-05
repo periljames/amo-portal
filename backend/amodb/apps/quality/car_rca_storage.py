@@ -18,12 +18,21 @@ from .car_rca_models import QualityCarRcaAction, QualityCarRcaDocument
 logger = logging.getLogger(__name__)
 
 
-def store_car_file(path: Path, *, amo_id: str, car_id: UUID, content_type: str | None) -> str:
-    # A separate directory for each tenant prevents cross-tenant object-key
-    # collision and makes selective tenant restore/backfill possible.
+def store_car_file(path: Path, *, amo_id: str, car_id: UUID,
+                   content_type: str | None, db: Session | None = None) -> str:
+    # Shared S3 writes must also reserve/finalize exact bytes in the tenant
+    # ledger. The historical local-only backend remains usable in development.
     key = f"tenants/{amo_id}/qms/cars/{car_id}/attachments/{path.name}"
     try:
-        obj = storage.put_file(path, key=key, content_type=content_type)
+        if storage.shared_storage_enabled():
+            if db is None:
+                raise HTTPException(status_code=503, detail="Tenant quota transaction is required for CAR evidence.")
+            from amodb.apps.platform.storage_quota_upload import put_local_file
+            obj = put_local_file(db, tenant_id=amo_id, key=key, path=path, content_type=content_type)
+        else:
+            obj = storage.put_file(path, key=key, content_type=content_type)
+    except HTTPException:
+        raise
     except Exception as exc:
         # Keep the public error generic, but retain the actual storage failure
         # server-side (for example: an unwritable volume or invalid S3 setup).
@@ -100,10 +109,27 @@ def retained_car_attachment(db: Session, car_id: UUID, attachment_id: UUID, *, a
     return False
 
 
-def delete_unretained_car_file(uri: str, *, car_id: UUID) -> None:
-    """Delete an unreferenced CAR blob, including a legacy local file."""
+def delete_unretained_car_file(uri: str, *, car_id: UUID,
+                               amo_id: str | None = None, db: Session | None = None) -> None:
+    """Release unreferenced bytes only after actual storage deletion succeeds."""
     if uri.startswith("s3://"):
-        storage.delete(uri)
+        if db is None or not amo_id:
+            raise HTTPException(status_code=503, detail="A tenant quota transaction is required for CAR deletion.")
+        # Never delete an object from another tenant, CAR, prefix or bucket.
+        prefix = f"tenants/{amo_id}/qms/cars/{car_id}/attachments"
+        expected_prefix = storage.expected_s3_uri(prefix) + "/"
+        if not uri.startswith(expected_prefix):
+            raise HTTPException(status_code=403, detail="CAR evidence does not belong to this tenant and CAR.")
+        name = uri[len(expected_prefix):]
+        if not name or "/" in name or name in {".", ".."}:
+            raise HTTPException(status_code=403, detail="CAR evidence has an invalid controlled object key.")
+        try:
+            storage.delete(uri)
+        except Exception as exc:
+            logger.exception("CAR evidence deletion failed for tenant %s, CAR %s", amo_id, car_id)
+            raise HTTPException(status_code=503, detail="CAR evidence storage deletion failed.") from exc
+        from amodb.apps.platform.storage_quota_service import recorded_delete
+        recorded_delete(db, tenant_id=amo_id, object_key=f"{prefix}/{name}")
         return
     path = car_attachment_path(uri, car_id=car_id)
     try:

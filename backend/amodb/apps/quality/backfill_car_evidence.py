@@ -68,7 +68,7 @@ def backfill(*, amo_id: str, apply: bool, limit: int) -> dict:
                 continue
             try:
                 stored_uri = store_car_file(
-                    source, amo_id=amo_id, car_id=car.id, content_type=attachment.content_type,
+                    source, amo_id=amo_id, car_id=car.id, content_type=attachment.content_type, db=db,
                 )
                 # Verify the destination before changing the authoritative DB URI.
                 storage.materialize(stored_uri, expected_sha256=attachment.sha256)

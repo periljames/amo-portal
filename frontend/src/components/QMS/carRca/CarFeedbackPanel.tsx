@@ -41,7 +41,10 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
         if(!active)return;
         const next=JSON.stringify([data.status,data.root_cause_status,data.capa_status,data.items[0]?.id]);
         const changed=Boolean(signature.current && signature.current!==next);
-        signature.current=next;setFeed(previous=>({...data,next_cursor:olderLoaded.current?previous?.next_cursor||null:data.next_cursor}));setLive(true);setError("");
+        signature.current=next;setFeed(previous=>({...data,next_cursor:olderLoaded.current?previous?.next_cursor||null:data.next_cursor}));setLive(true);
+        // GET/SSE refresh does not acknowledge an ambiguous POST. Preserve the
+        // send failure until the exact idempotent message is retried and confirmed.
+        if(!pending.current)setError("");
         setItems(previous=>Array.from(new Map([...previous,...data.items].map(item=>[item.id,item])).values()).sort((a,b)=>a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id)));
         if(changed) {
           setMessage("New feedback or review decision received.");

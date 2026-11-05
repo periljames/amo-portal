@@ -52,6 +52,10 @@ jobs:
       REALTIME_BROKER_WEBHOOK_SECRET: routing-ci-webhook-secret
       REALTIME_GATEWAY_USERNAME: routing-ci-user
       REALTIME_GATEWAY_PASSWORD: routing-ci-password
+      DATABASE_MIGRATION_URL: postgresql+psycopg2://ci_migration:ci_migration@db:5432/amo
+      AMO_STORAGE_S3_BUCKET: venspera-routing-ci
+      AMO_STORAGE_S3_REGION: eu-west-1
+      FORWARDED_ALLOW_IPS: 127.0.0.1
     steps:
       - uses: actions/checkout@v4
 

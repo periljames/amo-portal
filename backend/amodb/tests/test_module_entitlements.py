@@ -14,6 +14,7 @@ from amodb.apps.accounts import models as account_models  # noqa: E402
 from amodb.apps.accounts import schemas as account_schemas  # noqa: E402
 from amodb.apps.accounts import services as account_services  # noqa: E402
 from amodb import entitlements as entitlement_service  # noqa: E402
+from amodb import security as security_service  # noqa: E402
 from amodb.apps.fleet.router import router as fleet_router  # noqa: E402
 from amodb.apps.maintenance_program.api import router as maintenance_router  # noqa: E402
 from amodb.apps.quality.router import router as quality_router  # noqa: E402
@@ -68,7 +69,7 @@ def test_module_guard_blocks_without_entitlement(monkeypatch):
 
     for module_key, dependency in _module_guards():
         with pytest.raises(HTTPException) as exc:
-            dependency(current_user=stub_user, db=None)
+            dependency(current_user=stub_user, db=SimpleNamespace(get=lambda *_: SimpleNamespace(is_active=True)))
         assert exc.value.status_code == status.HTTP_403_FORBIDDEN
         assert module_key in str(exc.value.detail)
 
@@ -87,4 +88,37 @@ def test_module_guard_allows_with_entitlement(monkeypatch):
     stub_user = SimpleNamespace(amo_id="amo-1", is_superuser=False, is_active=True)
 
     for _, dependency in _module_guards():
-        assert dependency(current_user=stub_user, db=None) is stub_user
+        assert dependency(current_user=stub_user, db=SimpleNamespace(get=lambda *_: SimpleNamespace(is_active=True))) is stub_user
+
+
+
+def test_standing_tenant_admin_cannot_bypass_commercial_license(monkeypatch):
+    user = SimpleNamespace(amo_id="amo-1", is_superuser=False, is_active=True)
+    monkeypatch.setattr(security_service, "is_tenant_admin", lambda u: True)
+
+    def deny(*args, **kwargs):
+        raise HTTPException(status_code=403, detail="No effective paid entitlement")
+
+    monkeypatch.setattr(entitlement_service, "enforce_tenant_module", deny)
+    with pytest.raises(HTTPException) as blocked:
+        security_service.require_module_access("quality")(current_user=user, db=None)
+    assert blocked.value.status_code == 403
+
+    monkeypatch.setattr(entitlement_service, "enforce_tenant_module", lambda *args, **kwargs: None)
+    assert security_service.require_module_access("quality")(current_user=user, db=None) is user
+
+
+def test_shared_module_router_requires_at_least_one_licensed_module(monkeypatch):
+    user = SimpleNamespace(amo_id="amo-1", is_superuser=False, is_active=True)
+    monkeypatch.setattr(security_service, "is_tenant_admin", lambda u: True)
+
+    def only_documents(db, *, amo_id, module_key):
+        if module_key != "documents":
+            raise HTTPException(status_code=403, detail="Unlicensed")
+
+    monkeypatch.setattr(entitlement_service, "enforce_tenant_module", only_documents)
+    guard = security_service.require_any_module_access("documents", "quality", level="manage")
+    assert guard(current_user=user, db=None) is user
+    monkeypatch.setattr(entitlement_service, "enforce_tenant_module", lambda *args, **kwargs: (_ for _ in ()).throw(HTTPException(403, "Unlicensed")))
+    with pytest.raises(HTTPException):
+        guard(current_user=user, db=None)

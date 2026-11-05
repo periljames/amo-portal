@@ -138,7 +138,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   const [effectivenessResult, setEffectivenessResult] = useState<{ case_ref: string; case_id: string } | null>(null);
 
   const responsesQuery = useQuery({
-    queryKey: ["qms-car-control-responses", carId],
+    queryKey: ["qms-car-control-responses", amoCode, carId],
     queryFn: () => qmsListCarResponses(carId, false, amoCode),
     // Public respondents and other Quality reviewers can update CAR data.
     // Revalidate persisted query cache when the record opens or gains focus.
@@ -147,12 +147,12 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     refetchOnWindowFocus: "always",
   });
   const attachmentsQuery = useQuery({
-    queryKey: ["qms-car-control-attachments", carId],
+    queryKey: ["qms-car-control-attachments", amoCode, carId],
     queryFn: () => qmsListCarAttachments(carId),
     staleTime: 10_000,
   });
   const inviteQuery = useQuery({
-    queryKey: ["qms-car-control-source", carId],
+    queryKey: ["qms-car-control-source", amoCode, carId],
     queryFn: () => qmsGetCarInvite(carId, amoCode),
     // Public respondents and other Quality reviewers can update CAR data.
     // Revalidate persisted query cache when the record opens or gains focus.
@@ -209,6 +209,18 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
     if (explicitlyLatest) return explicitlyLatest;
     return [...responses].sort((left, right) => right.submitted_at.localeCompare(left.submitted_at))[0] ?? null;
   }, [responses]);
+  // Preserve main's independent RCA workbench and prefer the newest
+  // persisted responsible-manager response across the two governed reads.
+  const currentResponse = useMemo(() => {
+    const persisted = inviteQuery.data;
+    if (!persisted?.submitted_at) return latestResponse;
+    if (!latestResponse?.submitted_at) return persisted;
+    const inviteTime = Date.parse(persisted.submitted_at);
+    const ledgerTime = Date.parse(latestResponse.submitted_at);
+    return Number.isFinite(inviteTime) && (!Number.isFinite(ledgerTime) || inviteTime > ledgerTime)
+      ? persisted : latestResponse;
+  }, [inviteQuery.data, latestResponse]);
+
   const nextMilestone = useMemo(
     () => [...control.milestones]
       .sort((left, right) => left.phase_order - right.phase_order)
@@ -226,7 +238,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
   };
 
   const refreshAttachments = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["qms-car-control-attachments", carId] });
+    await queryClient.invalidateQueries({ queryKey: ["qms-car-control-attachments", amoCode, carId] });
   };
 
   const handleUpload = async (files: FileList | null) => {
@@ -331,12 +343,12 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       ["CAR", "Current due", control.profile?.current_due_date || control.car.target_closure_date || control.car.due_date || ""],
       ["CAR", "Health", `${control.health.state} ${control.health.risk_score}/100`],
       ["CAR", "Next required action", control.health.next_action],
-      ["Response", "Responder", personDisplay(latestResponse?.submitted_by_name || source?.submitted_by_name, "")],
-      ["Response", "Submitted", latestResponse?.submitted_at || source?.submitted_at || ""],
-      ["Response", "Immediate / containment action", latestResponse?.containment_action || source?.containment_action || ""],
-      ["Response", "Root cause", latestResponse?.root_cause || source?.root_cause || ""],
-      ["Response", "Corrective action", latestResponse?.corrective_action || source?.corrective_action || ""],
-      ["Response", "Preventive / systemic action", latestResponse?.preventive_action || source?.preventive_action || ""],
+      ["Response", "Responder", personDisplay(currentResponse?.submitted_by_name || source?.submitted_by_name, "")],
+      ["Response", "Submitted", currentResponse?.submitted_at || source?.submitted_at || ""],
+      ["Response", "Immediate / containment action", currentResponse?.containment_action || source?.containment_action || ""],
+      ["Response", "Root cause", currentResponse?.root_cause || source?.root_cause || ""],
+      ["Response", "Corrective action", currentResponse?.corrective_action || source?.corrective_action || ""],
+      ["Response", "Preventive / systemic action", currentResponse?.preventive_action || source?.preventive_action || ""],
       ["Review", "RCA status", source?.root_cause_status || ""],
       ["Review", "RCA review note", source?.root_cause_review_note || ""],
       ["Review", "CAP status", source?.capa_status || ""],
@@ -420,7 +432,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       return;
     }
     popup.opener = null;
-    const response = latestResponse || source;
+    const response = currentResponse || source;
     const milestoneRows = control.milestones.map((item) => `<tr><td>${item.phase_order}. ${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.original_due_date))}</td><td>${escapeHtml(formatDate(item.current_due_date))}</td><td>${escapeHtml(item.evidence_ref || "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`).join("");
     const dependencyRows = control.dependencies.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(humanize(item.dependency_type))}</td><td>${escapeHtml(humanize(item.risk_level))}</td><td>${escapeHtml(assigneeName(assignees, item.owner_user_id))}</td><td>${escapeHtml(formatDate(item.due_date))}</td><td>${item.blocks_closure ? "Yes" : "No"}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.description || "")}</td><td>${escapeHtml(item.mitigation_plan || "")}</td></tr>`).join("");
     const extensionRows = control.deadline_changes.map((item) => `<tr><td>${escapeHtml(formatDate(item.previous_due_date))}</td><td>${escapeHtml(formatDate(item.requested_due_date))}</td><td>${escapeHtml(item.reason)}</td><td>${escapeHtml(item.impact_statement || "")}</td><td>${escapeHtml(humanize(item.status))}</td><td>${escapeHtml(item.review_note || "")}</td></tr>`).join("");
@@ -539,13 +551,13 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
       <section className="card" aria-labelledby="car-response-heading">
         <div className="card__header"><div><h2 id="car-response-heading">Corrective action response</h2><p>Auditee/responsible-manager submission retained separately from Quality review and staged governance.</p></div><button className="btn btn--small" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars/${carId}`)}>Open CAR review</button></div>
         {responsesQuery.isLoading || inviteQuery.isLoading ? <p className="muted"><InlineLoading label={"Loading response history…"}/></p> : null}
-        {latestResponse || inviteQuery.data ? (
+        {currentResponse || inviteQuery.data ? (
           <div className="stack">
-            <div className="stats-grid"><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Responder</span><strong>{personDisplay(latestResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Submitted</span><strong>{formatDateTime(latestResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
-            <div><strong>Immediate / containment action</strong><p>{latestResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
-            <div><strong>Root cause analysis</strong><p>{latestResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
-            <div><strong>Corrective action</strong><p>{latestResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
-            <div><strong>Preventive / long-term systemic action</strong><p>{latestResponse?.preventive_action || inviteQuery.data?.preventive_action || "Not submitted."}</p></div>
+            <div className="stats-grid"><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Responder</span><strong>{personDisplay(currentResponse?.submitted_by_name || inviteQuery.data?.submitted_by_name, "—")}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>Submitted</span><strong>{formatDateTime(currentResponse?.submitted_at || inviteQuery.data?.submitted_at)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>RCA review</span><strong>{humanize(inviteQuery.data?.root_cause_status)}</strong></div><div><span className="muted" style={{ display: "block", marginBottom: 4 }}>CAP review</span><strong>{humanize(inviteQuery.data?.capa_status)}</strong></div></div>
+            <div><strong>Immediate / containment action</strong><p>{currentResponse?.containment_action || inviteQuery.data?.containment_action || "Not submitted."}</p></div>
+            <div><strong>Root cause analysis</strong><p>{currentResponse?.root_cause || inviteQuery.data?.root_cause || "Not submitted."}</p></div>
+            <div><strong>Corrective action</strong><p>{currentResponse?.corrective_action || inviteQuery.data?.corrective_action || "Not submitted."}</p></div>
+            <div><strong>Preventive / long-term systemic action</strong><p>{currentResponse?.preventive_action || inviteQuery.data?.preventive_action || "Not submitted."}</p></div>
             {(inviteQuery.data?.root_cause_review_note || inviteQuery.data?.capa_review_note) ? <div className="alert"><strong>Quality review comments</strong><div>RCA: {inviteQuery.data?.root_cause_review_note || "—"}</div><div>CAP: {inviteQuery.data?.capa_review_note || "—"}</div></div> : null}
           </div>
         ) : <p className="muted">No auditee/responsible-manager response has been submitted.</p>}
@@ -587,7 +599,7 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
             Open Assurance Cases</button></p>}
       </section>}
       <CarInviteGovernance amoCode={amoCode} carId={carId} canManage={canManage}
-        onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["qms-car-control-source", carId] }); }} />
+        onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["qms-car-control-source", amoCode, carId] }); }} />
       <section className="card" aria-labelledby="car-evidence-heading">
         <div className="card__header"><div><h2 id="car-evidence-heading">Objective evidence</h2><p>Upload, index, link and retrieve the evidence used to accept implementation and closure.</p></div><span className="badge badge--neutral">{attachments.length} file{attachments.length === 1 ? "" : "s"}</span></div>
         {canManage ? <div className="form-grid"><label>Link new evidence to milestone<select className="input" value={evidenceMilestoneId} onChange={(event) => setEvidenceMilestoneId(event.target.value)}><option value="">CAR-wide evidence</option>{control.milestones.map((item) => <option key={item.id} value={item.id}>{item.phase_order}. {item.title}</option>)}</select></label><label>Upload evidence files<input className="input" type="file" multiple disabled={uploadBusy} onChange={(event) => { void handleUpload(event.target.files); event.currentTarget.value = ""; }} /></label><div className="muted">Use the underlying evidence record for documents, photos, spreadsheets, certificates, work orders and other accepted proof. Filename, size and upload time remain visible below.</div></div> : null}

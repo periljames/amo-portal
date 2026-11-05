@@ -1088,8 +1088,8 @@ def _reset_failed_logins(
     user.login_attempts = 0
     user.locked_until = None
     user.lockout_count = 0
-    if hasattr(user, "token_revoked_at"):
-        user.token_revoked_at = None
+    # Do not erase the revocation boundary at login: old access tokens and
+    # recovery credentials must remain invalid even after a new login.
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     user.last_login_user_agent = user_agent
@@ -1470,6 +1470,10 @@ def change_password(
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
     user.password_changed_at = datetime.now(timezone.utc)
+    from . import session_service
+    session_service.revoke_user_sessions(
+        db, user=user, reason="password_changed",
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -1497,6 +1501,13 @@ def _generate_reset_token_raw(length: int = 32) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _indexed_reset_digest(raw_token: str) -> str:
+    """Stable indexed verifier; the high-entropy raw token is never stored."""
+    key = (os.getenv("RESET_TOKEN_PEPPER") or os.getenv("SECRET_KEY") or "local-development-only").encode("utf-8")
+    digest = hmac.new(key, raw_token.encode("utf-8"), hashlib.sha256).hexdigest()
+    return "hmac-sha256:" + digest
+
+
 def create_password_reset_token(
     db: Session,
     user: models.User,
@@ -1511,7 +1522,7 @@ def create_password_reset_token(
     Returns the raw token string (only this should be sent to the user).
     """
     raw_token = _generate_reset_token_raw()
-    token_hash = get_password_hash(raw_token)
+    token_hash = _indexed_reset_digest(raw_token)
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
     )
@@ -1545,21 +1556,23 @@ def _find_matching_reset_token(
     raw_token: str,
 ) -> Optional[models.PasswordResetToken]:
     now = datetime.now(timezone.utc)
-    candidate_tokens: List[models.PasswordResetToken] = (
+    # Normal path: an indexed equality lookup; never scan all accounts.
+    token = (
         db.query(models.PasswordResetToken)
-        .filter(models.PasswordResetToken.used_at.is_(None))
-        .order_by(models.PasswordResetToken.issued_at.desc())
-        .all()
+        .filter(
+            models.PasswordResetToken.token_hash == _indexed_reset_digest(raw_token),
+            models.PasswordResetToken.used_at.is_(None),
+            models.PasswordResetToken.expires_at > now,
+        )
+        .first()
     )
+    if token is not None:
+        return token
 
-    for token in candidate_tokens:
-        if token.expires_at and token.expires_at < now:
-            continue
-        if verify_password(raw_token, token.token_hash):
-            return token
-
+    # Historical Argon2 reset hashes cannot be safely indexed by raw token.
+    # Those outstanding links are deliberately invalidated on deployment:
+    # users must request a new reset link; do not retain an O(N) scan.
     return None
-
 
 def redeem_password_reset_token(
     db: Session,
@@ -1576,8 +1589,21 @@ def redeem_password_reset_token(
     if not token:
         return None
 
-    token.used_at = datetime.now(timezone.utc)
-    db.add(token)
+    now = datetime.now(timezone.utc)
+    # A conditional UPDATE is the one-use gate even when two requests have
+    # already fetched the same token on different workers.
+    consumed = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.id == token.id,
+            models.PasswordResetToken.used_at.is_(None),
+            models.PasswordResetToken.expires_at > now,
+        )
+        .update({"used_at": now}, synchronize_session=False)
+    )
+    if consumed != 1:
+        db.rollback()
+        return None
 
     user = token.user
     if not user or not user.is_active:
@@ -1588,6 +1614,10 @@ def redeem_password_reset_token(
     user.hashed_password = get_password_hash(new_password)
     user.must_change_password = False
     user.password_changed_at = datetime.now(timezone.utc)
+    from . import session_service
+    session_service.revoke_user_sessions(
+        db, user=user, reason="password_changed",
+    )
     db.add(user)
     db.commit()
     db.refresh(user)

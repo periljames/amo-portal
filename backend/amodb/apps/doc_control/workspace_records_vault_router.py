@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, true
 from sqlalchemy.orm import Session
 
+from amodb import storage as shared_storage
 from amodb.apps.accounts import models as account_models
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from amodb.apps.quality.amo_compliance_policy import assert_disposition_due, tenant_retention_extensions, prepare_retention
@@ -35,6 +36,30 @@ from .workspace_service import audit, is_control_user, resolve_tenant, role_valu
 router = APIRouter(prefix="/workspace", tags=["Document Control Records Vault"])
 
 RECORD_ROOT = Path(os.getenv("DOCUMENT_RECORD_VAULT_DIR", "uploads/document-record-vault")).resolve()
+
+
+def _materialize_record_file(storage_path: str, *, expected_sha256: str | None = None) -> Path:
+    """Read retained records from shared object storage or safeguarded legacy volumes."""
+    if str(storage_path or "").startswith("s3://"):
+        try:
+            path = shared_storage.materialize(storage_path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Retained record file is unavailable") from exc
+    else:
+        path = Path(storage_path).resolve()
+        if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
+            raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    if expected_sha256:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise HTTPException(status_code=409, detail={
+                "code": "RECORD_FILE_CHECKSUM_MISMATCH",
+                "message": "Retained record does not match its original certified checksum.",
+            })
+    return path
 MAX_RECORD_BYTES = int(os.getenv("DOCUMENT_RECORD_VAULT_MAX_BYTES", str(100 * 1024 * 1024)))
 DISPOSITIONS = {"REVIEW_AT_EXPIRY", "ARCHIVE", "TRANSFER", "DESTROY"}
 SERIES_STATUSES = {"ACTIVE", "INACTIVE"}
@@ -450,8 +475,10 @@ async def upload_record(
     metadata["retention_class"] = retention_class
 
     record_id = str(uuid.uuid4())
-    directory = (RECORD_ROOT / str(tenant.amo_id) / series.id / record_id).resolve()
-    expected_root = RECORD_ROOT.resolve()
+    use_shared_storage = shared_storage.shared_storage_enabled()
+    root = shared_storage.cache_root() if use_shared_storage else RECORD_ROOT
+    directory = (root / str(tenant.amo_id) / series.id / record_id).resolve()
+    expected_root = root.resolve()
     if expected_root not in directory.parents:
         raise HTTPException(status_code=400, detail="Invalid record storage path")
     directory.mkdir(parents=True, exist_ok=True)
@@ -471,8 +498,23 @@ async def upload_record(
             raise HTTPException(status_code=422, detail="Retained record is empty")
         mime_type = validate_record_file(temporary, filename)
         os.replace(temporary, destination)
+        if use_shared_storage:
+            from amodb.apps.platform import storage_quota_upload
+            persisted = storage_quota_upload.put_local_file(
+                db, tenant_id=str(tenant.amo_id), actor_id=str(current_user.id),
+                path=destination,
+                key=f"document-record-vault/{tenant.amo_id}/{series.id}/{record_id}/{filename}",
+                content_type=mime_type,
+            )
+            if int(persisted.size_bytes) != size:
+                raise IOError("Retained record object size mismatch")
+            storage_reference = persisted.uri
+            destination.unlink(missing_ok=True)
+        else:
+            storage_reference = str(destination)
     except Exception:
         temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
         try:
             directory.rmdir()
         except OSError:
@@ -503,7 +545,7 @@ async def upload_record(
         mime_type=mime_type,
         size_bytes=size,
         sha256=digest.hexdigest(),
-        storage_path=str(destination),
+        storage_path=storage_reference,
         captured_at=captured,
         retention_due_at=retention_due,
         search_text=search_text,
@@ -551,7 +593,13 @@ async def upload_record(
         db.commit()
     except Exception:
         db.rollback()
-        destination.unlink(missing_ok=True)
+        if storage_reference.startswith("s3://"):
+            try:
+                shared_storage.delete(storage_reference)
+            except Exception:
+                pass
+        else:
+            destination.unlink(missing_ok=True)
         raise
     background_tasks.add_task(index_record, str(tenant.amo_id), row.id, RECORD_ROOT)
     return {
@@ -615,9 +663,7 @@ def reindex_record(
         raise HTTPException(status_code=403, detail="Document Control privileges are required to reindex records")
     tenant = resolve_tenant(db, tenant_slug, current_user)
     row = _record(db, tenant.amo_id, record_id)
-    path = Path(row.storage_path).resolve()
-    if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    _materialize_record_file(row.storage_path, expected_sha256=row.sha256)
     row.metadata_json = {**dict(row.metadata_json or {}), "text_index": {"status": "PENDING"}}
     job = db.query(rm.TenantRecordIndexJob).filter(
         rm.TenantRecordIndexJob.tenant_id == tenant.amo_id,
@@ -645,9 +691,7 @@ def download_record(
     row = _record(db, tenant.amo_id, record_id)
     series = _series(db, tenant.amo_id, row.series_id)
     _require_record_read(db, str(tenant.amo_id), current_user, series, row)
-    path = Path(row.storage_path).resolve()
-    if not path.is_file() or RECORD_ROOT.resolve() not in path.parents:
-        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    path = _materialize_record_file(row.storage_path, expected_sha256=row.sha256)
     audit(db, tenant, request, "document.records.downloaded", "record_asset", row.id, {
         "record_number": row.record_number,
         "series_id": row.series_id,
@@ -690,9 +734,7 @@ def record_content(
     row = _record(db, tenant.amo_id, record_id)
     series = _series(db, tenant.amo_id, row.series_id)
     _require_record_read(db, str(tenant.amo_id), current_user, series, row)
-    path = Path(row.storage_path).resolve()
-    if RECORD_ROOT.resolve() not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="Retained record file is unavailable")
+    path = _materialize_record_file(row.storage_path)
     audit(db, tenant, request, "document.records.viewed", "record_asset", row.id, {"record_number": row.record_number})
     _write_event(db, tenant_id=tenant.amo_id, record_id=row.id, user_id=current_user.id, event_type="ACCESSED")
     db.commit()

@@ -101,14 +101,15 @@ class PreparedSnapshotBroker:
             return message
 
     def _perform_refresh(self, cursor: str | None, include_snapshot: bool) -> RefreshBatch:
-        """Count completed refreshes in the worker thread before waking the loop.
+        """Record an invocation before entering the blocking refresh function.
 
-        Counting on the event-loop side of to_thread() lets health() see a
-        background invocation before the loop has accounted for its result.
+        Health observers on the event loop can run concurrently with this
+        worker. Counting *after* the callback returns underreports an active
+        invocation (the source has already been contacted) and can make the
+        fan-out metrics contradict real upstream activity.
         """
-        batch = self._refresh(cursor, include_snapshot)
         self._refresh_count += 1
-        return batch
+        return self._refresh(cursor, include_snapshot)
 
     async def _run(self) -> None:
         self._running = True
