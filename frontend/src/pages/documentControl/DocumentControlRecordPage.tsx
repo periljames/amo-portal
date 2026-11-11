@@ -36,6 +36,7 @@ import DocumentControlShell, {
 import DocumentControlRecordActions, { type DocumentWorkspaceView } from "./DocumentControlRecordActions";
 import DocumentMicrosoftFilePanel from "./DocumentMicrosoftFilePanel";
 import DocumentWordRenditionPanel from "./DocumentWordRenditionPanel";
+import DocumentRevisionTrainingImpactPanel from "./DocumentRevisionTrainingImpactPanel";
 import "./dmsDocumentWorkspace.css";
 
 const TABS: Array<[DocumentWorkspaceView, string, typeof BookOpen]> = [
@@ -97,7 +98,7 @@ function controlStatus(detail: DocumentDetailResponse): string {
 export default function DocumentControlRecordPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { tenant, docId, basePath, readerBasePath } = useDocumentControlRoute();
+  const { tenant, amoCode, docId, basePath, readerBasePath } = useDocumentControlRoute();
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
   const [regulationLinks, setRegulationLinks] = useState<Array<Record<string, unknown>>>([]);
   const [governance, setGovernance] = useState<GovernanceDetail | null>(null);
@@ -225,6 +226,7 @@ export default function DocumentControlRecordPage() {
         {activeView === "workflow" ? <WorkflowView detail={detail} /> : null}
         {activeView === "distribution" ? <DistributionView detail={detail} /> : null}
         {activeView === "compliance" ? <ComplianceView detail={detail} regulationLinks={regulationLinks} /> : null}
+        {activeView === "compliance" && document.latest_revision?.id && amoCode ? <DocumentRevisionTrainingImpactPanel amoCode={amoCode} manualId={document.id} revisionId={document.latest_revision.id} canControl={canControl} /> : null}
         {activeView === "relationships" ? <RelationshipsView detail={detail} governance={governance} loading={governanceLoading} error={governanceError} onRetry={() => { setGovernance(null); setGovernanceError(""); }} onOpenGovernance={() => navigate(`${basePath}/library/${document.id}?governance=assignments`)} /> : null}
         {activeView === "history" ? <HistoryView detail={detail} /> : null}
 
