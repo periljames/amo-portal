@@ -16,7 +16,7 @@ def test_library_discovery_is_permission_filtered_and_bounded() -> None:
     # New shared-with-me discovery must not remove any previously supported
     # governed view; assert the full backwards-compatible set, not an exact
     # source-code formatting string tied to the old enum order.
-    match = re.search(r'pattern="\\^\\(([^"]+)\\)\\$"', source)
+    match = re.search(r'pattern="\^\(([^"]+)\)\$"', source)
     assert match, "Server must validate the library view against an explicit allowlist"
     supported = set(match.group(1).split("|"))
     required = {
