@@ -96,7 +96,7 @@ test.describe.serial("DMS authoritative role matrix", () => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
-    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    await library.getByRole("button", { name: "Cards", exact: true }).click();
     const card = library.locator("article.dlibrary-card").filter({ hasText: "DMS-CI-MOM" });
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card.getByRole("button", { name: "Read current", exact: true })).toBeVisible();
