@@ -71,6 +71,16 @@ class AcceptResidual(Versioned):
     acceptance_evidence_ids: list[str] = Field(min_length=1, max_length=30)
 
 
+class CompleteTreatment(Strict):
+    statement: str = Field(min_length=8, max_length=5000)
+    evidence_record_ids: list[str] = Field(min_length=1, max_length=30)
+
+
+class VerifyTreatment(Strict):
+    accepted: bool
+    reason: str = Field(min_length=8, max_length=4000)
+
+
 class Reopen(Versioned):
     reason: str = Field(min_length=12, max_length=8000)
     reassess_by: date
@@ -134,6 +144,21 @@ def _require_matrix(db: Session, ctx: TenantContext, payload: Assessment) -> Non
         choices = matrix.get(key)
         if not isinstance(choices, list) or not choices or supplied not in choices:
             raise HTTPException(422, f"Risk {key} must match a configured tenant matrix option.")
+
+
+def _verify_evidence(db: Session, ctx: TenantContext, references: list[str]) -> None:
+    if len(set(references)) != len(references) or any(not reference.strip() for reference in references):
+        raise HTTPException(422, "Evidence IDs must be nonempty and unique.")
+    if not references:
+        return
+    found = db.execute(text(
+        "SELECT CAST(id AS text) FROM qms_evidence_files WHERE amo_id=:amo_id "
+        "AND deleted_at IS NULL AND CAST(id AS text) IN :records"
+    ).bindparams(__import__("sqlalchemy").bindparam("records", expanding=True)), {
+        "amo_id": ctx.amo_id, "records": references,
+    }).scalars().all()
+    if set(found) != set(references):
+        raise HTTPException(422, "One or more evidence records are missing, archived or belong to another tenant.")
 
 
 def _children(db: Session, ctx: TenantContext, kind: str, risk_id: str) -> list[dict[str, Any]]:
@@ -262,6 +287,7 @@ def assess_risk(
     row = _risk(db, ctx, kind, risk_id, lock=True)
     _version(row, body.expected_version)
     _require_matrix(db, ctx, body)
+    _verify_evidence(db, ctx, body.evidence_record_ids)
     existing = list((row["payload"] or {}).get("assessment_history") or [])
     if row["status"] in {"ACCEPTED", "CLOSED"}:
         raise HTTPException(409, "Accepted risk cannot be altered without governed reassessment.")
@@ -320,6 +346,67 @@ def add_treatment(
     return {"record": updated, "action": child}
 
 
+@router.post("/records/{kind}/{risk_id}/actions/{action_id}/complete")
+def complete_treatment(
+    kind: Literal["RISK", "OPPORTUNITY"], risk_id: str, action_id: str,
+    body: CompleteTreatment, request: Request,
+    ctx: TenantContext = Depends(require_quality_permission("qms.risk.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    row = _risk(db, ctx, kind, risk_id, lock=True)
+    if row["status"] not in {"TREATING", "RESIDUAL_PENDING"}:
+        raise HTTPException(409, "The risk must be in governed treatment.")
+    item = next((item for item in _children(db, ctx, "actions", risk_id) if str(item["id"]) == action_id), None)
+    if not item:
+        raise HTTPException(404, "Treatment action not found in this tenant and parent risk.")
+    if str(item["owner_user_id"]) != str(ctx.user_id):
+        raise HTTPException(403, "Only the action owner may submit treatment evidence.")
+    if item["status"] not in {"OPEN", "REWORK"}:
+        raise HTTPException(409, "Treatment action is not open for implementation.")
+    _verify_evidence(db, ctx, body.evidence_record_ids)
+    data = dict(item.get("payload") or {})
+    data.update({"implemented_by": ctx.user_id, "implemented_at": datetime.now(timezone.utc).isoformat(),
+                 "statement": body.statement, "evidence_record_ids": body.evidence_record_ids})
+    db.execute(text(
+        "UPDATE qms_risk_actions SET status='AWAITING_VERIFICATION', payload=CAST(:payload AS jsonb), "
+        "updated_at=now(), updated_by=:actor WHERE id=:id AND amo_id=:amo_id"
+    ), {"payload": json.dumps(data), "actor": ctx.user_id, "id": action_id, "amo_id": ctx.amo_id})
+    updated = _commit(db, ctx, row, request, "risk_treatment_implemented",
+                      {"last_implementation_action_id": action_id}, kind=kind)
+    return {"action_id": action_id, "status": "AWAITING_VERIFICATION", "risk_version": updated["payload"]["version"]}
+
+
+@router.post("/records/{kind}/{risk_id}/actions/{action_id}/verify")
+def verify_treatment(
+    kind: Literal["RISK", "OPPORTUNITY"], risk_id: str, action_id: str,
+    body: VerifyTreatment, request: Request,
+    ctx: TenantContext = Depends(require_quality_permission("qms.risk.manage")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    row = _risk(db, ctx, kind, risk_id, lock=True)
+    if row["status"] not in {"TREATING", "RESIDUAL_PENDING"}:
+        raise HTTPException(409, "Risk must remain active during treatment verification.")
+    item = next((item for item in _children(db, ctx, "actions", risk_id) if str(item["id"]) == action_id), None)
+    if not item or item["status"] != "AWAITING_VERIFICATION":
+        raise HTTPException(409, "Only a submitted treatment action may be verified.")
+    if str(item["owner_user_id"]) == str(ctx.user_id):
+        raise HTTPException(403, "Treatment owner cannot verify their own action.")
+    data = dict(item.get("payload") or {})
+    data.update({"verified_by": ctx.user_id, "verified_at": datetime.now(timezone.utc).isoformat(),
+                 "verification_reason": body.reason, "verification_accepted": body.accepted})
+    next_status = "VERIFIED" if body.accepted else "REWORK"
+    db.execute(text(
+        "UPDATE qms_risk_actions SET status=:status, payload=CAST(:payload AS jsonb), "
+        "updated_at=now(), updated_by=:actor WHERE id=:id AND amo_id=:amo_id"
+    ), {"status": next_status, "payload": json.dumps(data), "actor": ctx.user_id,
+        "id": action_id, "amo_id": ctx.amo_id})
+    updated = _commit(db, ctx, row, request, "risk_treatment_verified" if body.accepted else "risk_treatment_rejected",
+                      {"last_verification_action_id": action_id}, kind=kind)
+    return {"action_id": action_id, "status": next_status, "risk_version": updated["payload"]["version"]}
+
+
 @router.post("/records/{kind}/{risk_id}/accept")
 def accept_residual(
     kind: Literal["RISK", "OPPORTUNITY"], risk_id: str, body: AcceptResidual, request: Request,
@@ -338,6 +425,9 @@ def accept_residual(
         raise HTTPException(409, "Residual assessment evidence is missing.")
     if not body.acceptance_evidence_ids or any(not ref.strip() for ref in body.acceptance_evidence_ids):
         raise HTTPException(422, "Retained evidence IDs are required.")
+    _verify_evidence(db, ctx, body.acceptance_evidence_ids)
+    if any(action["status"] != "VERIFIED" for action in _children(db, ctx, "actions", risk_id)):
+        raise HTTPException(409, "Every assigned treatment action requires independent verification before residual acceptance.")
     return {"record": _commit(db, ctx, row, request, "risk_residual_accepted",
                               {"accepted_by": ctx.user_id, "accepted_at": datetime.now(timezone.utc).isoformat(),
                                "acceptance_reason": body.reason, "acceptance_evidence_ids": body.acceptance_evidence_ids},
