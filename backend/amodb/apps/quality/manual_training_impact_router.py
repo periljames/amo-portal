@@ -210,6 +210,10 @@ def assign_revision_training(
             # never silently modified by Document Control impact planning.
             if body.blocking and not req.blocking:
                 raise HTTPException(409, "An existing nonblocking Training requirement cannot become blocking by DMS linkage. Change it in Training.")
+            if body.mandatory and not req.is_mandatory:
+                raise HTTPException(409, "An optional Training requirement cannot become mandatory through a DMS link. Change it in Training.")
+            if req.required_by_date is None or req.required_by_date > body.required_by_date:
+                raise HTTPException(409, "The existing Training due date does not meet the requested revision-impact deadline. Change it through Training first.")
         else:
             req = training_models.TrainingRequirement(
                 amo_id=ctx.amo_id, course_id=body.course_id,
