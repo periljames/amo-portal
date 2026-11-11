@@ -2326,6 +2326,8 @@ def _require_governed_change_write(module: str) -> None:
         raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use the governed source-backed risk register, independent control verification and residual decision; generic edits bypass assessment authority.", "workflow": "risk/register"})
     if module == "risk":
         raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use tenant-matrix risk governance for assessments, controls and independent residual acceptance.", "workflow": "risk/governance"})
+    if module == "external-interface":
+        raise HTTPException(409, {"code": "GOVERNED_EXTERNAL_INTERFACE_REQUIRED", "message": "Use controlled response approval, submission proof and independent commitment verification.", "workflow": "external-interface/governance"})
 
 
 @core_router.post("/{module}/{record_id}/{action}")
