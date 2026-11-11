@@ -7464,6 +7464,24 @@ def list_car_responses_for_review(
     # silently hid the latest response after a successful resubmission.
     # Access still requires the canonical tenant-scoped reviewer guard above.
     latest = _car_invite_latest_active_response(db, car.id)
+    # Each public submission stores the *same* submitted_at on the CAR and its
+    # immutable response row. Use that transaction timestamp as the canonical
+    # read pointer when multiple attempts exist (especially after rejection).
+    # Ordering old response history alone must never show the previous attempt
+    # as the current resubmission. Historical records without an exact linked
+    # timestamp retain the original fallback behavior.
+    if car.submitted_at is not None:
+        committed_submission = (
+            db.query(models.CARResponse)
+            .filter(
+                models.CARResponse.car_id == car.id,
+                models.CARResponse.submitted_at == car.submitted_at,
+            )
+            .order_by(models.CARResponse.id.desc())
+            .first()
+        )
+        if committed_submission is not None and not _car_response_was_recalled(db, car.id, committed_submission):
+            latest = committed_submission
     responses = [latest] if latest is not None else []
     if mark_open and latest and car.status == models.CARStatus.PENDING_VERIFICATION:
         opened_at = _latest_action_at_after(db, car.id, CAR_INVITE_REVIEW_OPENED_PREFIX, latest.submitted_at)
