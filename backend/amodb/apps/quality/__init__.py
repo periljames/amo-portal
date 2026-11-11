@@ -230,6 +230,10 @@ _canonical_router.router.include_router(_management_review_workflow_router.route
 from . import risk_governance_router as _risk_governance_router  # noqa: F401,E402
 _canonical_router.router.include_router(_risk_governance_router.router)
 
+# External issues and commitments use existing canonical QMS tables and retained transmission proof.
+from . import external_interface_governance_router as _external_interface_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_external_interface_governance_router.router)
+
 # Risk governance extends canonical qms_risks/qms_risk_controls, without
 # assuming authority to accept a separately managed SMS safety risk.
 from . import risk_workflow_router as _risk_workflow_router  # noqa: F401,E402
