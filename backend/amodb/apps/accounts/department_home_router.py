@@ -12,7 +12,7 @@ from amodb.apps.tasks.models import Task, TaskStatus
 from amodb.database import get_db, get_read_db
 from amodb.security import get_current_active_user
 from . import models
-from .tenant_authority import active_admin_profile_session, tenant_member
+from .tenant_authority import active_admin_profile_session, is_standing_admin, tenant_member
 
 
 router = APIRouter(prefix="/home", tags=["department_home"])
@@ -189,7 +189,11 @@ def _allowed_departments(db: Session, user: models.User, amo: models.AMO) -> set
             code = _normalise_department(department.code)
             if code:
                 allowed.add(code)
-    if _admin_profile_active(db, user, amo):
+    # A standing tenant administrator can see supported department homes by
+    # appointment, without first activating the privileged Admin View session.
+    # Delegated administrators still require an active, tenant-bound grant session.
+    # This does NOT bypass the Admin View guard on privileged mutations.
+    if is_standing_admin(user, amo.id) or _admin_profile_active(db, user, amo):
         allowed.update(SUPPORTED_DEPARTMENTS)
     return allowed
 
