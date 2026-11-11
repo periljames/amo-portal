@@ -2323,6 +2323,8 @@ def _require_governed_change_write(module: str) -> None:
     if module == "management-review":
         raise HTTPException(409, {"code": "GOVERNED_MANAGEMENT_REVIEW_REQUIRED", "message": "Use the governed management-review meetings and action workflow; generic record mutation cannot authorize approvals or closure.", "workflow": "management-review/meetings"})
     if module == "risk":
+        raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use the governed source-backed risk register, independent control verification and residual decision; generic edits bypass assessment authority.", "workflow": "risk/register"})
+    if module == "risk":
         raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use tenant-matrix risk governance for assessments, controls and independent residual acceptance.", "workflow": "risk/governance"})
 
 
