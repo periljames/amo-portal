@@ -257,6 +257,7 @@ export default function QmsEquipmentCalibrationGovernancePage() {
             Independently release equipment</button>
         </form> : null}
       </div>}
+      </div>
     </main>
   </DepartmentLayout>;
 }
