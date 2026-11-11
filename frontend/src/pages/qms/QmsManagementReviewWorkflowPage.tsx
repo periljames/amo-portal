@@ -3,7 +3,7 @@ import { useSearchParams, useParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../../services/auth";
 import {
-  addReviewItem, completeReviewAction, createReviewMeeting,
+  addReviewItem, attestReviewAttendance, completeReviewAction, createReviewMeeting,
   listReviewMeetings, listReviewParticipants, listReviewSources,
   readReviewMeeting, transitionReview, verifyReviewAction,
   type ReviewDetail, type ReviewMeeting, type ReviewParticipant,
@@ -72,6 +72,7 @@ export default function QmsManagementReviewWorkflowPage() {
   const [actionDue, setActionDue] = useState("");
   const [decisionId, setDecisionId] = useState("");
   const [rationale, setRationale] = useState("");
+  const [attendanceStatement, setAttendanceStatement] = useState("");
   const [evidence, setEvidence] = useState("");
   const [implementation, setImplementation] = useState("");
   const [verification, setVerification] = useState("");
@@ -174,6 +175,8 @@ export default function QmsManagementReviewWorkflowPage() {
   const selectableDecisions = (detail?.decisions || []).filter((item) => item.payload.action_required);
   const canApprove = pending && meeting?.created_by !== userId;
   const allVerified = detail?.actions.every((action) => action.status === "VERIFIED") ?? false;
+  const confirmedPresent = Object.values(meeting?.payload.attendance || {}).some((item) => item.presence === "PRESENT");
+  const invited = Boolean(userId && meeting?.payload.attendees.includes(userId));
 
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
     <main className="qms-review">
@@ -226,7 +229,24 @@ export default function QmsManagementReviewWorkflowPage() {
               </div>
               <p>{meeting?.description}</p>
               <h3>Approved agenda</h3><ol>{meeting?.payload.agenda.map((item, index) => <li key={index}>{item}</li>)}</ol>
-              <p>Participants: {meeting?.payload.attendees.map((id) => participants.find((person) => person.id === id)?.name || id).join(", ")}</p>
+              <h3>Attendee evidence</h3>
+              <div className="qms-review__record-list">
+                {meeting?.payload.attendees.map((id) => {
+                  const attested = meeting?.payload.attendance?.[id];
+                  return <p key={id}><strong>{participants.find((person) => person.id === id)?.name || id}</strong> · {attested?.presence || "NOT ATTESTED"}
+                    {attested ? <small> · {attested.attested_at} — {attested.statement}</small> : null}</p>;
+                })}
+              </div>
+              {editable && invited ? <div className="qms-review__form">
+                <label>Your participation statement<textarea minLength={8} required value={attendanceStatement} onChange={(event) => setAttendanceStatement(event.target.value)} /></label>
+                <div className="qms-review__action">
+                  <button type="button" disabled={busy || attendanceStatement.trim().length < 8}
+                    onClick={() => void run(() => attestReviewAttendance(amoCode, meetingId, meeting!.payload.version, "PRESENT", attendanceStatement.trim()), "Your attendance has been attested.")}>Confirm present</button>
+                  <button type="button" disabled={busy || attendanceStatement.trim().length < 8}
+                    onClick={() => void run(() => attestReviewAttendance(amoCode, meetingId, meeting!.payload.version, "ABSENT", attendanceStatement.trim()), "Your absence has been attested.")}>Record absence</button>
+                </div>
+              </div> : null}
+              {editable && !confirmedPresent ? <p role="status">At least one invited participant must attest attendance before this review can be submitted.</p> : null}
             </div>
             <div className="qms-review__record-grid">
               <ReviewRecordGroup title="Source-backed inputs" items={detail.inputs} />
@@ -305,7 +325,7 @@ export default function QmsManagementReviewWorkflowPage() {
             {editable || pending || approved ? <form className="qms-review__panel qms-review__form" onSubmit={submit}>
               <h3>Governed decision</h3>
               <label>Reason / approval notes<textarea minLength={8} required value={rationale} onChange={(event) => setRationale(event.target.value)} /></label>
-              {editable ? <button type="submit" disabled={busy || rationale.trim().length < 8 || !detail.inputs.length || !detail.minutes.length || !detail.decisions.length}>Submit for approval</button> : null}
+              {editable ? <button type="submit" disabled={busy || !confirmedPresent || rationale.trim().length < 8 || !detail.inputs.length || !detail.minutes.length || !detail.decisions.length}>Submit for approval</button> : null}
               {canApprove ? <button type="button" disabled={busy || rationale.trim().length < 8} onClick={() => reviewTransition("approve")}>Approve independently</button> : null}
               {pending && !canApprove ? <p>An independent authorised reviewer must approve this meeting.</p> : null}
               {approved ? <button type="button" disabled={busy || !allVerified || rationale.trim().length < 8} onClick={() => reviewTransition("close")}>Close with verified action evidence</button> : null}
