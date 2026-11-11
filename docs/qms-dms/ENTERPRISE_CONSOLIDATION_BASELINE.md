@@ -81,3 +81,30 @@ Every in-scope flow must demonstrate **Initiate → Assign → Execute → Evide
 ## Evidence limits
 
 This baseline relies on GitHub metadata, selected source, dated documented live reviews and branch CI conclusions. It **does not** include a checked-out running backend, working database, authentication fixture, rendered screenshots, Graph tenant consent, KCAA legal verification, complete migration graph execution or physical disaster-recovery test. Those are NOT VERIFIED. GitHub PR descriptions and historical CI assertions are not independent acceptance. Refreshed state and exact code-level review are required before each port.
+
+## Older PR file-level reconciliation — continuation (2026-11-11)
+
+Verified each PR's current live state and changed-file inventory against main; **none of the below stale branches was merged wholesale**. Source presence in main is not proof of acceptance.
+
+| PR | Material diff families | Decision / canonical owner |
+| --- | --- | --- |
+| #534 | DMS workspace theme token and library chip overflow, two CSS files | **PARTIAL UNIQUE → PORTED**: theme-adaptive muted surface and wrapping category filters applied to current `documentControlWorkspace.css` and `documentLibrary.css`. No wholesale old CSS replacement. |
+| #512 | archive package preflight on evidence-input size and PostgreSQL INTEGER package-size bounds, older archive-route wrappers | **PARTIAL UNIQUE → PORTED** size checks **directly** into current `audit_archive_package_router.py`, preserving current route composition/cleanup. Its monkeypatch/route-order version was not imported. |
+| #540 | People frontend search/rail/dialog accessibility, semantic checks | **PARTIAL / NOT VERIFIED** distinct details: main already has 1335-line People authorization workspace, active personnel detail and governed authorization actions; 8 of 12 old UI hunks do not apply to main, indicating significant divergence. Do not overwrite current People UX without verifying individual behavior. |
+| #537 | checklist/report/role regression checks across quality and frontend | **PARTIAL / NOT VERIFIED** old branch touches 44 files, including real auth and audit permission modules. Current main has newer audit execution, RCA, QMS roles and route composition; preserve main, use the still-relevant negative tests during Phase 3 rather than sweeping older patches. |
+| #532 | old standalone audit command-search router and cockpit UI | **PARTIAL / NOT VERIFIED** old `command_search_router.py` absent main; main has `QmsCommandPalette.tsx` and current Audit Assurance Dashboard. Determine exact useful command/search semantics via Phase 3, avoiding duplicate command engine. |
+| #520 | audit resolver/personnel API alignment | **PARTIAL / NOT VERIFIED** main retains `qmsAuditOccurrenceResolver.ts` and later operational route-order fixes; older branch is divergent. Test exact authoritative resolver & personnel transaction paths before deciding on additional port. |
+| #353 | older independent Quality war-room/audit lifecycle engine | **SUPERSEDED architectural proposal, NOT VERIFIED each historical feature**: main retains newer canonical Audit Programme, Prepare, Live execution, fieldwork, archive and CAR engines. Do not create another `audit_lifecycle` engine. |
+| #40 | pre-modern CAR invites, enum/model/router/service/UI modifications | **SUPERSEDED architectural proposal, NOT VERIFIED every old detail**: current CAR public-invitation and control-loop routes from merged #568 are canonical. The ancient branch must not replace them. |
+| #290 | platform authz, audit ledger and training gates | **NOT VERIFIED** safe mainline overlap; refer security ownership to #564. QMS-specific guard checks may become acceptance tests, not platform wholesale import. |
+| #280 | E-signature platform capability with many migrations | **NOT VERIFIED / external owner**; controlled approvals in QMS/DMS do not assume external e-signatures exist or have regulatory validity. |
+| #519 | AI gateway/assistant runtime | **NOT VERIFIED / external owner**; existing Document Control assistant remains supplemental and cannot approve or publish. |
+| #479/#484 | OEM MPD governance and AMP (with #484 targeting #479, not main) | **NOT VERIFIED / external owner**; QMS links typed source identity only after OEM/AMP owner is merged/approved. |
+| #442/#278 | Planning/Production migrations, approvals, execution | **NOT VERIFIED / external owner**; no shadow planning or execution code imported. |
+| #452 | identity/user administration changes | **NOT VERIFIED / external owner**; current account and People permission sources remain authoritative. |
+
+**Risk acceptance hardening after initial baseline:** existing risk backend had allowed any declared rating to be selected independently of the likelihood/consequence pair; this did not establish a governed tenant matrix. The consolidated code now enforces complete `rating_cells`, revision-aware edits, server-calculated rating correctness and rejection of stale residual acceptance, while retaining a snapshot of the exact assessment matrix. No tenant matrix, threshold or compliance approval was fabricated.
+
+**Management review attendance:** invitations do not prove attendance. The specialist review now records a self-attested, timestamped, tenant-scoped presence/absence decision and blocks submission if none of the invited participants confirmed presence.
+
+**Storage/governance boundary:** #564 remains externally owned. Only needed shared inspection/control changes are in this PR. No platform readiness or disaster-recovery claim is made without on-environment proof.
