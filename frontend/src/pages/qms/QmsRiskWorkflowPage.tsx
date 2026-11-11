@@ -11,7 +11,6 @@ import "./qms-management-review.css";
 
 const kinds: QmsRiskSourceType[] = ["AUDIT", "CAR", "FINDING", "PROCESS", "SUPPLIER"];
 const errText = (error: unknown) => error instanceof Error ? error.message : "The request failed.";
-const getLines = (value: string) => value.split("\n").map((v) => v.trim()).filter(Boolean);
 type RiskDetail = { risk: QmsRisk; controls: RiskControl[] };
 function SelectOption({ label, choices, value, onChange }: {
   label: string; choices: RiskOption[]; value: string; onChange: (value: string) => void;
