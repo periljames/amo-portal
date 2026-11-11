@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
-from .canonical_core_router import _insert_record, _log_qms_activity
+from .canonical_core_router import _insert_record, _log_qms_activity, _table_columns
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 router = APIRouter(prefix="/risk/governance", tags=["QMS governed risk and opportunities"])
@@ -109,11 +109,14 @@ def _version(row: dict[str, Any], expected: int) -> None:
 
 
 def _matrix(db: Session, ctx: TenantContext) -> dict[str, Any]:
+    fields = _table_columns(db, "qms_settings")
+    projection = "payload, risk_matrix" if "risk_matrix" in fields else "payload"
     row = db.execute(text(
-        "SELECT payload FROM qms_settings WHERE amo_id=:amo_id AND deleted_at IS NULL "
+        f"SELECT {projection} FROM qms_settings WHERE amo_id=:amo_id AND deleted_at IS NULL "
         "ORDER BY created_at DESC, id DESC LIMIT 1"
     ), {"amo_id": ctx.amo_id}).mappings().first()
-    matrix = (row["payload"] or {}).get("risk_matrix") if row else None
+    matrix = ((row.get("risk_matrix") if "risk_matrix" in fields else None)
+              or (row.get("payload") or {}).get("risk_matrix")) if row else None
     if not isinstance(matrix, dict):
         return {}
     return matrix
@@ -145,22 +148,40 @@ def _children(db: Session, ctx: TenantContext, kind: str, risk_id: str) -> list[
 
 
 def _commit(db: Session, ctx: TenantContext, row: dict[str, Any], request: Request,
-            action: str, data: dict[str, Any], status: str | None = None) -> dict[str, Any]:
+            action: str, data: dict[str, Any], status: str | None = None,
+            *, kind: str, due_date: date | None = None) -> dict[str, Any]:
     payload = dict(row.get("payload") or {})
     payload.update(data)
     payload["version"] = int(payload.get("version", 1)) + 1
-    table = _TABLES[payload["kind"]]
+    payload["kind"] = kind
+    table = _TABLES[kind]
     saved = db.execute(text(
         f"UPDATE {table} SET payload=CAST(:payload AS jsonb), status=:status, "
-        "updated_at=now(), updated_by=:actor WHERE id=:id AND amo_id=:amo_id AND deleted_at IS NULL RETURNING *"
+        "due_date=COALESCE(:due_date, due_date), updated_at=now(), updated_by=:actor "
+        "WHERE id=:id AND amo_id=:amo_id AND deleted_at IS NULL RETURNING *"
     ), {"payload": json.dumps(payload), "status": status or row["status"],
-        "actor": ctx.user_id, "id": row["id"], "amo_id": ctx.amo_id}).mappings().one()
+        "actor": ctx.user_id, "id": row["id"], "amo_id": ctx.amo_id,
+        "due_date": due_date}).mappings().one()
     _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id,
                       action=action, module="risk", entity_type=table,
                       entity_id=str(row["id"]), new_value={"version": payload["version"], "change": data},
                       request=request)
     db.commit()
     return dict(saved)
+
+
+@router.get("/participants")
+def risk_participants(
+    ctx: TenantContext = Depends(require_quality_permission("qms.risk.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    rows = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    ).order_by(account_models.User.full_name).limit(100).all()
+    return {"items": [{"id": user.id, "name": user.full_name} for user in rows]}
 
 
 @router.get("/matrix")
@@ -253,7 +274,7 @@ def assess_risk(
         "actor_user_id": ctx.user_id, "recorded_at": datetime.now(timezone.utc).isoformat(),
     })
     updated = _commit(db, ctx, row, request, "risk_assessed",
-                      {"assessment_history": existing}, "ASSESSED" if body.assessment_type == "INITIAL" else "RESIDUAL_PENDING")
+                      {"assessment_history": existing}, "ASSESSED" if body.assessment_type == "INITIAL" else "RESIDUAL_PENDING", kind=kind)
     return {"record": updated}
 
 
@@ -273,7 +294,7 @@ def add_risk_control(
                                "title": body.title, "description": body.description, "status": "ACTIVE",
                                "payload": {"parent_id": risk_id, "kind": kind, "effectiveness_measure": body.effectiveness_measure},
                            })
-    updated = _commit(db, ctx, row, request, "risk_control_recorded", {"last_control_id": str(child["id"])}, "TREATING")
+    updated = _commit(db, ctx, row, request, "risk_control_recorded", {"last_control_id": str(child["id"])}, "TREATING", kind=kind)
     return {"record": updated, "control": child}
 
 
@@ -295,7 +316,7 @@ def add_treatment(
                                "owner_user_id": body.owner_user_id, "due_date": body.due_date,
                                "payload": {"parent_id": risk_id, "kind": kind},
                            })
-    updated = _commit(db, ctx, row, request, "risk_treatment_assigned", {"last_action_id": str(child["id"])}, "TREATING")
+    updated = _commit(db, ctx, row, request, "risk_treatment_assigned", {"last_action_id": str(child["id"])}, "TREATING", kind=kind)
     return {"record": updated, "action": child}
 
 
@@ -320,7 +341,7 @@ def accept_residual(
     return {"record": _commit(db, ctx, row, request, "risk_residual_accepted",
                               {"accepted_by": ctx.user_id, "accepted_at": datetime.now(timezone.utc).isoformat(),
                                "acceptance_reason": body.reason, "acceptance_evidence_ids": body.acceptance_evidence_ids},
-                              "ACCEPTED")}
+                              "ACCEPTED", kind=kind)}
 
 
 @router.post("/records/{kind}/{risk_id}/reassess")
@@ -337,8 +358,6 @@ def reopen_risk(
     data = {"reopened_by": ctx.user_id, "reopen_reason": body.reason,
             "reassess_by": body.reassess_by.isoformat(),
             "previous_acceptance": (row.get("payload") or {}).get("accepted_at")}
-    updated = _commit(db, ctx, row, request, "risk_reassessment_opened", data, "IDENTIFIED")
-    db.execute(text(f"UPDATE {_TABLES[kind]} SET due_date=:due_date WHERE id=:id AND amo_id=:amo_id"),
-               {"due_date": body.reassess_by, "id": risk_id, "amo_id": ctx.amo_id})
-    db.commit()
+    updated = _commit(db, ctx, row, request, "risk_reassessment_opened", data, "IDENTIFIED",
+                      kind=kind, due_date=body.reassess_by)
     return {"record": updated}
