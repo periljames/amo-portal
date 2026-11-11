@@ -408,16 +408,19 @@ def accept_residual(
     _version(row, body.expected_version)
     if row["status"] != "RESIDUAL_PENDING":
         raise HTTPException(409, "A current residual assessment is required for acceptance.")
-    if str(row["owner_user_id"]) == str(ctx.user_id):
-        raise HTTPException(403, "Residual risk acceptance requires an independently authorised reviewer.")
+    if (row.get("payload") or {}).get("source_system") == "SMS_LINKED":
+        raise HTTPException(409, "Quality may monitor a linked SMS record but cannot accept a risk owned by Safety Management.")
+    if str(row["owner_user_id"]) == str(ctx.user_id) or str(row["created_by"]) == str(ctx.user_id):
+        raise HTTPException(403, "The risk originator or treatment owner cannot independently accept residual risk.")
     checks = (row.get("payload") or {}).get("assessment_history") or []
     if not checks or checks[-1].get("type") != "RESIDUAL":
         raise HTTPException(409, "Residual assessment evidence is missing.")
     if not body.acceptance_evidence_ids or any(not ref.strip() for ref in body.acceptance_evidence_ids):
         raise HTTPException(422, "Retained evidence IDs are required.")
     _verify_evidence(db, ctx, body.acceptance_evidence_ids)
-    if any(action["status"] != "VERIFIED" for action in _children(db, ctx, "actions", risk_id)):
-        raise HTTPException(409, "Every assigned treatment action requires independent verification before residual acceptance.")
+    treatments = _children(db, ctx, "actions", risk_id)
+    if not treatments or any(action["status"] != "VERIFIED" for action in treatments):
+        raise HTTPException(409, "Residual acceptance requires at least one implemented and independently verified treatment action.")
     return {"record": _commit(db, ctx, row, request, "risk_residual_accepted",
                               {"accepted_by": ctx.user_id, "accepted_at": datetime.now(timezone.utc).isoformat(),
                                "acceptance_reason": body.reason, "acceptance_evidence_ids": body.acceptance_evidence_ids},
