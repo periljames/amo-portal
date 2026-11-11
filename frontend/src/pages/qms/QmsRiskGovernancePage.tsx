@@ -41,7 +41,6 @@ export default function QmsRiskGovernancePage() {
   const [assessmentType, setAssessmentType] = useState<"INITIAL" | "RESIDUAL">("INITIAL");
   const [likelihood, setLikelihood] = useState("");
   const [consequence, setConsequence] = useState("");
-  const [rating, setRating] = useState("");
   const [basis, setBasis] = useState("");
   const [evidence, setEvidence] = useState("");
   const [controlTitle, setControlTitle] = useState("");
@@ -126,7 +125,12 @@ export default function QmsRiskGovernancePage() {
   };
   const assessed = row?.status === "ASSESSED" || row?.status === "TREATING" || row?.status === "RESIDUAL_PENDING";
   const last = row?.payload.assessment_history?.at(-1);
-  const matrixReady = Boolean(matrix.version && matrix.likelihood_levels?.length && matrix.consequence_levels?.length && matrix.rating_levels?.length);
+  const matrixReady = Boolean(matrix.version && matrix.likelihood_levels?.length &&
+    matrix.consequence_levels?.length && matrix.rating_levels?.length &&
+    matrix.rating_cells && matrix.likelihood_levels.every((level) =>
+      matrix.consequence_levels?.every((impact) =>
+        matrix.rating_levels?.includes(matrix.rating_cells?.[level]?.[impact] ?? "") )));
+  const computedRating = matrix.rating_cells?.[likelihood]?.[consequence] || "";
   const editable = row && !["ACCEPTED", "CLOSED"].includes(row.status);
   const assignedToMe = row?.owner_user_id === userId;
 
@@ -137,7 +141,7 @@ export default function QmsRiskGovernancePage() {
       </div></header>
       {error ? <div className="qms-review__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void refresh()}>Reload</button></div> : null}
       {success ? <p role="status" className="qms-review__success">{success}</p> : null}
-      {!matrixReady ? <div role="status" className="qms-review__panel">The tenant does not have a supported, versioned risk matrix. Risk identification remains available; assessments are blocked until Quality configures likelihood, consequence and rating levels in governed QMS settings. No default scores or acceptance thresholds will be invented.</div> : null}
+      {!matrixReady ? <div role="status" className="qms-review__panel">The tenant does not have a supported, versioned risk matrix. Risk identification remains available; assessments are blocked until Quality configures likelihood, consequence, rating levels and an explicit complete rating_cells lookup in governed QMS settings. No default scores or acceptance thresholds will be invented.</div> : null}
       <div className="qms-review__grid">
         <div>
           <section className="qms-review__panel">
@@ -220,7 +224,7 @@ export default function QmsRiskGovernancePage() {
               <form className="qms-review__panel qms-review__form" onSubmit={(e) => {e.preventDefault(); void run(() =>
                 assessGovernedRisk(amoCode, kind, row.id, {
                   expected_version: version, assessment_type: assessmentType,
-                  matrix_version: matrix.version || "", likelihood, consequence, rating,
+                  matrix_version: matrix.version || "", likelihood, consequence, rating: computedRating,
                   evidence_basis: basis.trim(), evidence_record_ids: entries(evidence),
                 }), "Recorded the human assessment with its matrix version.");}}>
                 <h3>Governed assessment</h3>
@@ -234,12 +238,10 @@ export default function QmsRiskGovernancePage() {
                 <label>Consequence<select required value={consequence} onChange={(e) => setConsequence(e.target.value)}>
                   <option value="">Choose matrix level</option>{(matrix.consequence_levels || []).map((item) => <option key={item} value={item}>{item}</option>)}
                 </select></label>
-                <label>Rating selected under tenant methodology<select required value={rating} onChange={(e) => setRating(e.target.value)}>
-                  <option value="">Choose rating</option>{(matrix.rating_levels || []).map((item) => <option key={item} value={item}>{item}</option>)}
-                </select></label>
+                <p role="status">Matrix-derived rating: <strong>{computedRating || "Choose likelihood and consequence"}</strong></p>
                 <label>Evidence and assessment rationale<textarea minLength={12} required value={basis} onChange={(e) => setBasis(e.target.value)} /></label>
                 <label>Evidence record IDs (optional, one per line)<textarea value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
-                <button type="submit" disabled={busy || !matrixReady}>Retain {assessmentType.toLowerCase()} assessment</button>
+                <button type="submit" disabled={busy || !matrixReady || !computedRating}>Retain {assessmentType.toLowerCase()} assessment</button>
               </form>
               <div className="qms-review__forms qms-review__panel">
                 <form className="qms-review__form" onSubmit={(e) => {e.preventDefault(); act("controls", {
