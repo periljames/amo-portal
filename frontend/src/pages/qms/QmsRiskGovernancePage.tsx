@@ -4,7 +4,7 @@ import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getCachedUser } from "../../services/auth";
 import {
   acceptGovernedResidual, addGovernedRiskControl, addGovernedRiskTreatment,
-  assessGovernedRisk, createGovernedRisk, getGovernedRiskMatrix,
+  assessGovernedRisk, completeRiskTreatment, verifyRiskTreatment, createGovernedRisk, getGovernedRiskMatrix,
   getRiskParticipants, listGovernedRisks, readGovernedRisk, reopenGovernedRisk,
   type GovernedRisk, type GovernedRiskMatrix, type RiskDetail, type RiskKind, type RiskParticipant,
 } from "../../services/qmsRisk";
@@ -53,6 +53,8 @@ export default function QmsRiskGovernancePage() {
   const [treatmentDue, setTreatmentDue] = useState("");
   const [acceptReason, setAcceptReason] = useState("");
   const [reassessReason, setReassessReason] = useState("");
+  const [implementationStatement, setImplementationStatement] = useState("");
+  const [verificationReason, setVerificationReason] = useState("");
   const [reassessDate, setReassessDate] = useState("");
 
   const refresh = useCallback(async () => {
@@ -192,6 +194,28 @@ export default function QmsRiskGovernancePage() {
                 </article>)}
               </section>)}
             </div>
+            {detail?.actions.length ? <section className="qms-review__panel">
+              <h3>Treatment implementation and independent verification</h3>
+              <label>Implementation statement<textarea minLength={8} value={implementationStatement} onChange={(e) => setImplementationStatement(e.target.value)} /></label>
+              <label>Evidence record IDs (one per line)<textarea value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
+              <label>Independent verification rationale<textarea minLength={8} value={verificationReason} onChange={(e) => setVerificationReason(e.target.value)} /></label>
+              {detail.actions.map((item) => <div className="qms-review__action" key={item.id}>
+                <strong>{item.title}</strong><span>{item.status} · Owner {people.find((person) => person.id === item.owner_user_id)?.name || item.owner_user_id}</span>
+                {item.owner_user_id === userId && ["OPEN", "REWORK"].includes(item.status) ? <button
+                  type="button" disabled={busy || implementationStatement.trim().length < 8 || entries(evidence).length === 0}
+                  onClick={() => void run(() => completeRiskTreatment(
+                    amoCode, kind, row.id, item.id, implementationStatement.trim(), entries(evidence),
+                  ), "Treatment evidence recorded for independent verification.")}>Submit treatment evidence</button> : null}
+                {item.owner_user_id !== userId && item.status === "AWAITING_VERIFICATION" ? <>
+                  <button type="button" disabled={busy || verificationReason.trim().length < 8} onClick={() => void run(() =>
+                    verifyRiskTreatment(amoCode, kind, row.id, item.id, true, verificationReason.trim()),
+                    "Treatment independently verified.")}>Verify treatment</button>
+                  <button type="button" disabled={busy || verificationReason.trim().length < 8} onClick={() => void run(() =>
+                    verifyRiskTreatment(amoCode, kind, row.id, item.id, false, verificationReason.trim()),
+                    "Treatment returned for rework.")}>Reject treatment</button>
+                </> : null}
+              </div>)}
+            </section> : null}
             {editable ? <>
               <form className="qms-review__panel qms-review__form" onSubmit={(e) => {e.preventDefault(); void run(() =>
                 assessGovernedRisk(amoCode, kind, row.id, {
