@@ -205,6 +205,36 @@ def _package_indexes(inventory: list[dict[str, Any]]) -> dict[str, list[dict[str
     return buckets
 
 
+# QualityAuditArchiveManifest.package_size_bytes is persisted as PostgreSQL
+# INTEGER. Refuse unrepresentable packages before writing to governed storage.
+# ZIP64 overhead is bounded again against the final actual size.
+_MAX_ARCHIVE_PACKAGE_BYTES = 2_147_483_647
+_MAX_ARCHIVE_EVIDENCE_INPUT_BYTES = 2_000_000_000
+
+
+def _preflight_evidence_archive_size(inventory: list[dict[str, Any]]) -> int:
+    total = 0
+    for item in inventory:
+        if item.get("item_type") != "EVIDENCE_ARTIFACT":
+            continue
+        raw = (item.get("metadata") or {}).get("size_bytes")
+        if isinstance(raw, bool) or raw is None:
+            raise HTTPException(status_code=409, detail="Governed audit evidence must have a recorded file size.")
+        try:
+            size = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail="Governed audit evidence has invalid size metadata.") from exc
+        if size < 0:
+            raise HTTPException(status_code=409, detail="Governed audit evidence size cannot be negative.")
+        total += size
+        if total > _MAX_ARCHIVE_EVIDENCE_INPUT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Audit evidence exceeds the supported archive input size. Split retained evidence before generating the package.",
+            )
+    return total
+
+
 def _render_package(
     path: Path,
     *,
@@ -213,6 +243,7 @@ def _render_package(
     inventory: list[dict[str, Any]],
     timeline: list[dict[str, Any]],
 ) -> tuple[int, str]:
+    _preflight_evidence_archive_size(inventory)
     path.parent.mkdir(parents=True, exist_ok=True)
     indexes = _package_indexes(inventory)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -223,7 +254,13 @@ def _render_package(
             if item.get("item_type") == "EVIDENCE_ARTIFACT":
                 _zip_evidence_file(archive, item)
         _zip_json(archive, "timeline.json", {"items": timeline, "event_count": len(timeline)})
-    return path.stat().st_size, _sha256(path)
+    package_size = path.stat().st_size
+    if package_size > _MAX_ARCHIVE_PACKAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Generated audit archive exceeds the supported database package size. Split retained evidence before generating.",
+        )
+    return package_size, _sha256(path)
 
 
 def _latest_execution(db: Session, *, amo_id: str, audit_id: uuid.UUID, manifest_id: str | None = None) -> QualityAuditDispositionEvent | None:
