@@ -34,6 +34,7 @@ export type GovernedRiskMatrix = {
   likelihood_levels?: string[];
   consequence_levels?: string[];
   rating_levels?: string[];
+  rating_cells?: Record<string, Record<string, string>>;
 };
 function govPath(amoCode: string, suffix: string): string {
   return qmsPath(amoCode, "/risk/governance" + suffix);
