@@ -1,0 +1,37 @@
+.qms-review { padding: clamp(0.75rem, 2vw, 1.5rem); color: var(--text-primary, #172033); min-width: 0; }
+.qms-review__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+.qms-review__header p { margin: 0 0 .3rem; font-size: .75rem; letter-spacing: .09em; color: var(--text-secondary, #64748b); font-weight: 700; }
+.qms-review__header h1 { margin: 0 0 .4rem; font-size: clamp(1.25rem, 2vw, 1.8rem); }
+.qms-review__header span { color: var(--text-secondary, #64748b); }
+.qms-review__grid { display: grid; grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr); align-items: start; gap: 1rem; }
+.qms-review__panel, .qms-review__records { min-width: 0; padding: 1rem; margin-bottom: 1rem; background: var(--surface-elevated, #fff); border: 1px solid var(--border-subtle, #d8e0ea); border-radius: .55rem; }
+.qms-review__panel h2, .qms-review__records h3 { margin: 0 0 .8rem; }
+.qms-review__panel small, .qms-review__records small { color: var(--text-secondary, #64748b); }
+.qms-review__meeting-list, .qms-review__participant-list, .qms-review__record-list { display: grid; gap: .4rem; max-height: 24rem; overflow: auto; }
+.qms-review__meeting-list button { text-align: left; display: grid; gap: .2rem; border: 1px solid var(--border-subtle, #d8e0ea); background: var(--surface, #fff); padding: .7rem; border-radius: .4rem; cursor: pointer; }
+.qms-review__meeting-list button.selected { outline: 2px solid var(--accent-primary, #2563eb); }
+.qms-review__pager { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin: .75rem 0 1.25rem; font-size: .8rem; }
+.qms-review__record-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .7rem; align-items: start; }
+.qms-review__record-list article { border-top: 1px solid var(--border-subtle, #d8e0ea); padding: .6rem 0; display: grid; gap: .25rem; overflow-wrap: anywhere; }
+.qms-review__record-list article span { font-size: .7rem; font-weight: bold; }
+.qms-review__record-list article p { margin: .25rem 0; white-space: pre-wrap; }
+.qms-review__forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; align-items: start; }
+.qms-review__form { display: grid; gap: .65rem; align-content: start; }
+.qms-review__form h3 { margin: .2rem 0; }
+.qms-review label { display: grid; gap: .3rem; font-size: .83rem; }
+.qms-review input:not([type=checkbox]), .qms-review textarea, .qms-review select { width: 100%; box-sizing: border-box; padding: .55rem; border-radius: .35rem; background: var(--surface-elevated, #fff); border: 1px solid var(--border-subtle, #d8e0ea); color: inherit; font: inherit; }
+.qms-review textarea { min-height: 5.5rem; resize: vertical; }
+.qms-review button { border: 1px solid var(--border-subtle, #d8e0ea); background: var(--surface-elevated, #fff); color: inherit; border-radius: .38rem; padding: .5rem .75rem; min-height: 2.2rem; cursor: pointer; }
+.qms-review button:hover:not(:disabled) { border-color: var(--accent-primary, #2563eb); }
+.qms-review button:focus-visible, .qms-review input:focus-visible, .qms-review textarea:focus-visible, .qms-review select:focus-visible { outline: 2px solid var(--accent-primary, #2563eb); outline-offset: 2px; }
+.qms-review button:disabled { opacity: .55; cursor: not-allowed; }
+.qms-review__participant-list { max-height: 10rem; }
+.qms-review__participant-list label, .qms-review__check { display: flex; align-items: center; gap: .5rem; }
+.qms-review fieldset { border: 1px solid var(--border-subtle, #d8e0ea); border-radius: .35rem; }
+.qms-review__error { padding: .8rem; margin-bottom: 1rem; border: 1px solid #dc2626; border-radius: .4rem; }
+.qms-review__success { border-left: .2rem solid #16a34a; padding: .6rem; }
+.qms-review__action { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; padding: .8rem 0; border-top: 1px solid var(--border-subtle, #d8e0ea); }
+.qms-review__action span { color: var(--text-secondary, #64748b); }
+.qms-review__detail-heading { display: flex; justify-content: space-between; align-items: center; }
+@media (max-width: 800px) { .qms-review__grid { grid-template-columns: minmax(0,1fr); } .qms-review__header { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .qms-review * { scroll-behavior: auto; } }
