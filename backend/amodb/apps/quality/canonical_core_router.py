@@ -2322,6 +2322,8 @@ def _require_governed_change_write(module: str) -> None:
         raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
     if module == "management-review":
         raise HTTPException(409, {"code": "GOVERNED_MANAGEMENT_REVIEW_REQUIRED", "message": "Use the governed management-review meetings and action workflow; generic record mutation cannot authorize approvals or closure.", "workflow": "management-review/meetings"})
+    if module == "risk":
+        raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use tenant-matrix risk governance for assessments, controls and independent residual acceptance.", "workflow": "risk/governance"})
 
 
 @core_router.post("/{module}/{record_id}/{action}")
