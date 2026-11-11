@@ -7447,12 +7447,17 @@ def delete_car_attachment(
 def list_car_responses_for_review(
     car_id: UUID,
     request: Request,
+    response: Response,
     mark_open: bool = Query(True),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id, lock=mark_open)
     _require_car_review_access(db, current_user, car)
+    # The reviewer reads current, private CAR evidence. A prior response must
+    # never be replayed by browser/intermediary HTTP caches after resubmission.
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization, Cookie"
     # Review reads must reflect the latest durably committed submission, even
     # if CAR governance has transitioned to IN_PROGRESS for plan rework,
     # implementation or effectiveness. Filtering by the parent status here
