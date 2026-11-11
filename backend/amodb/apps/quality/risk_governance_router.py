@@ -298,6 +298,7 @@ def assess_risk(
         raise HTTPException(409, "Record active treatment controls before asserting a residual assessment.")
     existing.append({
         "type": body.assessment_type, "matrix_version": body.matrix_version,
+        "matrix_snapshot": _matrix(db, ctx),
         "likelihood": body.likelihood, "consequence": body.consequence, "rating": body.rating,
         "basis": body.evidence_basis, "evidence_record_ids": body.evidence_record_ids,
         "actor_user_id": ctx.user_id, "recorded_at": datetime.now(timezone.utc).isoformat(),
