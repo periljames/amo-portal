@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
 from .canonical_core_router import _insert_record, _log_qms_activity, _table_columns
+from .qms_evidence_reference_validation import require_evidence_records
 from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
 
 router = APIRouter(prefix="/risk/governance", tags=["QMS governed risk and opportunities"])
@@ -147,18 +148,7 @@ def _require_matrix(db: Session, ctx: TenantContext, payload: Assessment) -> Non
 
 
 def _verify_evidence(db: Session, ctx: TenantContext, references: list[str]) -> None:
-    if len(set(references)) != len(references) or any(not reference.strip() for reference in references):
-        raise HTTPException(422, "Evidence IDs must be nonempty and unique.")
-    if not references:
-        return
-    found = db.execute(text(
-        "SELECT CAST(id AS text) FROM qms_evidence_files WHERE amo_id=:amo_id "
-        "AND deleted_at IS NULL AND CAST(id AS text) IN :records"
-    ).bindparams(__import__("sqlalchemy").bindparam("records", expanding=True)), {
-        "amo_id": ctx.amo_id, "records": references,
-    }).scalars().all()
-    if set(found) != set(references):
-        raise HTTPException(422, "One or more evidence records are missing, archived or belong to another tenant.")
+    require_evidence_records(db, ctx.amo_id, references)
 
 
 def _children(db: Session, ctx: TenantContext, kind: str, risk_id: str) -> list[dict[str, Any]]:
