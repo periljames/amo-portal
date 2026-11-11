@@ -215,7 +215,7 @@ jobs:
               "const MAX_RESPONSE_CHARS = 8000;",
               "const MAX_EVIDENCE_REFERENCE_CHARS = 500;",
               'evidence_ref: clampEvidenceReference(invite.evidence_ref ?? "")',
-              "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())",
+              "evidence_ref: clampEvidenceReference(ready.form.evidence_ref.trim())",
               "maxChars={MAX_EVIDENCE_REFERENCE_CHARS}",
               "maxLength={maxChars}",
           ]
@@ -223,6 +223,8 @@ jobs:
           assert not missing, f"Public CAR invite length contract missing: {missing}"
           assert 'evidence_ref: clampResponseText(invite.evidence_ref ?? "")' not in source
           assert "evidence_ref: clampResponseText(current.form.evidence_ref.trim())" not in source
+          assert "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())" not in source
+          assert "ready.form.root_cause.trim() !== ready.rca.conclusion.trim()" in source
           PY
       - name: Verify CAR workspace uses governed evidence client
         run: |
