@@ -60,6 +60,11 @@ class Versioned(StrictModel):
     expected_version: int = Field(ge=1)
 
 
+class AttendanceConfirmation(Versioned):
+    presence: Literal["PRESENT", "ABSENT"]
+    statement: str = Field(min_length=8, max_length=2000)
+
+
 class InputCreate(Versioned):
     title: str = Field(min_length=4, max_length=255)
     summary: str = Field(min_length=8, max_length=5000)
@@ -285,6 +290,44 @@ def meeting_detail(
     return {"meeting": row, **{kind: _related(db, ctx, meeting_id, kind) for kind in _TABLES}}
 
 
+@router.post("/meetings/{meeting_id}/attendance")
+def confirm_own_attendance(
+    meeting_id: str, payload: AttendanceConfirmation, request: Request,
+    ctx: TenantContext = Depends(require_quality_permission("qms.management_review.view")),
+    db: Session = Depends(get_write_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    row = _meeting(db, ctx, meeting_id, lock=True)
+    _version(row, payload.expected_version)
+    if row["status"] != "DRAFT":
+        raise HTTPException(409, "Attendance can be attested only before review submission.")
+    meeting_data = row.get("payload") or {}
+    if ctx.user_id not in meeting_data.get("attendees", []):
+        raise HTTPException(403, "Only an invited attendee may attest their own attendance.")
+    attendance = dict(meeting_data.get("attendance") or {})
+    previous = attendance.get(ctx.user_id)
+    entry = {
+        "presence": payload.presence, "statement": payload.statement,
+        "attested_by": ctx.user_id, "attested_at": _now(),
+    }
+    attendance[ctx.user_id] = entry
+    updated = _bump(db, ctx, row)
+    updated_payload = dict(updated["payload"])
+    updated_payload["attendance"] = attendance
+    updated = dict(db.execute(text(
+        "UPDATE qms_management_reviews SET payload=CAST(:payload AS jsonb) "
+        "WHERE id=:id AND amo_id=:amo_id RETURNING *"
+    ), {"payload": json.dumps(updated_payload), "id": meeting_id, "amo_id": ctx.amo_id}).mappings().one())
+    _log_qms_activity(
+        db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id,
+        action="management_review_attendance_attested", module="management-review",
+        entity_type="qms_management_reviews", entity_id=meeting_id,
+        previous_value=previous, new_value=entry, request=request,
+    )
+    db.commit()
+    return {"attendance": entry, "meeting_version": updated["payload"]["version"]}
+
+
 @router.post("/meetings/{meeting_id}/inputs", status_code=201)
 def add_input(
     meeting_id: str, payload: InputCreate, request: Request,
@@ -359,6 +402,9 @@ def submit_meeting(
     if row["status"] != "DRAFT":
         raise HTTPException(409, "Only a draft management review can be submitted.")
     items = {kind: _related(db, ctx, meeting_id, kind) for kind in ("inputs", "minutes", "decisions", "actions")}
+    attendance = (row.get("payload") or {}).get("attendance") or {}
+    if not any(item.get("presence") == "PRESENT" for item in attendance.values()):
+        raise HTTPException(409, "At least one invited attendee must confirm participation before submission.")
     if not all(items[kind] for kind in ("inputs", "minutes", "decisions")):
         raise HTTPException(409, "Source-backed inputs, minutes and decisions are required before submission.")
     required = {str(item["id"]) for item in items["decisions"] if item["payload"].get("action_required")}
