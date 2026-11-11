@@ -247,6 +247,7 @@ export default function QmsExternalInterfaceGovernancePage() {
           </form>
         </> : null}
       </section>}
+      </div>
     </main>
   </DepartmentLayout>;
 }
