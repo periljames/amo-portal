@@ -1,6 +1,6 @@
 # AMO Portal Enterprise QMS/DMS — Implementation and Verification Ledger
 
-**Scope:** one consolidation PR, target `main`. **Phase 1 base:** `86a66d2d3630518a67ff3f02d5c9467cdcdfd90d`. **Current phase at creation:** Phase 1.  
+**Scope:** one consolidation PR, target `main`. **Phase 1 base:** `86a66d2d3630518a67ff3f02d5c9467cdcdfd90d`. **Initial phase:** Phase 1. **Current phase:** Phase 2, implementation in progress; no runtime acceptance.  
 Update on each change with commit SHA, affected paths, test evidence and acceptance state. No unchecked coding box by itself means completion.
 
 ## Status policy
@@ -43,10 +43,10 @@ Update on each change with commit SHA, affected paths, test evidence and accepta
 - [x] Phase 1: fetched current main SHA and live open/merged PR metadata.
 - [x] Phase 1: inspected mainline Quality, Document Control and Manuals source inventories, selected routes/models, PR diffs and migration dependencies.
 - [ ] Phase 1: finish detailed line/function reconciliation of overlapping 564/569/557/558 branches and remaining legacy PRs; record findings rather than assume old branch correctness.
-- [ ] Phase 2: implement DMS Office/Graph bridge with branch-specific corrections.
-- [ ] Phase 2: reconcile DMS company-library features with current main.
-- [ ] Phase 2: port authoritative checklist-binding and lineage, preserve frozen audit version.
-- [ ] Phase 2: implement specialist QMS management/risk/equipment/process/external-interface transactions.
+- [x] Phase 2 source work: incorporate coherent #569 DMS Office/Graph bridge; **NOT RUN/NOT VERIFIED**, final contract verification pending.
+- [x] Phase 2 source work: reconcile #557 company-library files with main, preserve Structure and provider-evidence navigation; **NOT RUN/NOT VERIFIED**.
+- [x] Phase 2 source work: port #558 authoritative paginated binding and lineage backend, Prepare and Live audit UI; **NOT RUN/NOT VERIFIED**.
+- [ ] Phase 2: implement specialist QMS management/risk/equipment/process/external-interface transactions. Management review backend/UI source added, **NOT RUN/NOT VERIFIED**; other specialist workflows remain.
 - [ ] Phase 2: connect cross-domain evidence/training/authorisations/supplier gates.
 - [ ] Phase 2: prepare focused regression coverage for each changed contract.
 - [ ] Phase 3: reconcile latest main and all Alembic heads.
@@ -64,3 +64,17 @@ For each completed code item append an entry: **UTC date / requirement ID / sour
 3. #564 is external platform ownership with a failing real-browser CAR check on its current head; moving that entire branch is prohibited.
 4. Live Graph Entra consent/credentials, PostgreSQL deployment and actual Word-export document fixtures were not available to this inspection. Mark those acceptance cases **BLOCKED** when reached, not passed.
 5. No running project checkout and no local full application/DB runner was available in this connected GitHub-only inspection; do not claim test execution.
+
+## Source-change log — 2026-11-11 (Phase 2, unexecuted acceptance)
+
+| Requirement | Changes made on consolidation branch | Evidence tier | Outstanding |
+| --- | --- | --- | --- |
+| DMS-01/02/03/04 | Reconciled PR #569 source-linked Office rendition, manual revision models, Graph integration, client experience and migrations from HEAD `4fb9536d07588fcb7048e962f7455f15222695cf`; preserved main PDF reader; no import auto-publish claim | PARTIAL — GitHub committed source only | Microsoft consent, checksum/publish security, PDF/Word visual fidelity, concurrency, migration and failure-path tests |
+| DMS-05/06 | Selective #557 library/discovery router, saved views/favorites model, multi-file upload changes, search/reader components, navigation/css. Preserved newer mainline Structure and provider evidence access; chained `docctl_261009_favorites` after `doc_m365_261028` | PARTIAL — source only | Server-side actor authorizations, query scale, accessibility, migration graph and browser proof |
+| AUD-01/02 | Bounded `checklist-bindings` read with exact count, persisted direct-ID and full item lineage; frontend authoritative Prepare counts/confirmation and Live item contexts; route order preserves `checklists/parse-upload` | PARTIAL — source only | Exact >100 live tenant/DB tests, offline conflict, route map and old audit compatibility |
+| QMS-02 | `management_review_workflow_router.py` uses canonical QMS tables, tenant/user/source validation, serial updates and optimistic versions, independent approval/action verification, forbidden generic writes; typed service, specialist React workflow and routed UX | PARTIAL — source only | Run PostgreSQL and browser transitions with two tenants; independent role tests, non-approver checks, retained evidence ID validation, UX accessibility and concurrent edits |
+| ENT-03 | Revision ordering changed to bring library favorites after Word/365 branch; no schema execution | NOT VERIFIED | Run complete Alembic `heads/history/upgrade` on fresh and upgrade-path PostgreSQL, compare #564 and main updates |
+
+Committed representative changes: DMS #569 tree reconciliation; QMS checklist backend/frontend commits; Document Control source remaster and responsive shell; management-review backend `31aff9557a0a92b3a82fcb8c9a7b988f87815912`, guarded generic router `3b1e2ee0e8066f34192efa797783b8bf0d8423c7`, typed service `683c13d23cf9a84e100dc7f5ba8cb33bbd20a108`, specialist page `ddcdfa81d3860fbce8558322b51dbbc7adf7e0cc` and route dispatch `40ee66b52b78d410b7cf5ed852abf48068591ee8`. Full final HEAD is mutable; refresh before verification.
+
+**Tests executed in this phase: none.** Focused test files are committed for later execution; historical branch CI failures remain unresolved, including the explicit #564 CAR browser failure. The current draft PR is [#570](https://github.com/periljames/amo-portal/pull/570), not merge-ready and not production-ready.
