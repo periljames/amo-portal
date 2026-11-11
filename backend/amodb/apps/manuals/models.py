@@ -180,6 +180,7 @@ class ManualReaderProgress(Base):
     scroll_percent = Column(Integer, nullable=False, default=0)
     zoom_percent = Column(Integer, nullable=False, default=100)
     bookmark_label = Column(String(255), nullable=True)
+    is_favorite = Column(Boolean, nullable=False, default=False, server_default="false")
     bookmarks_json = Column(JSON, nullable=False, default=list)
     last_opened_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
