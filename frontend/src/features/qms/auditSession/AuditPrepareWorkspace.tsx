@@ -43,6 +43,8 @@ import {
   bindCurrentDmsChecklist,
   createRealtimeAuditChecklist,
   parseUploadedAuditChecklist,
+  getChecklistBinding,
+  getChecklistBindingLineage,
   listChecklistBindings,
   listCurrentDmsChecklists,
   uploadDmsChecklistFromAudit,
@@ -339,11 +341,18 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 2_000,
   });
+  const [bindingPage, setBindingPage] = useState(0);
   const fullBindingsQuery = useQuery({
-    queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId],
-    queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal),
+    queryKey: ["qms", "prepare-checklist-bindings", amoCode, auditId, bindingPage],
+    queryFn: ({ signal }) => listChecklistBindings(amoCode, auditId, signal, { offset: bindingPage * 50, limit: 50 }),
     enabled: Boolean(auditId),
     staleTime: 3_000,
+  });
+  const lineageQuery = useQuery({
+    queryKey: ["qms", "prepare-checklist-binding-lineage", amoCode, auditId],
+    queryFn: ({ signal }) => getChecklistBindingLineage(amoCode, auditId, signal),
+    enabled: Boolean(auditId),
+    staleTime: 5_000,
   });
   const controlledDocumentsQuery = useQuery({
     queryKey: ["qms-canonical-document-control-documents", amoCode, auditId],
@@ -411,6 +420,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-bindings", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "prepare-checklist-binding-lineage", amoCode, auditId] }),
     ]);
   };
 
@@ -426,10 +436,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     // Checklist binding authority is the immutable binding table used by the
     // preparation/fieldwork backend. The aggregate context is a secondary projection
     // and must never erase or veto a binding already confirmed by canonical authority.
-    const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);
-    const confirmed = Boolean(bindingsConfirmation.items?.some((item) => item.id === binding.id));
-    if (!confirmed) return false;
-    queryClient.setQueryData(bindingQueryKey, bindingsConfirmation);
+    // A paginated list can lag or omit a committed binding; confirm its exact
+    // identity against the tenant-scoped persisted authority instead.
+    const bindingConfirmation = await getChecklistBinding(amoCode, auditId, binding.id);
+    if (bindingConfirmation.id !== binding.id) return false;
+    await queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" });
 
     try {
       const contextConfirmation = await getAuditPreparationContext(amoCode, auditId);
@@ -452,6 +463,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.invalidateQueries({ queryKey: ["qms-audit-checklist-execution", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-bindings", amoCode, auditId] }),
+      queryClient.invalidateQueries({ queryKey: ["qms", "prepare-checklist-binding-lineage", amoCode, auditId] }),
     ]);
     return true;
   };
@@ -769,16 +781,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const selectedDmsChecklist = dmsChecklists.find((item) => item.document_id === effectiveDmsChecklistId) || null;
   const selectedRealtimeDocument = documents.find((document) => document.id === checklistDmsDocumentId) || null;
   const selectedRequestDocument = documents.find((document) => document.id === newRequest.controlledDocumentId) || null;
-  const requestChecklistOptions = (fullBindingsQuery.data?.items || []).flatMap((binding) =>
-    binding.instantiated_item_ids.map((itemId, index) => {
-      const item = binding.item_snapshot[index];
-      return {
-        id: itemId,
-        label: item?.checklist_ref || item?.requirement_ref || item?.prompt || `Checklist item ${index + 1}`,
-        section: item?.section || null,
-      };
-    }),
-  );
+  const requestChecklistOptions = (lineageQuery.data?.items || []).map((lineage, index) => ({
+    id: lineage.checklist_item_id,
+    label: lineage.source_context?.checklist_ref || lineage.source_context?.requirement_ref || lineage.source_context?.prompt || `Checklist item ${index + 1}`,
+    section: lineage.source_context?.section || null,
+  }));
   const dmsResponseSchemeValid = Boolean(
     dmsResponseType
     && (dmsResponseType !== "CUSTOM"
@@ -867,7 +874,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || applicabilityQuery.error || fullBindingsQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
+  const prerequisiteError = contextQuery.error || requestsQuery.error || participantsQuery.error || sessionQuery.error || applicabilityQuery.error || fullBindingsQuery.error || lineageQuery.error || preparationRevisionsQuery.error || readinessQuery.error;
   if (prerequisiteError) {
     return (
       <AuditStageLoadError
@@ -905,23 +912,24 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     );
   }
 
-  const samplingPlan = (fullBindingsQuery.data?.items || []).flatMap((binding) =>
-    binding.item_snapshot.flatMap((item, index) => item.sampling_requirement?.trim()
+  const samplingPlan = (lineageQuery.data?.items || []).flatMap((lineage, index) => {
+    const item = lineage.source_context;
+    return item.sampling_requirement?.trim()
       ? [{
-          key: `${binding.id}:${index}`,
+          key: lineage.checklist_item_id,
           section: item.section || "Checklist",
           reference: item.checklist_ref || item.requirement_ref || `Item ${index + 1}`,
           requirement: item.sampling_requirement,
           method: item.audit_method || null,
         }]
-      : [])
-  );
+      : [];
+  });
   const meetingPlan = context.opening_meeting_records || [];
   const controlledReferences = controlledDocumentSources(context.regulatory_and_manual_basis.source_references);
   const prepRevision = context.controlled_preparation?.latest_revision;
   const offlinePackStatus = offlinePackQuery.data;
   const bindings = fullBindingsQuery.data?.items || [];
-  const checklistBindings = bindings.length;
+  const checklistBindings = fullBindingsQuery.data?.total ?? 0;
   const readinessWarning = Boolean(readiness && !readiness.issue_ready);
   const fieldworkOpen = Boolean(readiness?.fieldwork_ready) && isAtLeastLiveStage(sessionQuery.data?.current_stage_id);
   const stageBlocked = !fieldworkOpen;
@@ -1009,7 +1017,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             </div>
             <span className="qms-audit-prepare-stage__meta-chip">{checklistBindings} bound</span>
           </header>
-          {bindings.length ? (
+          {checklistBindings > 0 ? (
             <div className="qms-audit-prepare__binding-list" aria-label="Bound checklist revisions">
               {bindings.map((binding) => (
                 <article key={binding.id}>
@@ -1017,10 +1025,15 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
                   <div><strong>{binding.template_code} · Rev {binding.revision_no}</strong><small>{binding.application_reason}</small></div>
                 </article>
               ))}
+              <div role="navigation" aria-label="Bound checklist revision pages">
+                <span>Showing {bindings.length ? bindingPage * 50 + 1 : 0}–{bindingPage * 50 + bindings.length} of {checklistBindings}</span>
+                <button type="button" disabled={bindingPage === 0 || fullBindingsQuery.isFetching} onClick={() => setBindingPage((page) => Math.max(0, page - 1))}>Previous bindings</button>
+                <button type="button" disabled={(bindingPage + 1) * 50 >= checklistBindings || fullBindingsQuery.isFetching} onClick={() => setBindingPage((page) => page + 1)}>Next bindings</button>
+              </div>
             </div>
           ) : <p className="qms-audit-prepare__empty">No fieldwork checklist is bound. Fieldwork cannot open until one is selected or created.</p>}
 
-          {bindings.length ? <ChecklistSourceReview amoCode={amoCode} auditId={auditId} hasPendingChanges={false}
+          {checklistBindings > 0 ? <ChecklistSourceReview amoCode={amoCode} auditId={auditId} hasPendingChanges={false}
             onRebuilt={async () => {
               await removeAuditOfflinePack(auditId);
               await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes(auditId) });
