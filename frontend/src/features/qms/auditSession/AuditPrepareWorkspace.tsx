@@ -433,25 +433,18 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.cancelQueries({ queryKey: ["qms-audit-preparation-revisions", amoCode, auditId] }),
     ]);
 
-    // Checklist binding authority is the immutable binding table used by the
-    // preparation/fieldwork backend. The aggregate context is a secondary projection
-    // and must never erase or veto a binding already confirmed by canonical authority.
-    // A paginated list can lag or omit a committed binding; confirm its exact
-    // identity against the tenant-scoped persisted authority instead.
+    // This read is the acceptance boundary: verify the exact persisted
+    // tenant-scoped binding rather than trusting a POST response or a stale
+    // paginated/context projection. Never report success without it.
     const bindingConfirmation = await getChecklistBinding(amoCode, auditId, binding.id);
-    if (bindingConfirmation.id !== binding.id) return false;
-    await queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" });
+    if (bindingConfirmation.id !== binding.id || bindingConfirmation.audit_id !== auditId) return false;
 
-    try {
-      const contextConfirmation = await getAuditPreparationContext(amoCode, auditId);
-      queryClient.setQueryData(["qms-audit-preparation-context", amoCode, auditId], contextConfirmation);
-    } catch {
-      void queryClient.invalidateQueries({
-        queryKey: ["qms-audit-preparation-context", amoCode, auditId],
-        refetchType: "active",
-      });
-    }
-    await Promise.all([
+    // Do not hold the user-visible durable confirmation behind unrelated
+    // preparation, fieldwork, activity, library or replica projections.
+    // Query invalidation still reconciles each dependent surface independently.
+    void Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: bindingQueryKey, refetchType: "active" }),
+      queryClient.invalidateQueries({ queryKey: ["qms-audit-preparation-context", amoCode, auditId], refetchType: "active" }),
       queryClient.invalidateQueries({ queryKey: ["qms-governed-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-document-requests", amoCode, auditId] }),
       queryClient.invalidateQueries({ queryKey: ["qms-audit-external-participants", amoCode, auditId] }),
