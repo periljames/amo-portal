@@ -81,3 +81,22 @@ export function acceptGovernedResidual(amoCode: string, kind: RiskKind, riskId: 
 export function reopenGovernedRisk(amoCode: string, kind: RiskKind, riskId: string, fields: Record<string, unknown>) {
   return riskPost<{ record: GovernedRisk }>(amoCode, riskRecordPath(kind, riskId) + "/reassess", fields);
 }
+
+export function completeRiskTreatment(
+  amoCode: string, kind: RiskKind, riskId: string, actionId: string,
+  statement: string, evidence_record_ids: string[],
+) {
+  return riskPost<{ action_id: string; status: string }>(
+    amoCode, riskRecordPath(kind, riskId) + "/actions/" + encodeURIComponent(actionId) + "/complete",
+    { statement, evidence_record_ids },
+  );
+}
+export function verifyRiskTreatment(
+  amoCode: string, kind: RiskKind, riskId: string, actionId: string,
+  accepted: boolean, reason: string,
+) {
+  return riskPost<{ action_id: string; status: string }>(
+    amoCode, riskRecordPath(kind, riskId) + "/actions/" + encodeURIComponent(actionId) + "/verify",
+    { accepted, reason },
+  );
+}
