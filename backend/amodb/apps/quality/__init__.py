@@ -243,6 +243,11 @@ _canonical_router.router.include_router(_equipment_calibration_governance_router
 from . import system_process_governance_router as _system_process_governance_router  # noqa: F401,E402
 _canonical_router.router.include_router(_system_process_governance_router.router)
 
+# Controlled manual-to-training links retain exact published DMS revision
+# identities; course/requirements/completions remain owned by Training.
+from . import manual_training_impact_router as _manual_training_impact_router  # noqa: F401,E402
+_canonical_router.router.include_router(_manual_training_impact_router.router)
+
 # Tenant mail identities are Quality settings, not tenant Resend transports.
 # Include the static API before catch-all route finalization.
 from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402
