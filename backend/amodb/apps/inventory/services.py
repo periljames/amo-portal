@@ -583,14 +583,14 @@ def _require_calibration_eligibility_for_issue(
             detail="Issuing serialized equipment requires an identified accountable actor.",
         )
     set_postgres_tenant_context(db, amo_id=amo_id, user_id=actor_user_id)
+    lock_clause = " FOR SHARE" if db.get_bind().dialect.name == "postgresql" else ""
     equipment = db.execute(text("""
         SELECT id, amo_id, status, due_date, payload
         FROM qms_equipment
         WHERE amo_id = :amo_id AND deleted_at IS NULL
           AND payload ->> 'inventory_serial_id' = :serial_id
         ORDER BY created_at DESC, id DESC LIMIT 2
-        FOR SHARE
-    """), {"amo_id": amo_id, "serial_id": str(serial_id)}).mappings().all()
+    """ + lock_clause), {"amo_id": amo_id, "serial_id": str(serial_id)}).mappings().all()
     if not equipment:
         return
     if len(equipment) > 1:
