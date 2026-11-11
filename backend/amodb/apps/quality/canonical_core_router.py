@@ -1096,7 +1096,7 @@ def _settings_response(row) -> dict[str, Any]:
     embedded = dict(row.get("payload") or {})
     return {
         **{key: row.get(key) for key in ("id", "created_at", "updated_at")},
-        **{key: row[key] if key in row else embedded.get(key, {}) for key in _SETTINGS_GROUPS},
+        **{key: row.get(key) if key in row and row.get(key) is not None else embedded.get(key, {}) for key in _SETTINGS_GROUPS},
     }
 
 
