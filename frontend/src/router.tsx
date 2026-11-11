@@ -83,6 +83,8 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
   if (route.module.id === "cars") return false;
+  // Management Review now has source-backed governed transitions rather than a generic register editor.
+  if (route.module.id === "management-review") return false;
   // Findings list aliases and record details are owned by the Audit Assurance
   // Findings & Actions workspace in PortalRouteSurface.
   if (route.module.id === "findings") return false;
