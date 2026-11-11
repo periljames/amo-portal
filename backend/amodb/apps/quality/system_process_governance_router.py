@@ -298,6 +298,17 @@ def submit_review(
     if str(row["owner_user_id"]) != str(ctx.user_id):
         raise HTTPException(403, "Only the accountable process owner may submit performance evidence.")
     require_evidence_records(db, ctx.amo_id, body.evidence_ids, required=True)
+    overlapping = db.execute(text(
+        "SELECT id FROM qms_process_performance_reviews "
+        "WHERE amo_id=:amo_id AND process_id=:process_id "
+        "AND period_start <= :period_end AND period_end >= :period_start "
+        "AND status IN ('PENDING_VERIFICATION','VERIFIED') LIMIT 1"
+    ), {
+        "amo_id": ctx.amo_id, "process_id": process_id,
+        "period_start": body.period_start, "period_end": body.period_end,
+    }).first()
+    if overlapping:
+        raise HTTPException(409, "This process already has a pending or verified review for an overlapping period.")
     objectives = _objectives(db, ctx, process_id)
     index = {str(item["id"]): item for item in objectives}
     if len(body.measures) != len(index) or {item.objective_id for item in body.measures} != set(index):
