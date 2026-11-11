@@ -51,6 +51,7 @@ import {
 } from "../../../services/qmsChecklistExecutionGovernance";
 import {
   listChecklistBindings,
+  getChecklistBindingLineage,
   type ChecklistResponseOption,
   type ChecklistTemplateItem,
 } from "../../../services/qmsChecklistTemplates";
@@ -338,6 +339,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: fieldworkEnabled,
     staleTime: 30_000,
   });
+  const lineageQuery = useQuery({
+    queryKey: ["qms", "live-audit-binding-lineage", amoCode, auditId],
+    queryFn: ({ signal }) => getChecklistBindingLineage(amoCode, auditId, signal),
+    enabled: fieldworkEnabled,
+    staleTime: 30_000,
+  });
   const findingsQuery = useQuery({
     queryKey: ["qms", "live-audit-findings", amoCode, auditId],
     queryFn: async () => {
@@ -448,11 +455,11 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const acceptedBaseRows = useMemo(() => restoreChecklistReceipts(checklistQuery.data?.items || [], acceptedRows), [checklistQuery.data?.items, acceptedRows]);
   const items = useMemo(() => {
     const rows = projectPendingChecklistItems(acceptedBaseRows, outboxQuery.data ?? []);
-    const sourceOrder = new Map((bindingsQuery.data?.items || []).flatMap((binding) => binding.instantiated_item_ids)
-      .map((id, index) => [id, index]));
+    const sourceOrder = new Map((lineageQuery.data?.items || [])
+      .map((entry, index): [string, number] => [entry.checklist_item_id, index]));
     return [...rows].sort((a, b) => (sourceOrder.get(a.checklist_item_id) ?? Number.MAX_SAFE_INTEGER)
       - (sourceOrder.get(b.checklist_item_id) ?? Number.MAX_SAFE_INTEGER));
-  }, [acceptedBaseRows, outboxQuery.data, bindingsQuery.data]);
+  }, [acceptedBaseRows, outboxQuery.data, lineageQuery.data]);
 
   const localAnswers = useMemo(() => {
     const result = new Map<string, { value: string; canonical: CanonicalChecklistResponse; status: string }>();
@@ -470,20 +477,16 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const itemNumberById = useMemo(() => new Map<string, number>(items.map((item, index): [string, number] => [item.checklist_item_id, index + 1])), [items]);
   const sourceContextByItemId = useMemo(() => {
     const map = new Map<string, LiveChecklistSourceContext>();
-    for (const binding of bindingsQuery.data?.items || []) {
-      binding.instantiated_item_ids.forEach((itemId, index) => {
-        const snapshot = binding.item_snapshot[index];
-        if (!snapshot) return;
-        map.set(itemId, {
-          ...snapshot,
-          templateCode: binding.template_code,
-          revisionNo: binding.revision_no,
-          contentSha256: binding.content_sha256,
-        });
+    for (const lineage of lineageQuery.data?.items || []) {
+      map.set(lineage.checklist_item_id, {
+        ...lineage.source_context,
+        templateCode: lineage.template_code,
+        revisionNo: lineage.revision_no,
+        contentSha256: lineage.content_sha256,
       });
     }
     return map;
-  }, [bindingsQuery.data?.items]);
+  }, [lineageQuery.data?.items]);
   const serverItemsById = useMemo(() => new Map(acceptedBaseRows.map((item) => [item.checklist_item_id, item])), [acceptedBaseRows]);
   const visibleItems = useMemo(() => {
     const term = checklistSearch.trim().toLowerCase();
@@ -554,7 +557,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       void cacheAuditFieldworkPack(amoCode, auditId).then(() => { if (active) setOfflinePackReady(true); }).catch(() => undefined);
     }, 800);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [amoCode, auditId, connectivity, checklistQuery.data, bindingsQuery.data, findingsQuery.data]);
+  }, [amoCode, auditId, connectivity, checklistQuery.data, bindingsQuery.data, lineageQuery.data, findingsQuery.data]);
   const evidenceCandidates = evidenceCandidatesQuery.data?.items || [];
   const updateAssessmentDraft = (changes: Partial<ChecklistAssessmentState>) => {
     if (!selected || !assessment) return;
@@ -1044,7 +1047,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       />
     );
   }
-  if (checklistQuery.isLoading || bindingsQuery.isLoading || findingsQuery.isLoading) {
+  if (checklistQuery.isLoading || bindingsQuery.isLoading || lineageQuery.isLoading || findingsQuery.isLoading) {
     return <div className="qms-live-audit-focus qms-live-audit-focus--loading">Preparing live audit workspace…</div>;
   }
   const prerequisiteError = !checklistQuery.data ? checklistQuery.error : null;
@@ -1060,6 +1063,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         onRetry={() => {
           void checklistQuery.refetch();
           void bindingsQuery.refetch();
+          void lineageQuery.refetch();
           void findingsQuery.refetch();
         }}
         exitHref={auditSessionPath(amoCode, auditKey, "prepare")}
@@ -1451,7 +1455,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         <section id="audit-occurrence-checklist" className="qms-live-audit-focus__matrix" aria-label="Checklist assessment table">
           <AuditChecklistToolbar search={checklistSearch} onSearch={setChecklistSearch} filter={checklistFilter} onFilter={setChecklistFilter}
             visible={visibleItems.length} total={items.length}
-            sourceLabel={bindingsQuery.data?.items?.length ? bindingsQuery.data.items.map((binding) => `${binding.template_code} · Rev ${binding.revision_no}`).join(" / ") : "Audit checklist"}
+            sourceLabel={(bindingsQuery.data?.total ?? 0) > 0 ? `${bindingsQuery.data?.total ?? 0} governed checklist revision(s)` : "Audit checklist"}
             sections={visibleItems.filter((item, index) => index === 0 || visibleItems[index - 1].section !== item.section).map((item) => ({ id: item.checklist_item_id, title: item.section || "Checklist" }))} />
           <AuditChecklistTable items={visibleItems} numberById={itemNumberById}
             optionsForItem={(item) => {
