@@ -648,7 +648,7 @@ export default function DocumentLibraryHubPage() {
     { headerName: "Owner", minWidth: 170, flex: 1, valueGetter: ({ data: item }) => item ? item.owner.name || item.owner.department || "Unassigned" : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{item.owner.name || "Unassigned"}</strong><small>{item.owner.department || "No department"}</small></div> : null },
     { headerName: "Review due", minWidth: 145, valueGetter: ({ data: item }) => item?.next_review_due || "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><strong>{formatDate(item.next_review_due)}</strong><small>{item.last_opened_at ? `Opened ${formatDate(item.last_opened_at)}` : "Not recently opened"}</small></div> : null },
     { headerName: "State", minWidth: 135, valueGetter: ({ data: item }) => item ? `${item.lifecycle_status} ${item.document_class}` : "", cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-stack"><DocumentControlStatus status={item.lifecycle_status} kind={statusKind(item.lifecycle_status)} /><small>{item.document_class}</small></div> : null },
-    { headerName: "Actions", width: canControl ? 205 : 90, minWidth: canControl ? 205 : 90, pinned: "right", sortable: false, filter: false, cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision ? "Read current" : "Read latest"}</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}</div> : null },
+    { headerName: "Actions", width: canControl ? 205 : 90, minWidth: canControl ? 205 : 90, pinned: "right", sortable: false, filter: false, cellRenderer: ({ data: item }: ICellRendererParams<LibraryDiscoveryItem>) => item ? <div className="dlibrary__ag-actions"><button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision?.status === "PUBLISHED" && item.current_revision.id === item.read_target_revision_id ? "Read current" : "Read latest"}</button>{canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}</div> : null },
   ], [basePath, canControl, navigate, openDiscoveryReader]);
 
   const defaultColumn = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true, suppressHeaderMenuButton: false }), []);
@@ -843,7 +843,7 @@ export default function DocumentLibraryHubPage() {
                 <span className="dlibrary-row__owner"><strong>{item.owner.name || "Unassigned"}</strong><small>{item.owner.department || "No department"}</small></span>
                 <DocumentControlStatus status={item.lifecycle_status} kind={statusKind(item.lifecycle_status)} />
               </button>
-              <div className="dlibrary-row__actions"><button type="button" className="dc-button" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision ? "Read current" : "Read latest"}</button></div>
+              <div className="dlibrary-row__actions"><button type="button" className="dc-button" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision?.status === "PUBLISHED" && item.current_revision.id === item.read_target_revision_id ? "Read current" : "Read latest"}</button></div>
             </article>;
           })}
         </div> : null}
@@ -904,7 +904,7 @@ export default function DocumentLibraryHubPage() {
               </dl>
               <div className="dlibrary-card__context"><span>{item.document_class} · {typeLabel}</span><span>{revision?.page_count ? `${revision.page_count} pages` : revision?.source_filename || "No source file"}</span></div>
               <footer>
-                <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision ? "Read current" : "Read latest"}</button>
+                <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision?.status === "PUBLISHED" && item.current_revision.id === item.read_target_revision_id ? "Read current" : "Read latest"}</button>
                 <button type="button" className="dc-button" onClick={() => selectDiscoveryItem(item)}>Details</button>
               </footer>
             </article>;
