@@ -9,6 +9,7 @@ const QmsAuditProgrammeSchedulePage = lazy(qmsPageLoaders.programmeSchedule);
 const QmsAuditProgrammeWorkspacePage = lazy(qmsPageLoaders.programme);
 const QmsModuleWorkspacePage = lazy(qmsPageLoaders.module);
 const QmsManagementReviewWorkflowPage = lazy(() => import("./QmsManagementReviewWorkflowPage"));
+const QmsProcessGovernancePage = lazy(() => import("./QmsProcessGovernancePage"));
 const QmsRiskGovernancePage = lazy(() => import("./QmsRiskGovernancePage"));
 const QmsExternalInterfaceGovernancePage = lazy(() => import("./QmsExternalInterfaceGovernancePage"));
 const QmsEquipmentCalibrationGovernancePage = lazy(() => import("./QmsEquipmentCalibrationGovernancePage"));
@@ -125,6 +126,7 @@ function QmsCanonicalContent(): React.ReactElement {
   if (pathname.includes("/quality/risk")) {
     return <QmsRiskGovernancePage />;
   }
+  if (pathname.includes("/quality/system")) return <QmsProcessGovernancePage />;
   if (pathname.includes("/quality/management-review")) {
     return <QmsManagementReviewWorkflowPage />;
   }
