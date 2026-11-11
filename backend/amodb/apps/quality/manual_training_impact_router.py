@@ -106,7 +106,7 @@ def course_and_people_catalog(
         account_models.User.is_active.is_(True),
         account_models.User.is_system_account.is_(False),
     ).order_by(account_models.User.full_name).limit(200).all()
-    return {"courses": [{"id": c.id, "code": c.course_id, "title": c.title} for c in courses],
+    return {"courses": [{"id": c.id, "code": c.course_id, "title": c.course_name} for c in courses],
             "people": [{"id": p.id, "name": p.full_name} for p in people]}
 
 
