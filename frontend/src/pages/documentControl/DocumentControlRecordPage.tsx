@@ -226,7 +226,7 @@ export default function DocumentControlRecordPage() {
         {activeView === "workflow" ? <WorkflowView detail={detail} /> : null}
         {activeView === "distribution" ? <DistributionView detail={detail} /> : null}
         {activeView === "compliance" ? <ComplianceView detail={detail} regulationLinks={regulationLinks} /> : null}
-        {activeView === "compliance" && document.latest_revision?.id && amoCode ? <DocumentRevisionTrainingImpactPanel amoCode={amoCode} manualId={document.id} revisionId={document.latest_revision.id} canControl={canControl} /> : null}
+        {activeView === "compliance" && amoCode && (document.read_target.revision_id || document.latest_revision?.id) ? <DocumentRevisionTrainingImpactPanel amoCode={amoCode} manualId={document.id} revisionId={document.read_target.kind === "PUBLISHED" && document.read_target.revision_id ? document.read_target.revision_id : document.latest_revision!.id} canControl={canControl} /> : null}
         {activeView === "relationships" ? <RelationshipsView detail={detail} governance={governance} loading={governanceLoading} error={governanceError} onRetry={() => { setGovernance(null); setGovernanceError(""); }} onOpenGovernance={() => navigate(`${basePath}/library/${document.id}?governance=assignments`)} /> : null}
         {activeView === "history" ? <HistoryView detail={detail} /> : null}
 
