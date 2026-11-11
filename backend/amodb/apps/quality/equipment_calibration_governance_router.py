@@ -323,6 +323,17 @@ def submit_calibration(
                                                  "standard_reference": body.standard_reference,
                                                  "result": body.result},
                                  })
+    if body.result == "OUT_OF_TOLERANCE":
+        _insert_record(db, table=_OOT, amo_id=ctx.amo_id,
+                       actor_user_id=ctx.user_id, payload={
+                           "title": "Out-of-tolerance calibration result",
+                           "status": "OPEN", "description": body.notes,
+                           "payload": {"equipment_id": asset_id,
+                                       "detected_on": body.calibration_date.isoformat(),
+                                       "source_calibration_id": str(calibration["id"]),
+                                       "evidence_record_ids": body.certificate_evidence_ids,
+                                       "affected_work_references": []},
+                       })
     new_status = "QUARANTINED" if body.result == "OUT_OF_TOLERANCE" else "PENDING_VERIFICATION"
     asset = _change(db, ctx, asset, request, "calibration_submitted",
                     {"pending_calibration_id": str(calibration["id"])}, status=new_status)
@@ -351,8 +362,11 @@ def verify_calibration(
     valid_result = cert["result"] == "IN_TOLERANCE"
     next_due = date.fromisoformat(cert["next_due"])
     open_events = [item for item in _children(db, ctx, _OOT, asset_id) if item["status"] != "CLOSED"]
-    if body.accepted and (not valid_result or next_due < date.today() or open_events):
-        raise HTTPException(409, "Equipment cannot be serviceable with out-of-tolerance result, overdue certificate or unresolved impact.")
+    unresolved = [event for event in open_events if event["status"] == "OPEN"]
+    if body.accepted and (not valid_result or next_due < date.today() or unresolved):
+        raise HTTPException(409, "The certificate is not in tolerance, is overdue or has an unresolved impact assessment.")
+    # A disposed OOT event still requires a separate controlled release. A
+    # newly verified certificate never silently restores a quarantined asset.
     status = "VERIFIED" if body.accepted else "REJECTED"
     data = {**cert, "verification_reason": body.rationale, "verified_by": ctx.user_id, "verified_at": _now()}
     db.execute(text(
@@ -371,7 +385,8 @@ def verify_calibration(
     asset = _change(db, ctx, asset, request, "calibration_verified" if body.accepted else "calibration_rejected",
                     {"pending_calibration_id": None,
                      "verified_calibration_id": str(record["id"]) if body.accepted else (asset["payload"] or {}).get("verified_calibration_id")},
-                    status="SERVICEABLE" if body.accepted else "QUARANTINED", due=next_due if body.accepted else None)
+                    status=("QUARANTINED" if open_events else "SERVICEABLE") if body.accepted else "QUARANTINED",
+                    due=next_due if body.accepted else None)
     return {"asset": asset, "calibration_status": status}
 
 
@@ -447,6 +462,17 @@ def release_equipment(
     last_cal = (asset.get("payload") or {}).get("verified_calibration_id")
     if not last_cal or not asset.get("due_date") or asset["due_date"] < date.today():
         raise HTTPException(409, "A current independently verified in-tolerance calibration is required.")
+    recent = next((cal for cal in _children(db, ctx, _CAL, asset_id)
+                   if str(cal["id"]) == str(last_cal) and cal["status"] == "VERIFIED"), None)
+    if not recent:
+        raise HTTPException(409, "The referenced verified calibration was not found in this tenant.")
+    calibration_date = date.fromisoformat(recent["payload"]["calibration_date"])
+    for event in events:
+        if event["status"] != "DISPOSITION_RECORDED" and event["status"] != "CLOSED":
+            raise HTTPException(409, "Every out-of-tolerance event must have an independent disposition.")
+        detected_on = date.fromisoformat(event["payload"]["detected_on"])
+        if calibration_date < detected_on:
+            raise HTTPException(409, "Fresh calibration after the out-of-tolerance event is required for release.")
     if str(asset["owner_user_id"]) == str(ctx.user_id):
         raise HTTPException(403, "Custodian cannot independently authorise release.")
     require_evidence_records(db, ctx.amo_id, body.closure_evidence_ids, required=True)
