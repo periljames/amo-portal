@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
-from .canonical_core_router import _insert_record, _log_qms_activity
+from .canonical_core_router import _insert_record, _log_qms_activity, _table_columns
 from .qms_evidence_reference_validation import require_evidence_records
 from .tenant_security import (
     TenantContext, require_quality_permission, set_postgres_tenant_context,
@@ -219,17 +219,19 @@ def list_review_sources(
 ) -> dict[str, Any]:
     _init(db, ctx)
     table = _SOURCE_TABLES[source_type]
+    # Limit source discovery to minimal tenant-scoped labels, not entire
+    # personal/training/quality rows or potentially large JSON evidence blobs.
+    columns = _table_columns(db, table)
+    label_field = next((field for field in ("title", "name", "car_number", "audit_ref", "course_id")
+                        if field in columns), None)
+    label_sql = f"CAST({label_field} AS text)" if label_field else "CAST(id AS text)"
     rows = db.execute(text(
-        f"SELECT * FROM {table} WHERE amo_id=:amo_id "
-        "AND CAST(id AS text) ILIKE :query ORDER BY created_at DESC LIMIT 30"
+        f"SELECT CAST(id AS text) AS id, {label_sql} AS label FROM {table} "
+        "WHERE amo_id=:amo_id "
+        f"AND (CAST(id AS text) ILIKE :query OR {label_sql} ILIKE :query) "
+        "ORDER BY created_at DESC LIMIT 30"
     ), {"amo_id": ctx.amo_id, "query": f"%{q.strip()}%"}).mappings().all()
-    results = []
-    for row in rows:
-        item = dict(row)
-        label = next((str(item[key]) for key in ("title", "name", "car_number", "audit_ref", "code")
-                      if item.get(key)), str(item["id"]))
-        results.append({"id": str(item["id"]), "label": label})
-    return {"items": results}
+    return {"items": [{"id": row["id"], "label": row["label"] or row["id"]} for row in rows]}
 
 
 @router.get("/meetings")
