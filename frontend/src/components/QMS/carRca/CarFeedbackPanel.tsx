@@ -46,7 +46,16 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
         if(changed) {
           setMessage("New feedback or review decision received.");
           window.dispatchEvent(new CustomEvent("amo:car-feedback-updated",{detail:{carId}}));
-          if(!token) void queryClient.invalidateQueries({predicate:q=>q.queryKey.some(key=>typeof key==="string"&&key.startsWith("qms-car"))});
+          if(!token) {
+            // A feedback message is not a control-loop transition. Refresh the
+            // response/review projections without invalidating the parent
+            // governance query: an unrelated transient fetch failure must not
+            // unmount the live composer or discard an unsent internal note.
+            void queryClient.invalidateQueries({
+              predicate:q=>["qms-car-control-responses","qms-car-control-rca","qms-car-control-source"].includes(String(q.queryKey[0]||""))
+                && q.queryKey.some(key=>String(key)===carId),
+            });
+          }
           await callback.current?.();
         }
       } catch(cause) {if(active){setLive(false);setError(cause instanceof Error?cause.message:"Feedback could not be refreshed. Your message is retained.");}}
