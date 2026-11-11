@@ -428,6 +428,14 @@ def accept_residual(
     checks = (row.get("payload") or {}).get("assessment_history") or []
     if not checks or checks[-1].get("type") != "RESIDUAL":
         raise HTTPException(409, "Residual assessment evidence is missing.")
+    active_matrix = _matrix(db, ctx)
+    if not active_matrix or checks[-1].get("matrix_version") != active_matrix.get("version"):
+        raise HTTPException(409, "The tenant risk matrix has changed since residual assessment; reassess before acceptance.")
+    cell_rating = (active_matrix.get("rating_cells") or {}).get(checks[-1].get("likelihood"), {}).get(
+        checks[-1].get("consequence")
+    )
+    if cell_rating is None or cell_rating != checks[-1].get("rating"):
+        raise HTTPException(409, "Residual acceptance is blocked because the current matrix cell is inconsistent.")
     if not body.acceptance_evidence_ids or any(not ref.strip() for ref in body.acceptance_evidence_ids):
         raise HTTPException(422, "Retained evidence IDs are required.")
     _verify_evidence(db, ctx, body.acceptance_evidence_ids)
