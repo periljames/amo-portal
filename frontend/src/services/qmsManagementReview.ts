@@ -15,7 +15,7 @@ export type ReviewMeeting = {
   status: "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "CLOSED";
   created_by: string;
   created_at: string;
-  payload: { version: number; meeting_date: string; agenda: string[]; attendees: string[]; purpose: string };
+  payload: { version: number; meeting_date: string; agenda: string[]; attendees: string[]; purpose: string; attendance?: Record<string, { presence: "PRESENT" | "ABSENT"; statement: string; attested_at: string; attested_by: string }> };
 };
 export type ReviewItem = {
   id: string;
@@ -61,6 +61,16 @@ export function listReviewMeetings(amoCode: string, offset = 0) {
     reviewEndpoint(amoCode, "/meetings?limit=25&offset=" + offset), { cacheTtlMs: 0 }
   );
 }
+export function attestReviewAttendance(
+  amoCode: string, meetingId: string, expectedVersion: number,
+  presence: "PRESENT" | "ABSENT", statement: string,
+) {
+  return reviewPost<{ attendance: { presence: string }; meeting_version: number }>(
+    amoCode, itemEndpoint(meetingId, "/attendance"),
+    { expected_version: expectedVersion, presence, statement },
+  );
+}
+
 export function listReviewParticipants(amoCode: string) {
   return apiRequest<{ items: ReviewParticipant[] }>(reviewEndpoint(amoCode, "/participants"), { cacheTtlMs: 30000 });
 }
