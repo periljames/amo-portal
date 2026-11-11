@@ -98,7 +98,13 @@ async function prepareFindingAndCar(page: Page, state: State): Promise<void> {
     if (path.endsWith(`/quality/audits/resolve/${AUDIT_REF}`) || path.endsWith("/quality/audits/resolve/qar-mo-26-020")) return respond(route, audit);
     if (path.endsWith("/quality/audits") && method === "GET") return respond(route, [audit]);
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-execution-governance`) && method === "GET") return respond(route, { items: [row()], canonical_response_values: ["COMPLIANT", "NONCOMPLIANT", "OBSERVATION", "NOT_APPLICABLE", "NOT_VERIFIED"], legacy_compatibility: { NONCOMPLIANT: "NON_CONFORMING", NOT_VERIFIED: "PENDING" } });
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [binding] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [binding], total: 1, offset: 0, limit: 50 });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-binding-lineage`) && method === "GET") return respond(route, {
+      items: binding.instantiated_item_ids.map((checklist_item_id, index) => ({
+        checklist_item_id, template_code: binding.template_code, revision_no: binding.revision_no,
+        content_sha256: binding.content_sha256, source_context: binding.item_snapshot[index],
+      })),
+    });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-finding-drafts`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-items/${ITEM_ID}/evidence-candidates`) && method === "GET") return respond(route, {
       items: [], limitations: [], conflicts: [],
