@@ -1,4 +1,4 @@
-"""Portal-side typed Microsoft 365 Document Control integration (no Office editing SDK).""";
+/** Portal-side typed Microsoft 365 Document Control integration (no Office editing SDK). */
 import { getApiBaseUrl } from "./config";
 import { authHeaders } from "./auth";
 import { portalFetch } from "./offlineHttp";
