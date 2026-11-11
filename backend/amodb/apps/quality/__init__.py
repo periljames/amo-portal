@@ -221,6 +221,11 @@ _canonical_router.router.include_router(_car_rca_pareto_router.router)
 # guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
+# Management-review meetings retain their single canonical QMS table ownership.
+# Explicit decisions and action transitions are registered before generic fallbacks.
+from . import management_review_workflow_router as _management_review_workflow_router  # noqa: F401,E402
+_canonical_router.router.include_router(_management_review_workflow_router.router)
+
 # Tenant mail identities are Quality settings, not tenant Resend transports.
 # Include the static API before catch-all route finalization.
 from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402
