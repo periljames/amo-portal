@@ -7,8 +7,8 @@ serialized on the review and recorded in the existing activity history.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import json
 from typing import Any, Literal
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -155,7 +155,7 @@ def _bump(db: Session, ctx: TenantContext, row: dict[str, Any], status: str | No
             updated_at = now(), updated_by = :user
         WHERE id = :id AND amo_id = :amo_id AND deleted_at IS NULL RETURNING *
     """), {
-        "payload": __import__("json").dumps(data),
+        "payload": json.dumps(data),
         "status": status or row["status"], "user": ctx.user_id,
         "id": row["id"], "amo_id": ctx.amo_id,
     }).mappings().one()
@@ -188,6 +188,47 @@ def _append(db: Session, ctx: TenantContext, row: dict[str, Any], kind: str,
     _activity(db, ctx, updated, f"management_review_{kind}_recorded", request, {"item_id": saved["id"]})
     db.commit()
     return {"item": saved, "meeting_version": updated["payload"]["version"]}
+
+
+@router.get("/participants")
+def list_review_participants(
+    q: str = Query(default="", max_length=80),
+    ctx: TenantContext = Depends(require_quality_permission("qms.management_review.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    query = db.query(account_models.User).filter(
+        account_models.User.amo_id == ctx.amo_id,
+        account_models.User.is_active.is_(True),
+        account_models.User.is_system_account.is_(False),
+    )
+    if q.strip():
+        query = query.filter(account_models.User.full_name.ilike(f"%{q.strip()}%"))
+    rows = query.order_by(account_models.User.full_name).limit(50).all()
+    return {"items": [{"id": row.id, "name": row.full_name,
+                       "position": row.position_title or ""} for row in rows]}
+
+
+@router.get("/sources")
+def list_review_sources(
+    source_type: Literal["AUDIT", "CAR", "RISK", "SUPPLIER", "EQUIPMENT", "TRAINING"],
+    q: str = Query(default="", max_length=80),
+    ctx: TenantContext = Depends(require_quality_permission("qms.management_review.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    table = _SOURCE_TABLES[source_type]
+    rows = db.execute(text(
+        f"SELECT * FROM {table} WHERE amo_id=:amo_id "
+        "AND CAST(id AS text) ILIKE :query ORDER BY created_at DESC LIMIT 30"
+    ), {"amo_id": ctx.amo_id, "query": f"%{q.strip()}%"}).mappings().all()
+    results = []
+    for row in rows:
+        item = dict(row)
+        label = next((str(item[key]) for key in ("title", "name", "car_number", "audit_ref", "code")
+                      if item.get(key)), str(item["id"]))
+        results.append({"id": str(item["id"]), "label": label})
+    return {"items": results}
 
 
 @router.get("/meetings")
@@ -251,7 +292,7 @@ def add_input(
     row = _meeting(db, ctx, meeting_id, lock=True)
     _version(row, payload.expected_version)
     source_table = _SOURCE_TABLES[payload.source_type]
-    found = db.execute(text(f"SELECT id FROM {source_table} WHERE id=:id AND amo_id=:amo_id"),
+    found = db.execute(text(f"SELECT id FROM {source_table} WHERE CAST(id AS text)=:id AND amo_id=:amo_id"),
                        {"id": payload.source_id, "amo_id": ctx.amo_id}).first()
     if not found:
         raise HTTPException(422, "The selected source record could not be verified in this tenant.")
@@ -380,7 +421,7 @@ def complete_review_action(
         "UPDATE qms_management_review_actions SET status='AWAITING_VERIFICATION', "
         "payload=CAST(:payload AS jsonb), updated_at=now(), updated_by=:actor "
         "WHERE id=:id AND amo_id=:amo_id"
-    ), {"payload": __import__("json").dumps(details), "actor": ctx.user_id,
+    ), {"payload": json.dumps(details), "actor": ctx.user_id,
         "id": action_id, "amo_id": ctx.amo_id})
     updated = _bump(db, ctx, row)
     _activity(db, ctx, updated, "management_review_action_implemented", request, {"action_id": action_id})
@@ -412,7 +453,7 @@ def verify_review_action(
         "UPDATE qms_management_review_actions SET status=:status, "
         "payload=CAST(:payload AS jsonb), updated_at=now(), updated_by=:actor "
         "WHERE id=:id AND amo_id=:amo_id"
-    ), {"status": status, "payload": __import__("json").dumps(details), "actor": ctx.user_id,
+    ), {"status": status, "payload": json.dumps(details), "actor": ctx.user_id,
         "id": action_id, "amo_id": ctx.amo_id})
     updated = _bump(db, ctx, row)
     _activity(db, ctx, updated, "management_review_action_verified" if payload.accepted else "management_review_action_rejected",
