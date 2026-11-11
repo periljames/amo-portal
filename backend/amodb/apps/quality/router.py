@@ -7453,7 +7453,12 @@ def list_car_responses_for_review(
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id, lock=mark_open)
     _require_car_review_access(db, current_user, car)
-    latest = _car_invite_latest_active_response(db, car.id) if car.status == models.CARStatus.PENDING_VERIFICATION else None
+    # Review reads must reflect the latest durably committed submission, even
+    # if CAR governance has transitioned to IN_PROGRESS for plan rework,
+    # implementation or effectiveness. Filtering by the parent status here
+    # silently hid the latest response after a successful resubmission.
+    # Access still requires the canonical tenant-scoped reviewer guard above.
+    latest = _car_invite_latest_active_response(db, car.id)
     responses = [latest] if latest is not None else []
     if mark_open and latest and car.status == models.CARStatus.PENDING_VERIFICATION:
         opened_at = _latest_action_at_after(db, car.id, CAR_INVITE_REVIEW_OPENED_PREFIX, latest.submitted_at)
