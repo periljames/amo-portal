@@ -145,6 +145,19 @@ def _require_matrix(db: Session, ctx: TenantContext, payload: Assessment) -> Non
         choices = matrix.get(key)
         if not isinstance(choices, list) or not choices or supplied not in choices:
             raise HTTPException(422, f"Risk {key} must match a configured tenant matrix option.")
+    # Do not permit a client to arbitrarily select a low residual rating from
+    # the list: the configured, versioned matrix must determine the actual cell.
+    # Matrices without a complete, explicit likelihood×consequence mapping
+    # remain unavailable for assessment rather than inventing an algorithm.
+    cells = matrix.get("rating_cells")
+    if not isinstance(cells, dict):
+        raise HTTPException(409, "Tenant risk matrix has no governed rating_cells mapping. Configure the lookup before assessment.")
+    row = cells.get(payload.likelihood)
+    if not isinstance(row, dict) or row.get(payload.consequence) not in matrix["rating_levels"]:
+        raise HTTPException(409, "The tenant risk matrix is incomplete for the selected likelihood and consequence.")
+    expected_rating = row[payload.consequence]
+    if payload.rating != expected_rating:
+        raise HTTPException(422, "Submitted rating does not equal the versioned tenant matrix result.")
 
 
 def _verify_evidence(db: Session, ctx: TenantContext, references: list[str]) -> None:
