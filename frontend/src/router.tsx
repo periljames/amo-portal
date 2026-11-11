@@ -86,6 +86,7 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // Management Review now has source-backed governed transitions rather than a generic register editor.
   if (route.module.id === "management-review") return false;
   if (route.module.id === "risk") return false;
+  if (route.module.id === "risk") return false;
   // Findings list aliases and record details are owned by the Audit Assurance
   // Findings & Actions workspace in PortalRouteSurface.
   if (route.module.id === "findings") return false;
