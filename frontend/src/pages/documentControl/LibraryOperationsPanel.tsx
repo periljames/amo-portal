@@ -68,7 +68,8 @@ type Props = {
   canControl: boolean;
   initialMode?: PanelMode;
   initialScan?: string | null;
-  onClose: () => void;
+  standalone?: boolean;
+  onClose?: () => void;
 };
 
 const WAREHOUSE_SCOPES: Array<{ id: WarehouseSearchScope; label: string }> = [
@@ -223,6 +224,7 @@ export default function LibraryOperationsPanel({
   canControl,
   initialMode = "catalog",
   initialScan,
+  standalone = false,
   onClose,
 }: Props) {
   const navigate = useNavigate();
@@ -608,10 +610,10 @@ export default function LibraryOperationsPanel({
     ["account", "My loans & holds", BookOpenCheck],
   ] as const, [canControl]);
 
-  return <aside className="library-ops" role="dialog" aria-modal="true" aria-label="Library services">
+  return <aside className={`library-ops${standalone ? " library-ops--page" : ""}`} role={standalone ? undefined : "dialog"} aria-modal={standalone ? undefined : true} aria-label="Library services">
     <header className="library-ops__header">
       <div><LibraryBig size={19} /><span><strong>Knowledge warehouse & library</strong><small>Controlled content, records, physical custody and external discovery</small></span></div>
-      <button type="button" className="dc-button" onClick={onClose}><CircleX size={15} /> Close</button>
+      {!standalone && onClose ? <button type="button" className="dc-button" onClick={onClose}><CircleX size={15} /> Close</button> : null}
     </header>
     <nav className="library-ops__tabs" aria-label="Library service">
       {modes.map(([id, label, Icon]) => <button key={id} type="button" className={mode === id ? "active" : ""} onClick={() => setMode(id)}><Icon size={15} /> {label}</button>)}
