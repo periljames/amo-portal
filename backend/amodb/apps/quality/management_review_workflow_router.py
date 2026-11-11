@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
 from .canonical_core_router import _insert_record, _log_qms_activity
+from .qms_evidence_reference_validation import require_evidence_records
 from .tenant_security import (
     TenantContext, require_quality_permission, set_postgres_tenant_context,
 )
@@ -414,6 +415,7 @@ def complete_review_action(
     evidence = [value.strip() for value in payload.evidence_references if value.strip()]
     if len(evidence) != len(payload.evidence_references):
         raise HTTPException(422, "Every evidence reference must identify a retained record.")
+    require_evidence_records(db, ctx.amo_id, evidence, required=True)
     details = dict(item["payload"] or {})
     details.update({"implementation_evidence": evidence, "implementation_statement": payload.statement,
                     "implemented_by": ctx.user_id, "implemented_at": _now()})
