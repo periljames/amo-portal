@@ -589,6 +589,7 @@ def _require_calibration_eligibility_for_issue(
         WHERE amo_id = :amo_id AND deleted_at IS NULL
           AND payload ->> 'inventory_serial_id' = :serial_id
         ORDER BY created_at DESC, id DESC LIMIT 2
+        FOR SHARE
     """), {"amo_id": amo_id, "serial_id": str(serial_id)}).mappings().all()
     if not equipment:
         return
