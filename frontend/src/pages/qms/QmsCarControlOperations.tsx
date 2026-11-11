@@ -565,16 +565,16 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
         </dl>
         {proposal.supporting_records?.length ? <ul>{proposal.supporting_records.map((source, index) => <li key={index}>{source}</li>)}</ul> : null}
         {canManage && !effectivenessResult && <div className="form-grid">
-          <label>Independent effectiveness reviewer
-            <select className="input" value={effectivenessReviewer} onChange={e => setEffectivenessReviewer(e.target.value)}
+          <label htmlFor="car-effectiveness-reviewer">Independent effectiveness reviewer
+            <select id="car-effectiveness-reviewer" aria-label="Independent effectiveness reviewer" className="input" value={effectivenessReviewer} onChange={e => setEffectivenessReviewer(e.target.value)}
               disabled={effectivenessAdopting}>
               <option value="">Select an authorized reviewer</option>
               {assignees.filter(user => user.id !== control.car.assigned_to_user_id).map(user =>
                 <option key={user.id} value={user.id}>{personDisplay(user.full_name || user.email)}</option>)}
             </select>
           </label>
-          <label>Quality adoption and independence rationale
-            <textarea className="input" rows={2} value={effectivenessReason} maxLength={4000}
+          <label htmlFor="car-effectiveness-reason">Quality adoption and independence rationale
+            <textarea id="car-effectiveness-reason" aria-label="Quality adoption and independence rationale" className="input" rows={2} value={effectivenessReason} maxLength={4000}
               onChange={e => setEffectivenessReason(e.target.value)} disabled={effectivenessAdopting}/>
           </label>
           <button className="btn btn--primary" type="button" disabled={effectivenessAdopting || !effectivenessReviewer || effectivenessReason.trim().length < 8}
