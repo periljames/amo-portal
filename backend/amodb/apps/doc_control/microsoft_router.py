@@ -14,6 +14,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 
@@ -59,11 +60,17 @@ def _connected(db: Session, tenant_id: str) -> mm.DocumentMicrosoftConnection:
     return row
 
 
-def _link(db: Session, tenant_id: str, manual_id: str) -> mm.DocumentMicrosoftFileLink | None:
-    return db.query(mm.DocumentMicrosoftFileLink).filter(
+def _link(db: Session, tenant_id: str, manual_id: str, *, lock: bool = False) -> mm.DocumentMicrosoftFileLink | None:
+    query = db.query(mm.DocumentMicrosoftFileLink).filter(
         mm.DocumentMicrosoftFileLink.tenant_id == tenant_id,
         mm.DocumentMicrosoftFileLink.manual_id == manual_id,
-    ).first()
+    )
+    # Lock only explicit imports to serialize eTag/controlled revision decisions.
+    # NOWAIT gives competing users a retryable conflict rather than silently
+    # importing one working-file version twice.
+    if lock:
+        query = query.with_for_update(nowait=True)
+    return query.first()
 
 
 def _require_admin(user, tenant) -> None:
@@ -294,7 +301,14 @@ async def import_document(
     require_control_user(user)
     tenant = resolve_tenant(db, tenant_slug, user)
     manual = get_manual(db, tenant, manual_id)
-    row = _link(db, tenant.amo_id, manual_id)
+    try:
+        row = _link(db, tenant.amo_id, manual_id, lock=True)
+    except OperationalError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This SharePoint working document is already being imported. Retry after the first import completes.",
+        ) from exc
     if not row:
         raise HTTPException(status_code=404, detail="Link a SharePoint document before importing a revision")
     conn = _connected(db, tenant.amo_id)
