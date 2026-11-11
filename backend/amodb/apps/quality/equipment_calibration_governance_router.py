@@ -158,6 +158,8 @@ def _eligibility(asset: dict[str, Any], *, today: date) -> dict[str, Any]:
     reason = "SERVICEABLE" if asset["status"] == "SERVICEABLE" else f"STATUS_{asset['status']}"
     if due is None:
         reason = "NO_VERIFIED_CALIBRATION_DUE_DATE"
+    elif not (asset.get("payload") or {}).get("verified_calibration_id"):
+        reason = "NO_INDEPENDENTLY_VERIFIED_CALIBRATION"
     elif due < today:
         reason = "CALIBRATION_OVERDUE"
     elif asset["status"] != "SERVICEABLE":
