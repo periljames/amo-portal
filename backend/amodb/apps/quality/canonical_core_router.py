@@ -2086,6 +2086,12 @@ def update_qms_settings(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported settings fields supplied.")
     if any(not isinstance(value, dict) for value in changes.values()):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Each settings group must be an object.")
+    if "risk_matrix" in changes:
+        from .risk_matrix_policy import validate_versioned_risk_matrix
+        if expected is None:
+            raise HTTPException(428, "Supply expected_settings for the risk_matrix to prevent replacing a concurrent tenant methodology.")
+        previous = _settings_response(current).get("risk_matrix") if current else None
+        validate_versioned_risk_matrix(changes["risk_matrix"], previous)
     if "retention_rules" in changes:
         validate_retention_extensions(changes["retention_rules"])
     if "numbering_rules" in changes:
