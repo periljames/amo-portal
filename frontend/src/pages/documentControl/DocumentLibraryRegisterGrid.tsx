@@ -8,6 +8,8 @@ import type { IntegratedLibraryItem, LibraryDiscoveryItem } from "../../services
 
 type SharedProps = {
   defaultColDef: ColDef;
+  onRowClick?: (item: IntegratedLibraryItem | LibraryDiscoveryItem) => void;
+  onSelectionChange?: (items: Array<IntegratedLibraryItem | LibraryDiscoveryItem>) => void;
 };
 
 type Props = SharedProps & (
@@ -20,6 +22,8 @@ export default function DocumentLibraryRegisterGrid({
   rowData,
   columnDefs,
   defaultColDef,
+  onRowClick,
+  onSelectionChange,
 }: Props) {
   const height = Math.min(650, Math.max(220, rowData.length * 62 + 44));
   if (mode === "integrated") {
@@ -32,7 +36,10 @@ export default function DocumentLibraryRegisterGrid({
           rowHeight={62}
           headerHeight={40}
           animateRows={false}
-          suppressCellFocus
+          suppressCellFocus={false}
+          rowSelection="multiple"
+          onSelectionChanged={(event) => onSelectionChange?.(event.api.getSelectedRows())}
+          onRowClicked={({ data: item }) => { if (item) onRowClick?.(item); }}
           getRowId={({ data: item }) => item.id}
           overlayNoRowsTemplate="No controlled documents match this view"
         />
@@ -51,7 +58,10 @@ export default function DocumentLibraryRegisterGrid({
         rowHeight={62}
         headerHeight={40}
         animateRows={false}
-        suppressCellFocus
+        suppressCellFocus={false}
+        rowSelection="multiple"
+        onSelectionChanged={(event) => onSelectionChange?.(event.api.getSelectedRows())}
+        onRowClicked={({ data: item }) => { if (item) onRowClick?.(item); }}
         getRowId={({ data: item }) => item.id}
         overlayNoRowsTemplate="No controlled documents match this view"
       />
