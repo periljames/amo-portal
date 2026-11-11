@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Dict, Iterable, List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from amodb.apps.audit import services as audit_services
@@ -564,6 +564,52 @@ def transfer_inventory(
     return entry
 
 
+def _require_calibration_eligibility_for_issue(
+    db: Session, *, amo_id: str, serial_id: int, actor_user_id: Optional[str],
+) -> None:
+    """Deny issuing an Inventory serial linked to restricted QMS equipment.
+
+    Ordinary inventory parts and unregistered serials retain their current
+    Stock/Procurement authority. Only an explicit existing QMS calibration
+    relationship activates the additional gate. Fail closed on ambiguous
+    duplicate calibration records instead of guessing which is authoritative.
+    """
+    from amodb.apps.quality.equipment_calibration_governance_router import _eligibility
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Issuing serialized equipment requires an identified accountable actor.",
+        )
+    set_postgres_tenant_context(db, amo_id=amo_id, user_id=actor_user_id)
+    equipment = db.execute(text("""
+        SELECT id, amo_id, status, due_date, payload
+        FROM qms_equipment
+        WHERE amo_id = :amo_id AND deleted_at IS NULL
+          AND payload ->> 'inventory_serial_id' = :serial_id
+        ORDER BY created_at DESC, id DESC LIMIT 2
+    """), {"amo_id": amo_id, "serial_id": str(serial_id)}).mappings().all()
+    if not equipment:
+        return
+    if len(equipment) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Duplicated calibration authority for this inventory serial; Quality must reconcile it before issue.",
+        )
+    decision = _eligibility(dict(equipment[0]), today=date.today())
+    if not decision["eligible"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "QMS_CALIBRATION_ISSUE_BLOCKED",
+                "equipment_id": decision["equipment_id"],
+                "reason": decision["reason"],
+                "next_due": str(decision["next_due"]) if decision.get("next_due") else None,
+            },
+        )
+
+
 def issue_inventory(
     db: Session,
     *,
@@ -584,6 +630,10 @@ def issue_inventory(
         raise HTTPException(status_code=400, detail="from_location_id is required for issue.")
     lot = _ensure_lot(db, amo_id=amo_id, part=part, lot_number=payload.lot_number)
     serial = _ensure_serial(db, amo_id=amo_id, part=part, serial_number=payload.serial_number)
+    if serial is not None:
+        _require_calibration_eligibility_for_issue(
+            db, amo_id=amo_id, serial_id=serial.id, actor_user_id=actor_user_id,
+        )
 
     _register_idempotency(
         db,
