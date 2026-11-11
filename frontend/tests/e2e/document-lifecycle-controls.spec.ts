@@ -161,7 +161,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?type=CHECKLIST&q=${encodeURIComponent(code)}`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
-    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    await library.getByRole("button", { name: "Cards", exact: true }).click();
     const card = library.locator("article.dlibrary-card").filter({ hasText: code });
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAttribute("data-document-type", "CHECKLIST");
@@ -179,7 +179,7 @@ test.describe.serial("DMS daily document lifecycle controls", () => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?q=${encodeURIComponent(code)}`);
     const deletedLibrary = page.getByTestId("integrated-document-library");
     await expect(deletedLibrary).toBeVisible({ timeout: 30_000 });
-    await deletedLibrary.getByRole("button", { name: "Shelf", exact: true }).click();
+    await deletedLibrary.getByRole("button", { name: "Cards", exact: true }).click();
     await expect(deletedLibrary.locator("article.dlibrary-card").filter({ hasText: code })).toHaveCount(0, { timeout: 30_000 });
   });
 
