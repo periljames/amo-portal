@@ -2320,6 +2320,8 @@ def _update_parent_status(
 def _require_governed_change_write(module: str) -> None:
     if module == "change-control":
         raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
+    if module == "management-review":
+        raise HTTPException(409, {"code": "GOVERNED_MANAGEMENT_REVIEW_REQUIRED", "message": "Use the governed management-review meetings and action workflow; generic record mutation cannot authorize approvals or closure.", "workflow": "management-review/meetings"})
 
 
 @core_router.post("/{module}/{record_id}/{action}")
