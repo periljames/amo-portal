@@ -87,6 +87,7 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   if (route.module.id === "management-review") return false;
   if (route.module.id === "risk") return false;
   if (route.module.id === "external-interface") return false;
+  if (route.module.id === "equipment-calibration") return false;
   // Findings list aliases and record details are owned by the Audit Assurance
   // Findings & Actions workspace in PortalRouteSurface.
   if (route.module.id === "findings") return false;
