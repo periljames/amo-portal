@@ -878,6 +878,7 @@ export default function DocumentLibraryHubPage() {
               <footer>
                 {selectedJob && canControl ? <button type="button" className="dc-button dc-button--primary" disabled={!eligibility.allowed} title={eligibility.reason} onClick={() => selectForJob(item)}>{selectingChangeDocument ? "Select for change" : selectedJob.selectLabel}</button> : <>
                   <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target.revision_id} onClick={() => openReader(item)}>{item.read_target.kind === "PUBLISHED" ? "Read current" : "Read latest"}</button>
+                  {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}
                   <button type="button" className="dc-button" onClick={() => selectIntegratedItem(item)}>Details</button>
                 </>}
               </footer>
@@ -905,6 +906,7 @@ export default function DocumentLibraryHubPage() {
               <div className="dlibrary-card__context"><span>{item.document_class} · {typeLabel}</span><span>{revision?.page_count ? `${revision.page_count} pages` : revision?.source_filename || "No source file"}</span></div>
               <footer>
                 <button type="button" className="dc-button dc-button--primary" disabled={!item.read_target_revision_id} onClick={() => openDiscoveryReader(item)}>{item.current_revision?.status === "PUBLISHED" && item.current_revision.id === item.read_target_revision_id ? "Read current" : "Read latest"}</button>
+                {canControl ? <button type="button" className="dc-button" onClick={() => navigate(`${basePath}/library/${item.id}`)}>Workspace</button> : null}
                 <button type="button" className="dc-button" onClick={() => selectDiscoveryItem(item)}>Details</button>
               </footer>
             </article>;
