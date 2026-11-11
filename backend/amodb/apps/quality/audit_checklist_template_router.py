@@ -1216,7 +1216,9 @@ def get_checklist_binding_lineage(
 @router.get("/audits/{audit_id}/checklist-bindings/{binding_id}")
 def get_checklist_binding(
     audit_id: uuid.UUID,
-    binding_id: uuid.UUID,
+    # Binding PKs use generate_user_id (String(36)), not UUIDs. A UUID
+    # parameter rejects valid committed IDs before tenant-safe lookup.
+    binding_id: str,
     ctx: TenantContext = Depends(require_quality_permission("qms.audit.view")),
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
