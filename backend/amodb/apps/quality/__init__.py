@@ -226,6 +226,10 @@ _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 from . import management_review_workflow_router as _management_review_workflow_router  # noqa: F401,E402
 _canonical_router.router.include_router(_management_review_workflow_router.router)
 
+# Governed risk and opportunity decisions preserve tenant QMS matrix authority and SMS boundaries.
+from . import risk_governance_router as _risk_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_risk_governance_router.router)
+
 # Tenant mail identities are Quality settings, not tenant Resend transports.
 # Include the static API before catch-all route finalization.
 from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402
