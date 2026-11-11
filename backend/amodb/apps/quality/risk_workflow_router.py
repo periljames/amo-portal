@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.accounts import models as account_models
 from amodb.database import get_read_db, get_write_db
 from .canonical_core_router import _insert_record, _log_qms_activity
-from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
+from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context
 
 router = APIRouter(prefix="/risk", tags=["QMS governed risk"])
 
@@ -27,10 +27,15 @@ _SOURCE_TABLES = {
     "FINDING": "qms_findings",
     "PROCESS": "qms_processes",
     "SUPPLIER": "qms_suppliers",
-    "MANUAL": "manuals",
 }
 _RISK_STATUSES = {"DRAFT", "TREATMENT", "PENDING_ACCEPTANCE", "ACCEPTED", "MONITORING"}
-_INTEGRITY_FIELDS = {"status", "payload", "owner_user_id", "title"}
+_SOURCE_PERMISSIONS = {
+    "AUDIT": "qms.audit.view",
+    "CAR": "qms.car.view",
+    "FINDING": "qms.finding.view",
+    "PROCESS": "qms.risk.view",
+    "SUPPLIER": "qms.supplier.view",
+}
 
 
 class Strict(BaseModel):
@@ -41,7 +46,7 @@ class NewRisk(Strict):
     title: str = Field(min_length=4, max_length=255)
     description: str = Field(min_length=12, max_length=8000)
     owner_user_id: str = Field(min_length=1, max_length=36)
-    source_type: Literal["AUDIT", "CAR", "FINDING", "PROCESS", "SUPPLIER", "MANUAL"]
+    source_type: Literal["AUDIT", "CAR", "FINDING", "PROCESS", "SUPPLIER"]
     source_id: str = Field(min_length=1, max_length=80)
     consequence: str = Field(min_length=8, max_length=4000)
     likelihood: int = Field(ge=1, le=5)
@@ -115,6 +120,7 @@ def _user(db: Session, ctx: TenantContext, user_id: str) -> None:
 
 
 def _source(db: Session, ctx: TenantContext, kind: str, source_id: str) -> None:
+    assert_quality_permission(db, ctx, _SOURCE_PERMISSIONS[kind])
     table = _SOURCE_TABLES[kind]
     found = db.execute(text(
         f"SELECT id FROM {table} WHERE CAST(id AS text) = :id AND amo_id = :amo_id"
@@ -202,17 +208,37 @@ def list_risks(
 
 @router.get("/sources")
 def list_sources(
-    source_type: Literal["AUDIT", "CAR", "FINDING", "PROCESS", "SUPPLIER", "MANUAL"],
+    source_type: Literal["AUDIT", "CAR", "FINDING", "PROCESS", "SUPPLIER"],
     ctx: TenantContext = Depends(require_quality_permission("qms.risk.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     _init(db, ctx)
+    assert_quality_permission(db, ctx, _SOURCE_PERMISSIONS[source_type])
     table = _SOURCE_TABLES[source_type]
     rows = db.execute(text(
-        f"SELECT id, title, name FROM {table} WHERE amo_id=:amo_id ORDER BY id DESC LIMIT 50"
+        f"SELECT * FROM {table} WHERE amo_id=:amo_id ORDER BY id DESC LIMIT 50"
     ), {"amo_id": ctx.amo_id}).mappings().all()
-    return {"items": [{"id": str(row["id"]), "title": row.get("title") or row.get("name") or str(row["id"])}
-                      for row in rows]}
+    return {"items": [
+        {"id": str(row["id"]), "title": row.get("title") or row.get("name")
+           or row.get("car_number") or row.get("audit_ref") or str(row["id"])}
+        for row in rows
+    ]}
+
+
+@router.get("/evidence")
+def list_risk_evidence(
+    ctx: TenantContext = Depends(require_quality_permission("qms.evidence.view")),
+    db: Session = Depends(get_read_db),
+) -> dict[str, Any]:
+    _init(db, ctx)
+    rows = db.execute(text(
+        "SELECT * FROM qms_evidence_files WHERE amo_id=:amo_id AND deleted_at IS NULL "
+        "ORDER BY created_at DESC LIMIT 50"
+    ), {"amo_id": ctx.amo_id}).mappings().all()
+    return {"items": [
+        {"id": str(row["id"]), "title": row.get("title") or row.get("file_name") or str(row["id"])}
+        for row in rows
+    ]}
 
 
 @router.get("/owners")
