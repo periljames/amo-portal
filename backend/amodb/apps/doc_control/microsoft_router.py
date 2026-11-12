@@ -249,8 +249,10 @@ def link_document(
     audit(db, tenant, request, "document.microsoft365.linked", "manual", manual_id, {
         "drive_id": row.drive_id, "item_id": row.item_id, "etag": row.observed_etag,
     })
+    # Compute the response before commit expires the linked ORM row.
+    response = {"linked": True, "file": link_payload(row)}
     db.commit()
-    return {"linked": True, "file": link_payload(row)}
+    return response
 
 
 @workspace_router.post("/t/{tenant_slug}/documents/{manual_id}/microsoft365/check-updates")
@@ -267,8 +269,10 @@ def check_document(
         raise HTTPException(status_code=404, detail="No SharePoint document is linked to this manual")
     item = current_item(_connected(db, tenant.amo_id), row)
     update_link(row, item)
+    # Compute the response before commit expires the linked ORM row.
+    response = {"linked": True, "file": link_payload(row)}
     db.commit()
-    return {"linked": True, "file": link_payload(row)}
+    return response
 
 
 @workspace_router.delete("/t/{tenant_slug}/documents/{manual_id}/microsoft365")
@@ -367,11 +371,12 @@ async def import_document(
         "manual_id": manual.id, "item_id": row.item_id, "drive_id": row.drive_id,
         "source_etag": etag, "source_sha256": row.last_imported_source_sha256,
     })
+    imported_manual_id = str(manual.id)
     db.commit()
     background_tasks.add_task(precompute_office_layout_assets, result["revision_id"])
     background_tasks.add_task(index_revision_background, result["revision_id"])
     return {
-        "manual_id": manual.id,
+        "manual_id": imported_manual_id,
         "revision_id": result["revision_id"],
         "status": result["status"],
         "source_sha256": result["source_sha256"],
