@@ -206,12 +206,17 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
     queryKey: ["qms-evidence-vault", context?.amoCode, context?.view, query, status, limit, offset],
     enabled: Boolean(isEvidence && !controlledNew),
     staleTime: 10_000,
-    queryFn: ({ signal }) => {
+    refetchOnWindowFocus: false,
+    queryFn: () => {
       if (!context) throw new Error("Quality context is unavailable.");
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
       if (query.trim()) params.set("q", query.trim());
       if (status) params.set("status", status);
-      return apiRequest<QmsRegisterResponse>(`${qmsPath(context.amoCode, `/${context.module.segment}/${context.view}`)}?${params}`, { signal, cacheTtlMs: 0, timeoutMs: 15_000 });
+      // The same tenant/view/page request survives StrictMode mount cycles
+      // and shell focus handoffs. React Query owns the keyed result and
+      // coalesces in-flight reads; rapidly changed filters use a different
+      // query key and cannot present superseded data.
+      return apiRequest<QmsRegisterResponse>(`${qmsPath(context.amoCode, `/${context.module.segment}/${context.view}`)}?${params}`, { cacheTtlMs: 0, timeoutMs: 15_000 });
     },
   });
   const { refetch: refetchEvidence } = evidenceQuery;
