@@ -646,7 +646,10 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       selectionActive: await selectedCaseButton.getAttribute("class"),
       panelText: (await casePanel.innerText()).slice(0,1800),
     }));
-    await expect(casePanel, "The selected case detail must reflect the adopted plan, not a stale or different case").toContainText(selectedPlan?.expected_outcome || "ADOPTED_PLAN_NOT_PRESENT", {timeout:15000});
+    await expect(casePanel, "The selected case must expose its governed effectiveness-plan count").toContainText("1 effectiveness plans", {timeout:15_000});
+    const effectivenessPanel = internalPage.getByRole("heading", {name:"Define, observe & conclude effectiveness"}).locator("xpath=ancestor::section[1]");
+    await expect(effectivenessPanel, "The adopted plan must appear in the actual effectiveness engineering workspace")
+      .toContainText(selectedPlan?.expected_outcome || "ADOPTED_PLAN_NOT_PRESENT", {timeout:15_000});
     expect(selectedPlan, "Adopted effectiveness plan must belong to the selected governed case").toBeDefined();
     const browserToday = await internalPage.evaluate(() => {
       const value = new Date();
