@@ -632,12 +632,21 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(plan.plan_id).toBeTruthy();
 
     await internalPage.getByRole("button",{name:"Open Assurance Cases",exact:true}).click();
-    await internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref}).click({timeout:30000});
+    const selectedCaseButton = internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref});
+    await selectedCaseButton.click({timeout:30000});
+    await expect(selectedCaseButton, "The adopted case must become the visible active selection").toHaveClass(/is-selected/, {timeout:15000});
     const caseDetails = await authenticatedRequest(internalPage, "GET",
       `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/assurance-cases/${plan.case_id}`);
     expect(caseDetails.status, JSON.stringify(caseDetails.body)).toBe(200);
-    const caseBody = caseDetails.body as { effectiveness_plans?: Array<{ id: string; status: string; planned_review_date: string }> };
+    const caseBody = caseDetails.body as { status: string; effectiveness_plans?: Array<{ id: string; status: string; planned_review_date: string; expected_outcome: string }> };
     const selectedPlan = caseBody.effectiveness_plans?.find(item => item.id === plan.plan_id);
+    const casePanel = internalPage.locator(".qms-assurance-cases__detail");
+    console.log("CAR acceptance: selected case UI " + JSON.stringify({
+      caseStatus: caseBody.status, caseRef: plan.case_ref, planId: plan.plan_id,
+      selectionActive: await selectedCaseButton.getAttribute("class"),
+      panelText: (await casePanel.innerText()).slice(0,1800),
+    }));
+    await expect(casePanel, "The selected case detail must reflect the adopted plan, not a stale or different case").toContainText(selectedPlan?.expected_outcome || "ADOPTED_PLAN_NOT_PRESENT", {timeout:15000});
     expect(selectedPlan, "Adopted effectiveness plan must belong to the selected governed case").toBeDefined();
     const browserToday = await internalPage.evaluate(() => {
       const value = new Date();
