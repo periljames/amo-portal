@@ -420,8 +420,15 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       await feedback.getByRole("button",{name:"Send feedback",exact:true}).click();
       await expect(publicFeedback).toContainText("Rework guidance: retain your draft",{timeout:20000});
     });
-    // Verify the new submission is actually committed and reviewable, not
-    // merely reported as successful in the invited browser.
+    // Verify both public persisted provenance and the authorized Quality
+    // projection. The public UI can display local drafts, but the server must
+    // retain the new narrative before the reviewer is shown its snapshot.
+    const committedPublic = await publicPage.request.get(
+      `/quality/cars/invite/${data.car_loop_invite_token}`,
+    );
+    expect(committedPublic.status()).toBe(200);
+    const publicRecord = await committedPublic.json() as { root_cause: string };
+    expect(publicRecord.root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
     const revisedResponses = await authenticatedRequest(
       internalPage, "GET",
       `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/responses?mark_open=false`,
