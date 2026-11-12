@@ -414,12 +414,24 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await expect(sharedGuest).toContainText("Root cause: REJECTED",{timeout:20000});
     await expect(sharedGuest).toContainText("identify the missing management-control checkpoint");
 
+    const reworkPatchBodies: Array<{ root_cause?: string; corrective_action?: string }> = [];
+    const captureReworkPatch = (request: import("@playwright/test").Request) => {
+      if (request.method() !== "PATCH" ||
+          !new URL(request.url()).pathname.endsWith(`/quality/cars/invite/${data.car_loop_invite_token}`)) return;
+      reworkPatchBodies.push(request.postDataJSON() as { root_cause?: string; corrective_action?: string });
+    };
+    publicPage.on("request", captureReworkPatch);
     await submitResponsibleManagerResponse(publicPage, data, "rework",async()=>{
       const feedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
       await feedback.getByLabel("CAR feedback message",{exact:true}).fill("Rework guidance: retain your draft while linking the independent evidence owner.");
       await feedback.getByRole("button",{name:"Send feedback",exact:true}).click();
       await expect(publicFeedback).toContainText("Rework guidance: retain your draft",{timeout:20000});
     });
+    publicPage.off("request", captureReworkPatch);
+    expect(reworkPatchBodies.length).toBeGreaterThan(0);
+    expect(reworkPatchBodies.at(-1)?.root_cause).toContain(
+      "effectiveness checkpoint and evidence-index ownership control rework",
+    );
     // Verify both public persisted provenance and the authorized Quality
     // projection. The public UI can display local drafts, but the server must
     // retain the new narrative before the reviewer is shown its snapshot.
