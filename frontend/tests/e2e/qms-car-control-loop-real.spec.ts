@@ -439,12 +439,29 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       `/quality/cars/invite/${data.car_loop_invite_token}`,
     );
     expect(committedPublic.status()).toBe(200);
-    const publicRecord = await committedPublic.json() as { root_cause: string };
-    expect(publicRecord.root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
+    const publicRecord = await committedPublic.json() as { root_cause: string; submitted_at?: string; status?: string };
+    // Capture independent committed read models before the assertion. This
+    // intentionally does not accept a local/browser draft as proof of a save.
     const revisedResponses = await authenticatedRequest(
       internalPage, "GET",
       `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/responses?mark_open=false`,
     );
+    const registerResponse = await authenticatedRequest(internalPage, "GET", carEndpoint);
+    const activeRows = Array.isArray(revisedResponses.body) ? revisedResponses.body as Array<{
+      root_cause?: string; submitted_at?: string; status?: string;
+    }> : [];
+    const registerRecord = (registerResponse.body || {}) as { root_cause?: string; submitted_at?: string; status?: string };
+    console.log("CAR acceptance: committed rework provenance " + JSON.stringify({
+      patchNarrative: reworkPatchBodies.at(-1)?.root_cause,
+      inviteNarrative: publicRecord.root_cause,
+      inviteStatus: publicRecord.status, inviteSubmittedAt: publicRecord.submitted_at,
+      reviewerHttpStatus: revisedResponses.status, reviewerCount: activeRows.length,
+      reviewerNarrative: activeRows.at(0)?.root_cause,
+      reviewerSubmittedAt: activeRows.at(0)?.submitted_at,
+      registerHttpStatus: registerResponse.status, registerNarrative: registerRecord.root_cause,
+      registerStatus: registerRecord.status, registerSubmittedAt: registerRecord.submitted_at,
+    }));
+    expect(publicRecord.root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
     expect(revisedResponses.status, JSON.stringify(revisedResponses.body)).toBe(200);
     const responseRows = revisedResponses.body as Array<{
       root_cause: string; is_latest: boolean; submitted_by_name: string;
