@@ -243,9 +243,21 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByLabel("I confirm this response and evidence are accurate for audit closeout.").check();
   await page.getByRole("button", { name: "Preview submission" }).click();
   await expect(page.getByRole("dialog", { name: "Preview CAR submission" })).toBeVisible();
+  // The preview's in-flight disabled/locked UI is NOT proof of a committed
+  // submission. Wait for the actual backend PATCH response and verify its
+  // freshly persisted narrative before checking the published invite state.
+  const submittedResponse = page.waitForResponse(response =>
+    response.request().method() === "PATCH" &&
+    new URL(response.url()).pathname.endsWith(`/quality/cars/invite/${data.car_loop_invite_token}`),
+  { timeout: 30_000 });
   await page.getByRole("button", { name: "Confirm and submit" }).click();
-  // Live feedback can replace a transient success notice. Assert the durable
-  // submitted state, not the timing of a toast relative to background refresh.
+  const submissionReceipt = await submittedResponse;
+  const receiptBody = await submissionReceipt.json() as { root_cause?: string; submitted_at?: string };
+  expect(submissionReceipt.status(), JSON.stringify(receiptBody)).toBe(200);
+  expect(receiptBody.submitted_at, "A submitted CAR needs a committed submission timestamp").toBeTruthy();
+  expect(receiptBody.root_cause, "The PATCH receipt must match this RCA revision").toContain(`effectiveness checkpoint and evidence-index ownership control ${suffix}`);
+  // Only a persisted, reloaded invite may say "Response locked"; a pending
+  // request instead reads "Submitting response…" in the real user interface.
   await expect(page.getByText("Response locked — no further submissions or changes are permitted.")).toBeVisible({ timeout: 30_000 });
   console.log(`CAR acceptance: ${suffix} response submitted`);
   await page.screenshot({path:`test-results/car-feedback-${suffix}-submitted.png`});
