@@ -43,3 +43,17 @@ No local checkout, fresh/upgrade PostgreSQL migration execution, production reco
 ## Operational release decision
 
 **NO GO.** The draft branch includes extensive work but the evidence does not show complete migration, backend, frontend, role, two-tenant browser, infrastructure and final-code CI acceptance. External Graph production tenant and real DOCX visual comparators are **BLOCKED** pending credentials and fixtures. Keep PR #570 in draft; record precise latest run outcomes here before considering review readiness. Deployment, migration and rollback steps must be derived from proven database upgrade and object-storage snapshots, not guessed in this report.
+
+## Phase 3 continuation — 2026-11-12: CAR rework submission consistency
+
+**Reproduced failure on historical consolidation HEAD** `b483839817b2d7b5799b76274fa87693b163526c`: [QMS CAR Control Loop Real Browser CI run 43180928343](https://github.com/periljames/amo-portal/actions/runs/43180928343), job `131056426645`. The real Playwright responsible-manager flow submitted the returned CAR rework; its intercepted PATCH included the revised RCA, but a fresh public GET still displayed the original rejected conclusion. The failure was line 443 in `frontend/tests/e2e/qms-car-control-loop-real.spec.ts`. That historical HEAD had 22 other successful workflows. These results **do not** certify newer commits.
+
+**Corrections committed in PR #570, all subject to exact-final-HEAD proof:**
+
+- `17b0af52608fc871e2e1f7aaac910296328baab2`: public invitation payload obtains the current submitted narrative, action, evidence and identity from the immutable `CARResponse` **only if** its `submitted_at` matches the CAR's current submission timestamp; stale/recalled snapshots cannot become authoritative.
+- `cccdcadad2126ab780dc1dc62a76938101564cff`: public submission explicitly flushes the staged 8k narratives inside the same tenant-scoped transaction before the compatibility handler re-reads the CAR through `FOR UPDATE`. The SQLAlchemy session configures `autoflush=False`, so this avoids silent re-use of a previous rejected narrative while preserving rollback on error.
+- `159c91432f42f015f9ba888acd6c085cf696c8df` and `e5c0f0ef37d19cfd251bb57684a137800cec473e`: added and corrected focused snapshot/older-revision contract coverage.
+- `9f0b8c727dca323d3662b21ceba6b9adf6405fca`: reject contradictory legacy aliases `root_cause_text`/`capa_text` against the validated canonical fields, support coherent legacy-only payloads and prevent a secondary overwrite after structured RCA verification.
+- `45369c087bf78f87d0f46ab64202b1ca931e3684`: added regression coverage for contradictory alias rejection and legacy-only compatibility.
+
+**Acceptance:** source changes are committed, but **not certified passed**. The current PR head changes as commits are made; CI, migrations, two-tenant RLS, full CAR rework through independent reviewer, Word fidelity and real Microsoft Entra/Graph acceptance must be assessed on the actual final commit. Preserve **DRAFT / NO GO** and do not merge or mark `COMPLETE` until evidence is available.
