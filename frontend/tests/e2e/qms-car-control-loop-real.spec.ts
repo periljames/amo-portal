@@ -301,6 +301,18 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByLabel("Controlled final due date").fill(futureDate(28));
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
     await expect(internalPage.getByRole("status").filter({ hasText: "Staged CAR control initialized" })).toContainText("Staged CAR control initialized", { timeout: 30_000 });
+    // The POST receipt is not sufficient: a COMMIT resets PostgreSQL's
+    // transaction-local RLS context. Verify the control is still initialized
+    // after an independent, tenant-authorized server read-back.
+    const persistedControl = await authenticatedRequest(
+      internalPage, "GET",
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/control-loop`,
+    );
+    expect(persistedControl.status, JSON.stringify(persistedControl.body)).toBe(200);
+    expect((persistedControl.body as { initialized: boolean }).initialized).toBe(true);
+    expect((persistedControl.body as { milestones: unknown[] }).milestones).toHaveLength(5);
+    await expect(internalPage.getByRole("heading", { name: "Initialize staged control" })).toHaveCount(0);
+    await expect(internalPage.getByRole("heading", { name: "Staged CAR lifecycle" })).toBeVisible({ timeout: 30_000 });
 
     const internalFeedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
     console.log("CAR acceptance: exchanging live shared feedback and checking private-note isolation");
