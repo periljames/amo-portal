@@ -1249,6 +1249,11 @@ async def preview_pdf_upload(
     }
 
 
+def _http_docx_upload_commits() -> bool:
+    """Direct HTTP uploads always commit; the Graph adapter can defer explicitly."""
+    return True
+
+
 @router.post("/t/{tenant_slug}/upload-docx")
 async def upload_docx_revision(
     tenant_slug: str,
@@ -1265,6 +1270,7 @@ async def upload_docx_revision(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
+    commit_changes: bool = Depends(_http_docx_upload_commits),
 ):
     tenant = _tenant_by_slug(db, tenant_slug)
     if not is_tenant_admin(current_user) and (str(current_user.role) == "AccountRole.VIEW_ONLY" or getattr(current_user, "role", None) == account_models.AccountRole.VIEW_ONLY):
@@ -1453,7 +1459,11 @@ async def upload_docx_revision(
         "control_metadata": control_metadata,
         "processing_job_id": processing_job.id,
     })
-    db.commit()
+    # Graph imports hold the file-link row lock until the provenance update commits.
+    if commit_changes:
+        db.commit()
+    else:
+        db.flush()
     return {
         "manual_id": manual.id,
         "revision_id": rev.id,
