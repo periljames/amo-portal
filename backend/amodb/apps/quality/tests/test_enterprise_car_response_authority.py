@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from amodb.apps.quality.schemas import CARInviteUpdate
 
@@ -30,7 +30,7 @@ public_invites = importlib.import_module("amodb.apps.quality.public_invite_exten
 def test_committed_response_visible_to_authorized_reviewer_after_status_change(monkeypatch, car_status):
     car_id = uuid4()
     recorded = SimpleNamespace(id=uuid4(), root_cause="Revised operational RCA")
-    car = SimpleNamespace(id=car_id, status=car_status)
+    car = SimpleNamespace(id=car_id, status=car_status, submitted_at=None)
     reviewer = SimpleNamespace(id="quality-reviewer", amo_id="tenant-a")
     verified = []
 
@@ -48,7 +48,7 @@ def test_committed_response_visible_to_authorized_reviewer_after_status_change(m
     })
 
     result = router.list_car_responses_for_review(
-        car_id=car_id, request=None, mark_open=False, db=object(), current_user=reviewer,
+        car_id=car_id, request=None, response=Response(), mark_open=False, db=object(), current_user=reviewer,
     )
     assert verified == ["authorized"]
     assert result == [{"id": str(recorded.id), "root_cause": "Revised operational RCA", "is_latest": True}]
@@ -56,13 +56,13 @@ def test_committed_response_visible_to_authorized_reviewer_after_status_change(m
 
 def test_no_submitted_response_does_not_invent_review_evidence(monkeypatch):
     car_id = uuid4()
-    car = SimpleNamespace(id=car_id, status=models.CARStatus.IN_PROGRESS)
+    car = SimpleNamespace(id=car_id, status=models.CARStatus.IN_PROGRESS, submitted_at=None)
     monkeypatch.setattr(router, "_current_amo_id", lambda _user: "tenant-a")
     monkeypatch.setattr(router, "_get_car_for_amo", lambda *_args, **_kwargs: car)
     monkeypatch.setattr(router, "_require_car_review_access", lambda *_args: None)
     monkeypatch.setattr(router, "_car_invite_latest_active_response", lambda *_args: None)
     assert router.list_car_responses_for_review(
-        car_id=car_id, request=None, mark_open=False, db=object(),
+        car_id=car_id, request=None, response=Response(), mark_open=False, db=object(),
         current_user=SimpleNamespace(amo_id="tenant-a"),
     ) == []
 
