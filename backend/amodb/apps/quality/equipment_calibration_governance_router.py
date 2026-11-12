@@ -14,6 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from amodb.apps.accounts import models as account_models
@@ -267,19 +268,28 @@ def create_equipment(
         ), {"amo_id": ctx.amo_id, "serial": str(body.inventory_serial_id)}).first()
         if existing:
             raise HTTPException(409, "Inventory serial is already governed by another calibration asset.")
-    asset = _insert_record(db, table=_EQUIPMENT, amo_id=ctx.amo_id,
-                           actor_user_id=ctx.user_id, payload={
-                               "title": body.title, "description": body.description, "status": "QUARANTINED",
-                               "owner_user_id": body.owner_user_id, "due_date": body.calibration_due,
-                               "payload": {"version": 1, "asset_reference": body.asset_reference,
-                                           "inventory_serial_id": body.inventory_serial_id,
-                                           "traceability_policy": body.traceability_policy,
-                                           "verified_calibration_id": None},
-                           })
-    _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id,
-                      action="equipment_registered_quarantined", module="equipment-calibration",
-                      entity_type=_EQUIPMENT, entity_id=str(asset["id"]), new_value=asset, request=request)
-    db.commit()
+    try:
+        asset = _insert_record(db, table=_EQUIPMENT, amo_id=ctx.amo_id,
+                               actor_user_id=ctx.user_id, payload={
+                                   "title": body.title, "description": body.description, "status": "QUARANTINED",
+                                   "owner_user_id": body.owner_user_id, "due_date": body.calibration_due,
+                                   "payload": {"version": 1, "asset_reference": body.asset_reference,
+                                               "inventory_serial_id": body.inventory_serial_id,
+                                               "traceability_policy": body.traceability_policy,
+                                               "verified_calibration_id": None},
+                               })
+        _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id,
+                          action="equipment_registered_quarantined", module="equipment-calibration",
+                          entity_type=_EQUIPMENT, entity_id=str(asset["id"]), new_value=asset, request=request)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        if constraint == "uq_qms_equipment_active_inventory_serial":
+            raise HTTPException(
+                409, "Inventory serial is already governed by another calibration asset."
+            ) from exc
+        raise
     return {"asset": asset}
 
 
