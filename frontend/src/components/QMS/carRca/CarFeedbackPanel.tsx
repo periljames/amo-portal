@@ -74,7 +74,11 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
     if(!pending.current||pending.current.text!==text.trim()||pending.current.internal!==internal)pending.current={id:crypto.randomUUID(),text:text.trim(),internal};
     try {
       await request("",{message:pending.current.text,client_message_id:pending.current.id,actor_name:actorName?.trim()||"Invited respondent",visibility:internal&&!token?"INTERNAL":"SHARED"});
-      setText("");pending.current=null;setSendError("");setMessage(internal&&!token?"Internal note recorded.":"Feedback sent and retained in CAR history.");await refresh.current();
+      setText("");pending.current=null;setSendError("");setMessage(internal&&!token?"Internal note recorded.":"Feedback sent and retained in CAR history.");
+      // The write is already acknowledged by the server. History reconciliation
+      // is independent and must not hold the composer disabled, especially when
+      // a second, private Quality note follows a shared message.
+      void refresh.current();
     }catch(cause){
       // SSE/polling may already display the committed message after a lost
       // acknowledgement. Do not let a successful feed read erase the send
