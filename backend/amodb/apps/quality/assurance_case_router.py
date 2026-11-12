@@ -424,4 +424,8 @@ def conclude_effectiveness(
     if plan.source_type == "CAR":
         from .car_feedback import feedback_changed
         feedback_changed(source_car, ctx.user_id)
+    # A commit ends the SET LOCAL tenant context. Re-establish it before the
+    # final canonical read so RLS-enforced runtime principals can see their own
+    # just-committed conclusion (but never another tenant's case).
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return {"case": _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=case_id), detail=True), "effectiveness_plan": _plan_dict(plan)}
