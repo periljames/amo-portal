@@ -57,3 +57,10 @@ No local checkout, fresh/upgrade PostgreSQL migration execution, production reco
 - `45369c087bf78f87d0f46ab64202b1ca931e3684`: added regression coverage for contradictory alias rejection and legacy-only compatibility.
 
 **Acceptance:** source changes are committed, but **not certified passed**. The current PR head changes as commits are made; CI, migrations, two-tenant RLS, full CAR rework through independent reviewer, Word fidelity and real Microsoft Entra/Graph acceptance must be assessed on the actual final commit. Preserve **DRAFT / NO GO** and do not merge or mark `COMPLETE` until evidence is available.
+
+## Phase 3 continuation — 2026-11-12: final-head CAR real-browser date assertion
+
+- Inspected consolidation commit `913d038f04de218c47804c25ef0effc7f72910d5` against `main@86a66d2d3630518a67ff3f02d5c9467cdcdfd90d`: 191 ahead, 0 behind, before this correction.
+- PR-triggered CI on that exact head: **22 successful workflows, 1 failed workflow** among 23 returned runs. The failing [QMS CAR Control Loop Real Browser CI run 43195104096](https://github.com/periljames/amo-portal/actions/runs/43195104096), job 131103916329, failed at `frontend/tests/e2e/qms-car-control-loop-real.spec.ts:652` with Playwright's `toBeLessThanOrEqual` numeric matcher applied to the string date `2026-11-12`. It did **not** prove a backend rejection, and the effectiveness conclusion/closure stages were not reached by that run.
+- Commit `7b65d330efac4aaf3b151edeacb4a3a42dc343ab` replaces the invalid numeric matcher with an ISO calendar-date format check and a lexicographic `YYYY-MM-DD` date comparison. The gate remains strict: a planned review later than the browser calendar date fails. No test skip or feature bypass was added.
+- **Evidence status:** committed test correction; replacement browser CI and all exact-new-HEAD checks **NOT YET VERIFIED**. Keep PR #570 draft / NO GO, and investigate any subsequent failure at conclusion, independent verification or closure rather than treating this correction as end-to-end proof.
