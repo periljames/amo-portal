@@ -4,7 +4,10 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 // Explicit checkpoint images verify the real UI without continuously recording
 // animated pages on the same low-memory host that runs the database VM.
 test.use({ trace: "off", screenshot: "only-on-failure", video: "off" });
-test.setTimeout(Number(process.env.E2E_CAR_ACCEPTANCE_TIMEOUT_MS || 180_000));
+// The scenario covers two complete submissions, independent reviews, staged
+// implementation and governed effectiveness/closure through two browsers.
+// A 3-minute wall clock prematurely ended the final governance stages on CI.
+test.setTimeout(Number(process.env.E2E_CAR_ACCEPTANCE_TIMEOUT_MS || 300_000));
 
 type Fixture = {
   amo_slug: string;
@@ -630,7 +633,25 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     await internalPage.getByRole("button",{name:"Open Assurance Cases",exact:true}).click();
     await internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref}).click({timeout:30000});
-    await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id);
+    const caseDetails = await authenticatedRequest(internalPage, "GET",
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/assurance-cases/${plan.case_id}`);
+    expect(caseDetails.status, JSON.stringify(caseDetails.body)).toBe(200);
+    const caseBody = caseDetails.body as { effectiveness_plans?: Array<{ id: string; status: string; planned_review_date: string }> };
+    const selectedPlan = caseBody.effectiveness_plans?.find(item => item.id === plan.plan_id);
+    expect(selectedPlan, "Adopted effectiveness plan must belong to the selected governed case").toBeDefined();
+    const browserToday = await internalPage.evaluate(() => {
+      const value = new Date();
+      return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    });
+    const roleDenied = internalPage.getByText("Effectiveness planning and conclusions require CAR management permission.");
+    console.log("CAR acceptance: effectiveness review readiness " + JSON.stringify({
+      caseId: plan.case_id, planId: plan.plan_id, reviewer: data.realtime_user_a_id,
+      plannedReviewDate: selectedPlan?.planned_review_date, planStatus: selectedPlan?.status,
+      browserToday, permissionWarning: await roleDenied.isVisible(),
+    }));
+    expect(selectedPlan!.planned_review_date, "Do not conclude an effectiveness plan before its planned review date").toBeLessThanOrEqual(browserToday);
+    await expect(roleDenied, "Quality reviewer must have the CAR management permission needed to conclude").toHaveCount(0);
+    await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
     await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
     await internalPage.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
     await internalPage.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
