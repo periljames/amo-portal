@@ -185,12 +185,16 @@ def assign_revision_training(
     ).with_for_update().first()
     if not course:
         raise HTTPException(422, "The selected active Training course does not belong to this organisation.")
+    # Serialize competing manual-impact assignments for the same people.
+    # The legacy Training identity constraint has nullable scope fields, so a
+    # plain existence check would not prevent simultaneous USER-scope inserts.
+    # Lock target identities in deterministic order for this transaction.
     targets = db.query(account_models.User.id).filter(
         account_models.User.amo_id == ctx.amo_id,
         account_models.User.id.in_(body.target_user_ids),
         account_models.User.is_active.is_(True),
         account_models.User.is_system_account.is_(False),
-    ).all()
+    ).order_by(account_models.User.id).with_for_update(of=account_models.User).all()
     if {row[0] for row in targets} != set(body.target_user_ids):
         raise HTTPException(422, "Training targets must all be active people belonging to this organisation.")
     saved: list[dict[str, Any]] = []
