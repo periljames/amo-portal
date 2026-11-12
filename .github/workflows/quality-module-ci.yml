@@ -98,6 +98,12 @@ jobs:
           amodb/apps/quality/tests/test_people_authorization_control.py
           amodb/apps/quality/tests/test_planner_router.py
           amodb/apps/quality/tests/test_assurance_cockpit_contract.py
+          amodb/apps/quality/tests/test_enterprise_qms_dms_route_wiring.py
+          amodb/apps/quality/tests/test_enterprise_governed_risk_matrix.py
+          amodb/apps/quality/tests/test_enterprise_risk_matrix_policy.py
+          amodb/apps/quality/tests/test_enterprise_calibration_eligibility.py
+          amodb/apps/quality/tests/test_enterprise_car_response_authority.py
+          amodb/apps/quality/tests/test_audit_checklist_execution_route_order.py
 
   postgres-quality-schema:
     name: Quality PostgreSQL schema and RLS
