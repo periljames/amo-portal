@@ -652,6 +652,23 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect( /^\d{4}-\d{2}-\d{2}$/.test(selectedPlan!.planned_review_date), "Planned review must be an ISO calendar date").toBe(true);
     expect(selectedPlan!.planned_review_date <= browserToday, "Do not conclude an effectiveness plan before its planned review date").toBe(true);
     await expect(roleDenied, "Quality reviewer must have the CAR management permission needed to conclude").toHaveCount(0);
+    // Inspect the *rendered* effectiveness gate as well as the committed API
+    // snapshot. This identifies permission/date/data mismatch without masking
+    // a missing form or bypassing the real reviewer workflow.
+    const effectivenessUi = await internalPage.evaluate(() => {
+      const area = document.querySelector(".qms-assurance-cases__workgrid");
+      const control = document.querySelector<HTMLSelectElement>("#conclusion-plan");
+      const today = new Date();
+      return {
+        localNow: today.toString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        workgridText: (area?.textContent || "").slice(0, 5500),
+        selectorPresent: Boolean(control),
+        visiblePlanOptions: Array.from(control?.options || []).map((option) => ({value: option.value, text: option.text})),
+      };
+    });
+    console.log("CAR acceptance: rendered effectiveness review gate " + JSON.stringify(effectivenessUi));
+    await internalPage.screenshot({path:"test-results/car-effectiveness-review-form-full.png",fullPage:true});
     await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
     await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
     await internalPage.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
