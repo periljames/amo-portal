@@ -1502,7 +1502,11 @@ const PublicCarInvitePage: React.FC = () => {
                                     </label>
                                     <div className="car-invite-submit-row">
                                       <span className="car-invite-subtitle">
-                                        {locked ? "Response locked — no further submissions or changes are permitted." : "Preview is required before final submission."}
+                                        {!isInviteEditable(invite)
+                                           ? "Response locked — no further submissions or changes are permitted."
+                                           : entry.submitting
+                                             ? "Submitting response…"
+                                             : "Preview is required before final submission."}
                                       </span>
                                       <div className="car-invite-actions">
                                         {invite.can_recall ? (
