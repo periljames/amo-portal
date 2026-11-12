@@ -681,10 +681,10 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     });
     console.log("CAR acceptance: rendered effectiveness review gate " + JSON.stringify(effectivenessUi));
     await internalPage.screenshot({path:"test-results/car-effectiveness-review-form-full.png",fullPage:true});
-    await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
-    await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
-    await internalPage.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
-    await internalPage.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
+    await effectivenessPanel.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
+    await effectivenessPanel.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
+    await effectivenessPanel.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
+    await effectivenessPanel.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
     await internalPage.screenshot({path:"test-results/car-feedback-effectiveness-review.png"});
     const concluding=internalPage.waitForResponse(r=>r.url().endsWith(`/effectiveness-plans/${plan.plan_id}/conclusion`)&&r.request().method()==="POST");
     await internalPage.getByRole("button",{name:"Record immutable effectiveness conclusion",exact:true}).click();
