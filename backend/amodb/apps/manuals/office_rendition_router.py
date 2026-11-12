@@ -78,8 +78,9 @@ def retry_layout(
     if not revision.source_storage_path or not Path(revision.source_storage_path).is_file():
         raise HTTPException(status_code=404, detail="The original Office source is unavailable")
     audit(db, tenant, request, "document.rendition.retry_requested", "manual_revision", revision.id, {"previous_status": state.get("status")})
+    revision_for_background = str(revision.id)
     db.commit()
-    background_tasks.add_task(precompute_office_layout_assets, revision.id)
+    background_tasks.add_task(precompute_office_layout_assets, revision_for_background)
     return {"status": "QUEUED"}
 
 
@@ -108,8 +109,13 @@ def verify_layout(
     audit(db, tenant, request, "document.rendition.verified", "manual_revision", revision.id, {
         "source_sha256": row.source_sha256, "pdf_sha256": row.pdf_sha256, "note": row.verification_note,
     })
+    # Build the committed response from the flushed transaction while its
+    # tenant-scoped ORM state remains valid; never rely on an implicit ORM
+    # refresh after commit when PostgreSQL SET LOCAL scope has expired.
+    db.flush()
+    result = rendition_payload(db, revision)
     db.commit()
-    return rendition_payload(db, revision)
+    return result
 
 
 @router.post("/t/{tenant_slug}/{manual_id}/rev/{revision_id}/layout-upload")
@@ -194,5 +200,10 @@ async def upload_word_export_pdf(
         "source_sha256": revision.source_sha256, "pdf_sha256": digest,
         "page_count": pages, "filename": file.filename,
     })
+    # Build the committed response from the flushed transaction while its
+    # tenant-scoped ORM state remains valid; never rely on an implicit ORM
+    # refresh after commit when PostgreSQL SET LOCAL scope has expired.
+    db.flush()
+    result = rendition_payload(db, revision)
     db.commit()
-    return rendition_payload(db, revision)
+    return result
