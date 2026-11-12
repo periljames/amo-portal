@@ -649,7 +649,8 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
       plannedReviewDate: selectedPlan?.planned_review_date, planStatus: selectedPlan?.status,
       browserToday, permissionWarning: await roleDenied.isVisible(),
     }));
-    expect(selectedPlan!.planned_review_date, "Do not conclude an effectiveness plan before its planned review date").toBeLessThanOrEqual(browserToday);
+    expect( /^\d{4}-\d{2}-\d{2}$/.test(selectedPlan!.planned_review_date), "Planned review must be an ISO calendar date").toBe(true);
+    expect(selectedPlan!.planned_review_date <= browserToday, "Do not conclude an effectiveness plan before its planned review date").toBe(true);
     await expect(roleDenied, "Quality reviewer must have the CAR management permission needed to conclude").toHaveCount(0);
     await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
     await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
