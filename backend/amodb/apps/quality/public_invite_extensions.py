@@ -228,6 +228,13 @@ def submit_car_invite_with_detailed_response(
     from .tenant_security import set_postgres_tenant_context
     from .car_rca_router import submit_rca_document
     set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+    # The compatibility submit handler acquires the CAR again with FOR UPDATE.
+    # Flush the new narratives under the resolved tenant context first: with
+    # autoflush=False, an ORM re-read can otherwise reuse the previous submitted
+    # register values and create an immutable response for the rejected attempt.
+    # This is still one transaction; any failed RCA/submission validation rolls
+    # back both the narrative and the structured investigation together.
+    db.flush()
     submit_rca_document(
         db, car, payload.root_cause if payload.root_cause is not None else car.root_cause,
         responder_email=payload.submitted_by_email,
