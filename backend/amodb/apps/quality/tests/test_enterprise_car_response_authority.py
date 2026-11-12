@@ -73,6 +73,8 @@ def test_public_invite_uses_only_exact_committed_response_snapshot(
     current = SimpleNamespace(
         id=uuid4(), invite_token="single-car-token",
         car_number="Q-2026-0101", title="Evidence control", summary="Corrective review",
+        priority=models.CARPriority.MEDIUM, status=models.CARStatus.PENDING_VERIFICATION,
+        due_date=None, target_closure_date=None, next_reminder_at=None,
         submitted_at=submitted_at, root_cause="Original rejected explanation",
         root_cause_text="Original rejected explanation",
         corrective_action="Original rejected action",
