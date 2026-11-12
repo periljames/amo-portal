@@ -517,7 +517,16 @@ def _initialize_control_loop(
         severity="ACTION_REQUIRED",
     )
     db.commit()
-    return _result(db, car=_load_car(db, amo_id=ctx.amo_id, car_id=car_id), profile=_load_profile(db, amo_id=ctx.amo_id, car_id=car_id))
+    # PostgreSQL SET LOCAL RLS scope ends at COMMIT. Re-enter the same
+    # authorised tenant before reading the newly persisted profile: returning
+    # initialized=False after a successful POST wrongly sends the browser back
+    # to its initialization form and discards its live feedback composer.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    committed_car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id)
+    committed_profile = _load_profile(db, amo_id=ctx.amo_id, car_id=car_id)
+    if committed_profile is None:
+        raise HTTPException(status_code=500, detail="CAR control loop was committed but could not be verified under the authorised tenant.")
+    return _result(db, car=committed_car, profile=committed_profile)
 
 
 @router.patch("/profile")
