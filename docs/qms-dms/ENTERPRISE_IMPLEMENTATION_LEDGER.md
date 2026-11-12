@@ -123,3 +123,20 @@ Repository `main` remains `86a66d2d3630518a67ff3f02d5c9467cdcdfd90d` when refres
 - **Exact final-HEAD check:** the consolidated PR now has new CI jobs scheduled after each commit, and prior run results do NOT certify the newer HEAD. Do not merge while latest-run checks are queued, cancelled due to superseding commits or failing. Main remained at `86a66d2d3630518a67ff3f02d5c9467cdcdfd90d` when checked.
 
 **Phase 3 result: IN PROGRESS / NOT VERIFIED. Production readiness decision: NO.** A final report will record the exact final HEAD and complete executable results after CI settles; external Microsoft tenant/credentials and Word layout visual acceptance remain blockers until tested.
+
+## Implementation audit — 2026-11-12
+
+All items below are **PARTIAL** pending exact-final-HEAD and live-environment acceptance. No source PR was closed/merged/retargeted.
+
+| Contract | Source/commit | Runtime verification and remaining gate |
+| --- | --- | --- |
+| Selective #569/#557/#558 consolidation | Git-tree SHA/source-file comparison | All source file paths are present; 4/12/6 were adapted, 3/16 retain newer mainline ownership for #557/#558. Function-level parity and browser acceptance still required. |
+| QMS/DMS route ownership | `7fcbaccf`, `11c2a6d9` | Runtime FastAPI exact endpoint and Alembic-chain assertions added to Quality CI. Quality backend contract passed on historical `e8bdad58`; final-head rerun pending. |
+| Equipment/Inventory calibration boundary | `2463b9fb`, `ffa4e91e`, `91642b2e`, `f6d704af` | Unique active inventory-serial calibration owner in PostgreSQL, controlled duplicate 409. Fresh-schema migration and index assertions passed in historical Document Control Governance CI; duplicate historical rows must be reconciled before upgrading a real populated database. |
+| Microsoft Graph delegated draft import | `e7eb724f`, `9011dae1`, `e8bdad58` | Canonical DOCX upload no longer commits before SharePoint eTag/source lineage; test covers one commit, replay, changed eTag. Live tenant OAuth, real download, storage consistency and cancellation still unverified. |
+| Manual revision → Training | `66a1c770` | Deterministic target-person row locks serialise this DMS assignment path. A separate, cross-module Training concurrency acceptance is still required. |
+| CAR effectiveness reviewer UI | `bc6c1fa5`, `cb0b3bcc`, `e5715055` | Prior exact-head run 43220214444: reviewer form selector timeout although persisted plan existed. Chromium reproduced exact label mismatch on nested select options; accessible labels and full-page trace added. Current final-head real-browser conclusion/closure acceptance pending. |
+| External platform integration | PR #564 separately open | Storage quota/tenant/DR work deliberately not bulk stacked. Joint platform/QMS migration and live storage/tenant tests remain blockers; no release claim. |
+
+### Evidence policy
+On historical `e8bdad58`, 22/23 workflows passed, with CAR real browser failing. All newer commits must receive their own successful final-head CI; do not infer success from previous checks or selectively ignore failures. **DRAFT / NO GO.**
