@@ -6806,6 +6806,17 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
                 "due_date": related_car.due_date,
                 "priority": related_car.priority,
             })
+    # A submitted response is an immutable, reviewable record. Resolve the
+    # public projection from the response belonging to the current submission,
+    # not from mutable register fields that can outlive earlier rejected attempts.
+    # During rework (before a new submission), the editable register/draft
+    # remains visible; a recalled response is never promoted as current.
+    submitted_snapshot = None
+    if db is not None and car.submitted_at is not None:
+        latest_response = _car_invite_latest_active_response(db, car.id)
+        if latest_response is not None and latest_response.submitted_at == car.submitted_at:
+            submitted_snapshot = latest_response
+
     return {
         "car_id": car.id,
         "invite_token": car.invite_token,
@@ -6823,13 +6834,13 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
         "evidence_received_at": getattr(car, "evidence_received_at", None),
         "evidence_verified_at": getattr(car, "evidence_verified_at", None),
         "submitted_at": getattr(car, "submitted_at", None),
-        "containment_action": getattr(car, "containment_action", None),
-        "root_cause": getattr(car, "root_cause", None) or getattr(car, "root_cause_text", None),
-        "corrective_action": getattr(car, "corrective_action", None) or getattr(car, "capa_text", None),
-        "preventive_action": getattr(car, "preventive_action", None),
-        "evidence_ref": getattr(car, "evidence_ref", None),
-        "submitted_by_name": getattr(car, "submitted_by_name", None),
-        "submitted_by_email": getattr(car, "submitted_by_email", None),
+        "containment_action": submitted_snapshot.containment_action if submitted_snapshot is not None else getattr(car, "containment_action", None),
+        "root_cause": submitted_snapshot.root_cause if submitted_snapshot is not None else (getattr(car, "root_cause", None) or getattr(car, "root_cause_text", None)),
+        "corrective_action": submitted_snapshot.corrective_action if submitted_snapshot is not None else (getattr(car, "corrective_action", None) or getattr(car, "capa_text", None)),
+        "preventive_action": submitted_snapshot.preventive_action if submitted_snapshot is not None else getattr(car, "preventive_action", None),
+        "evidence_ref": submitted_snapshot.evidence_ref if submitted_snapshot is not None else getattr(car, "evidence_ref", None),
+        "submitted_by_name": submitted_snapshot.submitted_by_name if submitted_snapshot is not None else getattr(car, "submitted_by_name", None),
+        "submitted_by_email": submitted_snapshot.submitted_by_email if submitted_snapshot is not None else getattr(car, "submitted_by_email", None),
         "root_cause_status": getattr(car, "root_cause_status", None),
         "capa_status": getattr(car, "capa_status", None),
         "root_cause_review_note": getattr(car, "root_cause_review_note", None),
