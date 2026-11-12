@@ -6917,10 +6917,19 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         if val is not None:
             setattr(car, field, _limit_car_invite_text(val) if field in text_fields else val)
 
+    # Keep the historical *_text aliases consistent with the submitted
+    # narrative. A prior rejected attempt must not remain the first nonempty
+    # value used to construct the next immutable CARResponse snapshot.
     if payload.root_cause_text is not None:
         car.root_cause_text = _limit_car_invite_text(payload.root_cause_text)
+        car.root_cause = car.root_cause_text
+    elif payload.root_cause is not None:
+        car.root_cause_text = car.root_cause
     if payload.capa_text is not None:
         car.capa_text = _limit_car_invite_text(payload.capa_text)
+        car.corrective_action = car.capa_text
+    elif payload.corrective_action is not None:
+        car.capa_text = car.corrective_action
 
     if not (car.root_cause_text or car.root_cause):
         raise HTTPException(status_code=400, detail="Root cause is required for CAR response")
@@ -6957,8 +6966,8 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     response = models.CARResponse(
         car_id=car.id,
         containment_action=car.containment_action,
-        root_cause=car.root_cause_text or car.root_cause,
-        corrective_action=car.capa_text or car.corrective_action,
+        root_cause=car.root_cause or car.root_cause_text,
+        corrective_action=car.corrective_action or car.capa_text,
         preventive_action=car.preventive_action,
         evidence_ref=car.evidence_ref,
         submitted_by_name=car.submitted_by_name,
