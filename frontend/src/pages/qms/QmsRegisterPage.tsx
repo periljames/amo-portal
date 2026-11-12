@@ -335,6 +335,11 @@ const QmsRegisterPage: React.FC<QmsRegisterPageProps> = ({ embedded = false }) =
     <div className={`qms-register-page qms-register-page--${module.id}`}>
       {module.id === "change-control" ? <div className="qms-workspace-actions"><strong>Historical change records</strong><Link to={qmsModulePath(amoCode, module.id, "register")}>Manage controlled changes and approvals <ArrowRight size={14}/></Link></div> : null}
       {!embedded ? <PageHeader compact title={module.label} actions={!controlledNew ? <button type="button" className="qms-register-refresh" onClick={() => void load(true)} disabled={state === "loading"}><RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh</button> : null} /> : null}
+      {embedded && isEvidence ? <div className="qms-workspace-actions">
+        <button type="button" className="qms-register-refresh" onClick={() => void refetchEvidence()} disabled={state === "loading"}>
+          <RefreshCw size={16} className={state === "loading" ? "is-spinning" : ""} aria-hidden="true" /> Refresh evidence
+        </button>
+      </div> : null}
 
       {!embedded && <QmsSectionTabs amoCode={amoCode} />}
       {isInbox ? <><div className="qms-workspace-actions"><button type="button" onClick={() => setSyncOpen(true)}>Sync calendars</button><Link to={qmsModulePath(amoCode, "calendar", "week")}>Open calendar</Link></div><QmsCalendarSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} /><details className="qms-register-diagnostics"><summary>Personal to-dos</summary><Suspense fallback={<InlineLoading label="Opening tasks"/>}><QmsPersonalTasks key={amoCode} amoCode={amoCode} /></Suspense></details></> : null}
