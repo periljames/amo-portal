@@ -252,7 +252,11 @@ def assign_revision_training(
                    "target_user_ids": body.target_user_ids, "decision_basis": body.decision_basis,
                    "assignments": saved, "blocking": body.blocking}, request=request,
     )
+    # Snapshot response identifiers before commit expires ORM state. The returned
+    # provenance is the validated immutable published revision, not a fresh
+    # post-commit read with potentially expired SET LOCAL tenant scope.
+    response = {"manual_id": manual.id, "revision_id": revision.id,
+                "source_sha256": revision.source_sha256, "assignments": saved,
+                "message": "Training requirements were linked; completion and document acknowledgements remain independent."}
     db.commit()
-    return {"manual_id": manual.id, "revision_id": revision.id,
-            "source_sha256": revision.source_sha256, "assignments": saved,
-            "message": "Training requirements were linked; completion and document acknowledgements remain independent."}
+    return response
