@@ -6,6 +6,7 @@ the PostgreSQL + invited-browser scenario in run 41999293028.
 from __future__ import annotations
 
 import importlib
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -60,3 +61,53 @@ def test_no_submitted_response_does_not_invent_review_evidence(monkeypatch):
         car_id=car_id, request=None, mark_open=False, db=object(),
         current_user=SimpleNamespace(amo_id="tenant-a"),
     ) == []
+
+
+
+@pytest.mark.parametrize("matches_current_submission", [True, False])
+def test_public_invite_uses_only_exact_committed_response_snapshot(
+    monkeypatch, matches_current_submission,
+):
+    """A returned CAR cannot surface rejected text after the new response commits."""
+    submitted_at = datetime(2026, 11, 12, 8, 0, tzinfo=timezone.utc)
+    current = SimpleNamespace(
+        id=uuid4(), invite_token="single-car-token",
+        car_number="Q-2026-0101", title="Evidence control", summary="Corrective review",
+        submitted_at=submitted_at, root_cause="Original rejected explanation",
+        root_cause_text="Original rejected explanation",
+        corrective_action="Original rejected action",
+        containment_action="Original containment",
+        preventive_action="Original prevention",
+        evidence_ref="Original evidence",
+        submitted_by_name="Responsible Manager",
+        submitted_by_email="manager@example.com",
+        finding=None,
+    )
+    stored = SimpleNamespace(
+        submitted_at=submitted_at if matches_current_submission else submitted_at - timedelta(days=1),
+        root_cause="Revised evidence-backed explanation",
+        corrective_action="Revised action",
+        containment_action="Revised containment",
+        preventive_action="Revised prevention",
+        evidence_ref="Revised evidence",
+        submitted_by_name="Responsible Manager",
+        submitted_by_email="manager@example.com",
+    )
+    monkeypatch.setattr(router, "_public_request_origin", lambda _request: "https://portal.example")
+    monkeypatch.setattr(
+        router, "build_car_invite_link",
+        lambda _car, *, request_origin: f"{request_origin}/qms/car-access/single-car-token",
+    )
+    monkeypatch.setattr(router, "_car_invite_state", lambda _db, _car: {"can_edit": False})
+    monkeypatch.setattr(router, "_car_invite_latest_active_response", lambda _db, _id: stored)
+
+    projection = router._car_invite_payload(current, db=object())
+    if matches_current_submission:
+        assert projection["root_cause"] == "Revised evidence-backed explanation"
+        assert projection["corrective_action"] == "Revised action"
+        assert projection["evidence_ref"] == "Revised evidence"
+    else:
+        # An older or recalled snapshot must never masquerade as the current one.
+        assert projection["root_cause"] == "Original rejected explanation"
+        assert projection["corrective_action"] == "Original rejected action"
+        assert projection["evidence_ref"] == "Original evidence"
