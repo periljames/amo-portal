@@ -11,11 +11,15 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
+
+from amodb.apps.quality.schemas import CARInviteUpdate
 
 from amodb.apps.quality import models
 
 
 router = importlib.import_module("amodb.apps.quality.router")
+public_invites = importlib.import_module("amodb.apps.quality.public_invite_extensions")
 
 
 @pytest.mark.parametrize("car_status", [
@@ -113,3 +117,38 @@ def test_public_invite_uses_only_exact_committed_response_snapshot(
         assert projection["root_cause"] == "Original rejected explanation"
         assert projection["corrective_action"] == "Original rejected action"
         assert projection["evidence_ref"] == "Original evidence"
+
+
+
+@pytest.mark.parametrize(("canonical", "alias"), [
+    ("root_cause", "root_cause_text"),
+    ("corrective_action", "capa_text"),
+])
+def test_public_submission_rejects_conflicting_legacy_narrative_aliases(canonical, alias):
+    car = SimpleNamespace(
+        root_cause="Retained RCA", root_cause_text="Retained RCA",
+        corrective_action="Retained CAPA", capa_text="Retained CAPA",
+    )
+    payload = CARInviteUpdate(**{canonical: "Revised conclusion", alias: "Old rejected conclusion"})
+    with pytest.raises(HTTPException) as rejected:
+        public_invites._persist_detailed_response_fields(car, payload)
+    assert rejected.value.status_code == 422
+    # Reject before changing a CAR, not after producing mismatched evidence.
+    assert car.root_cause == car.root_cause_text == "Retained RCA"
+    assert car.corrective_action == car.capa_text == "Retained CAPA"
+
+
+@pytest.mark.parametrize(("canonical", "alias"), [
+    ("root_cause", "root_cause_text"),
+    ("corrective_action", "capa_text"),
+])
+def test_public_submission_legacy_only_narrative_keeps_canonical_fields_consistent(canonical, alias):
+    car = SimpleNamespace(
+        root_cause="Original RCA", root_cause_text="Original RCA",
+        corrective_action="Original CAPA", capa_text="Original CAPA",
+    )
+    public_invites._persist_detailed_response_fields(
+        car, CARInviteUpdate(**{alias: "Revised legacy explanation"}),
+    )
+    assert getattr(car, canonical) == "Revised legacy explanation"
+    assert getattr(car, alias) == "Revised legacy explanation"
