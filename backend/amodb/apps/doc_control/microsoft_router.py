@@ -355,6 +355,7 @@ async def import_document(
         owner_role=manual.owner_role, effective_date=None,
         change_log="Imported from linked SharePoint working file",
         control_metadata_json=None, file=upload, db=db, current_user=user,
+        commit_changes=False,  # Preserve NOWAIT file-link lock until provenance commit.
     )
     if str(result["manual_id"]) != str(manual.id):
         raise HTTPException(status_code=409, detail="Imported source did not match the canonical manual; contact Document Control")
