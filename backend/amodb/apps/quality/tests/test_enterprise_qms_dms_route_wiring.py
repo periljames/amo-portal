@@ -54,6 +54,7 @@ def test_qms_dms_migration_chain_is_reachable_and_ordered() -> None:
         "docctl_261009_favorites": "doc_m365_261028",
         "quality_process_review_261111": "docctl_261009_favorites",
         "dms_training_link_261111": "quality_process_review_261111",
+        "qms_equipment_serial_261112": "dms_training_link_261111",
     }
     for revision, expected_parent in parents.items():
         node = script.get_revision(revision)
