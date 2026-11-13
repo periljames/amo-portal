@@ -87,6 +87,17 @@ def _full_key(key: str) -> str:
     return f"{prefix}/{clean}" if prefix else clean
 
 
+def expected_s3_uri(key: str) -> str:
+    """Canonical physical URI for an immutable key in this deployment.
+
+    Never trust a caller-supplied bucket or object prefix when assigning a
+    tenant's quota receipt: another tenant's object must not be referenced.
+    """
+    if not bucket_name():
+        raise ValueError("S3 bucket is not configured")
+    return f"s3://{bucket_name()}/{_full_key(key)}"
+
+
 def _client():
     global _CLIENT
     with _CLIENT_LOCK:
@@ -253,7 +264,7 @@ def _parse_s3(uri: str) -> tuple[str, str]:
     return parsed.netloc, parsed.path.lstrip("/")
 
 
-def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
+def materialize(uri: str, *, expected_sha256: str | None = None, force_download: bool = False) -> Path:
     if not str(uri or "").startswith("s3://"):
         path = Path(uri).resolve()
         root = local_root()
@@ -272,7 +283,7 @@ def materialize(uri: str, *, expected_sha256: str | None = None) -> Path:
     suffix = Path(key).suffix[:16]
     digest = hashlib.sha256(uri.encode()).hexdigest()
     target = root / f"{digest}{suffix}"
-    if target.is_file():
+    if target.is_file() and not force_download:
         if not expected_sha256 or _sha256(target) == expected_sha256:
             try:
                 os.utime(target, None)
@@ -298,6 +309,9 @@ def delete(uri: str) -> None:
         return
     if uri.startswith("s3://"):
         bucket, key = _parse_s3(uri)
+        prefix = object_prefix()
+        if bucket != bucket_name() or (prefix and not key.startswith(prefix + "/")):
+            raise ValueError("Refusing deletion outside the configured S3 namespace")
         _client().delete_object(Bucket=bucket, Key=key)
         cached = cache_root() / f"{hashlib.sha256(uri.encode()).hexdigest()}{Path(key).suffix[:16]}"
         cached.unlink(missing_ok=True)
@@ -309,6 +323,18 @@ def delete(uri: str) -> None:
     except ValueError:
         return
     path.unlink(missing_ok=True)
+
+
+def retained_object_size(uri: str) -> int:
+    """Read the actual size of a retained object in the configured S3 bucket."""
+    bucket, key = _parse_s3(uri)
+    prefix = object_prefix()
+    if bucket != bucket_name() or (prefix and not key.startswith(prefix + "/")):
+        raise ValueError("Retained object is outside the configured S3 namespace")
+    head = _client().head_object(Bucket=bucket, Key=key)
+    if "ContentLength" not in head:
+        raise IOError("S3 HEAD response did not include the retained byte count")
+    return int(head["ContentLength"])
 
 
 def exists(uri: str) -> bool:
