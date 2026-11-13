@@ -103,6 +103,7 @@ jobs:
           amodb/apps/quality/tests/test_enterprise_risk_matrix_policy.py
           amodb/apps/quality/tests/test_enterprise_calibration_eligibility.py
           amodb/apps/quality/tests/test_enterprise_car_response_authority.py
+          amodb/apps/quality/tests/test_shared_report_storage.py
           amodb/apps/quality/tests/test_shared_evidence_storage.py
           amodb/apps/quality/tests/test_audit_checklist_execution_route_order.py
 
