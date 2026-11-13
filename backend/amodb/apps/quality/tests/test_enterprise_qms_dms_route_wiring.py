@@ -19,6 +19,10 @@ QUALITY_PREFIX = "/api/maintenance/{amo_code}/quality"
 
 @pytest.mark.parametrize(("method", "path"), [
     ("GET", QUALITY_PREFIX + "/management-review/meetings"),
+    ("GET", "/platform/tenants/{tenant_id}/storage-quota"),
+    ("POST", "/platform/tenants/{tenant_id}/storage-quota"),
+    ("POST", "/platform/tenants/{tenant_id}/storage-quota/reconcile"),
+    ("POST", "/platform/tenants/{tenant_id}/storage-quota/verify-objects"),
     ("POST", QUALITY_PREFIX + "/management-review/meetings/{meeting_id}/approve"),
     ("POST", QUALITY_PREFIX + "/management-review/meetings/{meeting_id}/actions/{action_id}/verify"),
     ("GET", QUALITY_PREFIX + "/risk/governance/matrix"),
@@ -49,7 +53,10 @@ def test_governed_endpoint_has_exactly_one_application_owner(method: str, path: 
 def test_qms_dms_migration_chain_is_reachable_and_ordered() -> None:
     script = ScriptDirectory.from_config(Config("amodb/alembic.ini"))
     parents = {
-        "docx_fidelity_261028": "quality_car_feedback_261027",
+        "plat_20261016_storage_bytes": "quality_261003_evidence_context",
+        "plat_261026_merge_heads": ("extprov_261019_oversight", "plat_20261016_storage_bytes"),
+        "venspera_quality_261029_merge": ("plat_261026_merge_heads", "quality_car_feedback_261027"),
+        "docx_fidelity_261028": "venspera_quality_261029_merge",
         "doc_m365_261028": "docx_fidelity_261028",
         "docctl_261009_favorites": "doc_m365_261028",
         "quality_process_review_261111": "docctl_261009_favorites",

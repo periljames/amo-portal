@@ -37,6 +37,7 @@ from amodb.database import Base, write_engine  # type: ignore  # noqa: E402
 # Import model modules so all tables are registered on Base.metadata.
 # IMPORTANT: we do NOT import `amodb.models` here to avoid any legacy tables.
 from amodb.apps.accounts import models as accounts_models  # noqa: F401, E402
+from amodb.apps.platform import storage_quota_models as platform_storage_quota_models  # noqa: F401, E402
 from amodb.apps.fleet import models as fleet_models  # noqa: F401, E402
 from amodb.apps.work import models as work_models  # noqa: F401, E402
 from amodb.apps.crs import models as crs_models  # noqa: F401, E402

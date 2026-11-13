@@ -1,13 +1,13 @@
 """Persist source-bound Office reading renditions and human verification.
 
 Revision ID: docx_fidelity_261028
-Revises: quality_car_feedback_261027
+Revises: venspera_quality_261029_merge
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "docx_fidelity_261028"
-down_revision = "quality_car_feedback_261027"
+down_revision = "venspera_quality_261029_merge"
 branch_labels = None
 depends_on = None
 
