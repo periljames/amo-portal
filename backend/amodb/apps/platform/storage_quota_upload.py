@@ -13,10 +13,47 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 from amodb import storage
 from . import storage_quota_service
 from .storage_quota_models import TenantStorageObject
+
+
+_PENDING_OBJECTS = "tenant_storage_pending_remote_objects"
+_OUTER_COMMIT = "tenant_storage_outer_commit_pending"
+
+
+def _track_uncommitted_object(session: Session, uri: str) -> None:
+    """Retain custody of new S3 objects until the surrounding DB commit succeeds."""
+    session.info.setdefault(_PENDING_OBJECTS, set()).add(uri)
+
+
+@event.listens_for(Session, "before_commit")
+def _storage_before_commit(session: Session) -> None:
+    if not session.in_nested_transaction() and session.info.get(_PENDING_OBJECTS):
+        session.info[_OUTER_COMMIT] = True
+
+
+@event.listens_for(Session, "after_commit")
+def _storage_after_commit(session: Session) -> None:
+    if session.info.pop(_OUTER_COMMIT, False):
+        session.info.pop(_PENDING_OBJECTS, None)
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _storage_after_transaction_end(session: Session, transaction) -> None:
+    if getattr(transaction, "parent", None) is not None:
+        return
+    session.info.pop(_OUTER_COMMIT, None)
+    for uri in session.info.pop(_PENDING_OBJECTS, set()):
+        try:
+            storage.delete(uri)
+        except Exception:
+            # Cleanup cannot mask the transactional error. The remote orphan
+            # must remain discoverable by physical storage reconciliation.
+            pass
 
 
 def enforcement_enabled() -> bool:
@@ -113,6 +150,7 @@ def put_bytes(db, *, tenant_id: str, key: str, content: bytes,
             db, tenant_id=tenant_id, reservation_id=reservation.id,
             storage_uri=retained.uri, checksum_sha256=digest, actor_id=actor_id,
         )
+        _track_uncommitted_object(db, retained.uri)
         return retained
     except Exception:
         if retained is not None:
@@ -156,6 +194,7 @@ def put_local_file(db, *, tenant_id: str, key: str, path: Path,
             db, tenant_id=tenant_id, reservation_id=reservation.id,
             storage_uri=retained.uri, checksum_sha256=digest.hexdigest(), actor_id=actor_id,
         )
+        _track_uncommitted_object(db, retained.uri)
         return retained
     except Exception:
         if retained is not None:

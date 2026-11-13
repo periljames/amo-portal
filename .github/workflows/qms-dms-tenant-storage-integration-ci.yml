@@ -6,6 +6,7 @@ on:
       - "backend/amodb/storage.py"
       - "backend/amodb/apps/platform/storage_quota*.py"
       - "backend/amodb/apps/platform/tests/test_storage_quota_accounting.py"
+      - "backend/amodb/apps/platform/tests/test_storage_object_rollback_cleanup.py"
       - "backend/amodb/apps/platform/tests/test_postgres_tenant_storage_quota.py"
       - "backend/amodb/apps/platform/tests/test_s3_multinode_acceptance.py"
       - "backend/amodb/apps/quality/car_rca_storage.py"
@@ -59,6 +60,7 @@ jobs:
         run: >-
           python -m pytest -q
           backend/amodb/apps/platform/tests/test_storage_quota_accounting.py
+          backend/amodb/apps/platform/tests/test_storage_object_rollback_cleanup.py
           backend/amodb/apps/platform/tests/test_postgres_tenant_storage_quota.py
 
   minio-cross-worker-recovery:
