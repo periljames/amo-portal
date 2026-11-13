@@ -261,7 +261,7 @@ test("Assurance exposes only backend-allowed transitions and blocks evidence-fre
   const recordStatement = page.getByRole("button", { name: "Record immutable statement" });
   await expect(recordStatement).toBeDisabled();
   await expect(page.getByText("Record at least one FACT before promoting a statement to a causal conclusion.", { exact: true })).toBeVisible();
-  await page.getByLabel(/Authoritative evidence reference/).first().fill("evidence-record-1");
+  await page.getByLabel(/Investigation evidence reference/).fill("evidence-record-1");
   await expect(recordStatement).toBeDisabled();
 });
 

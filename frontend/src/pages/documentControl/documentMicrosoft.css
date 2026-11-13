@@ -1,0 +1,14 @@
+
+.dms-microsoft { display: flex; flex-direction: column; gap: .8rem; min-width: 0; }
+.dms-microsoft__row { display: flex; align-items: center; gap: .8rem; min-width: 0; }
+.dms-microsoft__row > div { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.dms-microsoft__row strong { overflow-wrap: anywhere; }
+.dms-microsoft__row small, .dms-microsoft__hint { color: var(--text-muted, #64748b); }
+.dms-microsoft__actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+.dms-microsoft__actions a, .dms-microsoft__actions button, .dms-microsoft__form button { display: inline-flex; align-items: center; gap: .4rem; }
+.dms-microsoft__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .7rem; align-items: end; }
+.dms-microsoft__form label { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.dms-microsoft__form input, .dms-microsoft__form textarea { width: 100%; min-width: 0; padding: .55rem; color: var(--text-primary, #0f172a); background: var(--surface-primary, #fff); border: 1px solid var(--border-subtle, #cbd5e1); border-radius: .35rem; }
+.dms-microsoft__wide { grid-column: 1 / -1; }
+.dms-microsoft__error { color: #b91c1c; overflow-wrap: anywhere; }
+.dms-microsoft__success { color: #15803d; }

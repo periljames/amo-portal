@@ -180,6 +180,7 @@ class ManualReaderProgress(Base):
     scroll_percent = Column(Integer, nullable=False, default=0)
     zoom_percent = Column(Integer, nullable=False, default=100)
     bookmark_label = Column(String(255), nullable=True)
+    is_favorite = Column(Boolean, nullable=False, default=False, server_default="false")
     bookmarks_json = Column(JSON, nullable=False, default=list)
     last_opened_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -272,3 +273,34 @@ class ManualAIHookEvent(Base):
     event_name = Column(String(128), nullable=False)
     payload_json = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
+class ManualRendition(Base):
+    """Durable PDF reading rendition for an unchanged Office source revision."""
+
+    __tablename__ = "manual_revision_renditions"
+    __table_args__ = (UniqueConstraint("revision_id", "rendition_type", name="uq_manual_revision_rendition_type"),)
+
+    id = Column(String(36), primary_key=True, default=generate_user_id)
+    amo_id = Column(String(36), ForeignKey("amos.id", ondelete="CASCADE"), nullable=False, index=True)
+    manual_id = Column(String(36), ForeignKey("manuals.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_id = Column(String(36), ForeignKey("manual_revisions.id", ondelete="CASCADE"), nullable=False, index=True)
+    rendition_type = Column(String(16), nullable=False, default="PDF")
+    status = Column(String(24), nullable=False, default="QUEUED")
+    source_sha256 = Column(String(64), nullable=False)
+    pdf_sha256 = Column(String(64), nullable=True)
+    storage_path = Column(Text, nullable=True)
+    converter = Column(String(96), nullable=True)
+    page_count = Column(Integer, nullable=True)
+    source_media_count = Column(Integer, nullable=True)
+    rendered_image_count = Column(Integer, nullable=True)
+    warning = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    verified_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verification_note = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

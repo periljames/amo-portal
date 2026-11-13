@@ -31,7 +31,8 @@
   background: var(--pdfv5-shell-bg);
   color: var(--pdfv5-text);
   color-scheme: dark;
-  transition: background-color 160ms ease, color 160ms ease;
+  /* A scheme change must not momentarily invert reader contrast. */
+  transition: none;
 }
 
 body[data-color-scheme="light"] .pdfv5-shell {
@@ -89,7 +90,7 @@ body[data-color-scheme="light"] .pdfv5-shell {
   border-right: 1px solid var(--pdfv5-border);
   background: var(--pdfv5-panel-bg);
   color: var(--pdfv5-text);
-  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  transition: none;
 }
 
 .pdfv5-navigator-head {

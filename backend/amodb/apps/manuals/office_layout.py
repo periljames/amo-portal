@@ -8,6 +8,7 @@ on every open.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 import json
 import logging
@@ -105,6 +106,15 @@ def _validate_pdf(path: Path) -> None:
     with path.open("rb") as handle:
         if handle.read(5) != b"%PDF-":
             raise OfficeLayoutError("Office layout conversion produced an invalid PDF")
+    try:
+        import fitz
+        with fitz.open(str(path)) as document:
+            if document.page_count < 1:
+                raise OfficeLayoutError("Office conversion produced an empty PDF")
+    except OfficeLayoutError:
+        raise
+    except Exception as exc:
+        raise OfficeLayoutError("Office layout PDF cannot be opened safely") from exc
 
 
 def _pdf_checksum(path: Path) -> str:
@@ -272,7 +282,7 @@ def normalize_office_source_to_docx(content: bytes, filename: str | None, *, tim
         return payload
 
 
-def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
+def _prepare_office_layout_pdf_unlocked(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
     source = _source_path(revision)
     checksum = _source_checksum(revision, source)
     target = office_layout_pdf_path(revision)
@@ -348,30 +358,83 @@ def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> Office
     )
 
 
+
+
+@contextmanager
+def _office_layout_lock(target: Path):
+    """Serialize conversion of a revision's single checksum-bound PDF proof.
+
+    Both ingestion workers and reader-driven requests can request the proof.
+    Concurrent LibreOffice processes must not replace one another's output.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = target.with_name(target.name + ".lock")
+    with lock_file.open("a+b") as handle:
+        if os.name != "nt":
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name != "nt":
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def prepare_office_layout_pdf(revision, *, timeout_seconds: int = 120) -> OfficeLayoutDerivative:
+    target = office_layout_pdf_path(revision)
+    if target is None:
+        raise OfficeLayoutError("Office layout target could not be resolved")
+    with _office_layout_lock(target):
+        return _prepare_office_layout_pdf_unlocked(revision, timeout_seconds=timeout_seconds)
+
+
 def precompute_office_layout_assets(revision_id: str) -> None:
-    """Materialize the stable Office layout proof once after source upload."""
+    """Persist the conversion outcome; a source upload is never silently rewritten."""
     from amodb.database import WriteSessionLocal
     from . import models
+    from .office_rendition import begin_rendition, complete_rendition, fail_rendition
 
     db = WriteSessionLocal()
     try:
-        revision = (
-            db.query(models.ManualRevision)
-            .filter(models.ManualRevision.id == revision_id)
-            .first()
-        )
+        revision = db.query(models.ManualRevision).filter(models.ManualRevision.id == revision_id).first()
         if revision is None:
             LOGGER.warning("Office layout precompute skipped: revision %s not found", revision_id)
             return
-        raw = str(getattr(revision, "source_storage_path", "") or "").strip()
+        raw = str(revision.source_storage_path or "").strip()
         if not raw or Path(raw).suffix.lower() not in SUPPORTED_OFFICE_EXTENSIONS:
             return
-        derivative = prepare_office_layout_pdf(revision)
-        revision.source_page_count = derivative.page_count
-        db.add(revision)
+        # Never silently replace an author-supplied Word PDF proof with LibreOffice.
+        existing = db.query(models.ManualRendition).filter(
+            models.ManualRendition.revision_id == revision.id,
+            models.ManualRendition.rendition_type == "PDF",
+        ).first()
+        if existing and existing.converter == "Author-supplied Microsoft Word PDF export":
+            proof_path = office_layout_pdf_path(revision)
+            if proof_path and proof_path.is_file() and existing.pdf_sha256 and office_layout_pdf_checksum(proof_path) == existing.pdf_sha256:
+                return
+            # Do not silently replace an author-approved visual proof with a
+            # different engine's rendition when the retained proof is missing.
+            raise OfficeLayoutError("Author-supplied Word PDF proof is missing or has changed")
+        rendition = begin_rendition(db, revision)
         db.commit()
+        try:
+            derivative = prepare_office_layout_pdf(revision)
+            revision.source_page_count = derivative.page_count
+            complete_rendition(db, rendition, revision, derivative)
+            db.add(revision)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            rendition = db.query(models.ManualRendition).filter(
+                models.ManualRendition.revision_id == revision_id,
+                models.ManualRendition.rendition_type == "PDF",
+            ).first()
+            if rendition:
+                fail_rendition(db, rendition, exc)
+                db.commit()
+            LOGGER.exception("Office layout precompute failed for revision %s", revision_id)
     except Exception:
         db.rollback()
-        LOGGER.exception("Office layout precompute failed for revision %s", revision_id)
+        LOGGER.exception("Office layout processing failed for revision %s", revision_id)
     finally:
         db.close()

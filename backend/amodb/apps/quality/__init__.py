@@ -221,6 +221,33 @@ _canonical_router.router.include_router(_car_rca_pareto_router.router)
 # guards for their public control-loop operations.
 _canonical_router.router.include_router(_car_control_loop_guard_router.router)
 
+# Management-review meetings retain their single canonical QMS table ownership.
+# Explicit decisions and action transitions are registered before generic fallbacks.
+from . import management_review_workflow_router as _management_review_workflow_router  # noqa: F401,E402
+_canonical_router.router.include_router(_management_review_workflow_router.router)
+
+# Governed risk and opportunity decisions preserve tenant QMS matrix authority and SMS boundaries.
+from . import risk_governance_router as _risk_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_risk_governance_router.router)
+
+# External issues and commitments use existing canonical QMS tables and retained transmission proof.
+from . import external_interface_governance_router as _external_interface_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_external_interface_governance_router.router)
+
+# Calibration is a governed Quality overlay on verified Inventory serial IDs.
+from . import equipment_calibration_governance_router as _equipment_calibration_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_equipment_calibration_governance_router.router)
+
+# Process ownership and KPI evaluation extend the canonical QMS process/objective
+# records, with independently governed and auditable period reviews.
+from . import system_process_governance_router as _system_process_governance_router  # noqa: F401,E402
+_canonical_router.router.include_router(_system_process_governance_router.router)
+
+# Controlled manual-to-training links retain exact published DMS revision
+# identities; course/requirements/completions remain owned by Training.
+from . import manual_training_impact_router as _manual_training_impact_router  # noqa: F401,E402
+_canonical_router.router.include_router(_manual_training_impact_router.router)
+
 # Tenant mail identities are Quality settings, not tenant Resend transports.
 # Include the static API before catch-all route finalization.
 from . import qms_mail_identity_router as _qms_mail_identity_router  # noqa: F401,E402

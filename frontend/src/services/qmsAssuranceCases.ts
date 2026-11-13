@@ -86,7 +86,9 @@ export function listQmsAssuranceCases(
 }
 
 export function getQmsAssuranceCase(amoCode: string, caseId: string, signal?: AbortSignal): Promise<QmsAssuranceCase> {
-  return apiRequest<QmsAssuranceCase>(qmsPath(amoCode, `/assurance-cases/${encodeURIComponent(caseId)}`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal });
+  // This detail contains mutable effectiveness and lifecycle gates. Always read the
+  // committed record rather than a previously cached pre-adoption case snapshot.
+  return apiRequest<QmsAssuranceCase>(qmsPath(amoCode, `/assurance-cases/${encodeURIComponent(caseId)}`), { timeoutMs: 15_000, cacheTtlMs: 0, signal });
 }
 
 export function createQmsAssuranceCase(

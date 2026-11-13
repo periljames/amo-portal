@@ -24,6 +24,8 @@ const PublicationExportsPage = lazy(() => import("./pages/manuals/ManualExportsP
 
 const DocControlDashboardPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlDashboardPage })));
 const DocControlLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlLibraryPage })));
+const DocControlSearchPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlSearchPage })));
+const DocControlPhysicalLibraryPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlPhysicalLibraryPage })));
 const DocControlStructurePage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlStructurePage })));
 const DocControlGeneratedRecordPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlGeneratedRecordPage })));
 const DocControlChangesPortfolioPage = lazy(() => import("./pages/DocControlPages").then((module) => ({ default: module.DocControlChangesPortfolioPage })));
@@ -81,6 +83,12 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
   if (route.module.id === "cars") return false;
+  // Management Review now has source-backed governed transitions rather than a generic register editor.
+  if (route.module.id === "management-review") return false;
+  if (route.module.id === "risk") return false;
+  if (route.module.id === "system") return false;
+  if (route.module.id === "external-interface") return false;
+  if (route.module.id === "equipment-calibration") return false;
   // Findings list aliases and record details are owned by the Audit Assurance
   // Findings & Actions workspace in PortalRouteSurface.
   if (route.module.id === "findings") return false;
@@ -225,6 +233,8 @@ function DocumentControlRouteSurface() {
       <Routes>
         <Route path="/maintenance/:amoCode/document-control" element={<WorkspaceRequireAuth><DocControlDashboardPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library" element={<WorkspaceRequireAuth><DocControlLibraryPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/search" element={<WorkspaceRequireAuth><DocControlSearchPage /></WorkspaceRequireAuth>} />
+        <Route path="/maintenance/:amoCode/document-control/physical-library" element={<WorkspaceRequireAuth><DocControlPhysicalLibraryPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/library/:docId" element={<WorkspaceRequireAuth><DocControlDocumentDetailPage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure" element={<WorkspaceRequireAuth><DocControlStructurePage /></WorkspaceRequireAuth>} />
         <Route path="/maintenance/:amoCode/document-control/structure/records/:recordId" element={<WorkspaceRequireAuth><DocControlGeneratedRecordPage /></WorkspaceRequireAuth>} />

@@ -4,7 +4,10 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 // Explicit checkpoint images verify the real UI without continuously recording
 // animated pages on the same low-memory host that runs the database VM.
 test.use({ trace: "off", screenshot: "only-on-failure", video: "off" });
-test.setTimeout(Number(process.env.E2E_CAR_ACCEPTANCE_TIMEOUT_MS || 180_000));
+// The scenario covers two complete submissions, independent reviews, staged
+// implementation and governed effectiveness/closure through two browsers.
+// A 3-minute wall clock prematurely ended the final governance stages on CI.
+test.setTimeout(Number(process.env.E2E_CAR_ACCEPTANCE_TIMEOUT_MS || 300_000));
 
 type Fixture = {
   amo_slug: string;
@@ -243,9 +246,21 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByLabel("I confirm this response and evidence are accurate for audit closeout.").check();
   await page.getByRole("button", { name: "Preview submission" }).click();
   await expect(page.getByRole("dialog", { name: "Preview CAR submission" })).toBeVisible();
+  // The preview's in-flight disabled/locked UI is NOT proof of a committed
+  // submission. Wait for the actual backend PATCH response and verify its
+  // freshly persisted narrative before checking the published invite state.
+  const submittedResponse = page.waitForResponse(response =>
+    response.request().method() === "PATCH" &&
+    new URL(response.url()).pathname.endsWith(`/quality/cars/invite/${data.car_loop_invite_token}`),
+  { timeout: 30_000 });
   await page.getByRole("button", { name: "Confirm and submit" }).click();
-  // Live feedback can replace a transient success notice. Assert the durable
-  // submitted state, not the timing of a toast relative to background refresh.
+  const submissionReceipt = await submittedResponse;
+  const receiptBody = await submissionReceipt.json() as { root_cause?: string; submitted_at?: string };
+  expect(submissionReceipt.status(), JSON.stringify(receiptBody)).toBe(200);
+  expect(receiptBody.submitted_at, "A submitted CAR needs a committed submission timestamp").toBeTruthy();
+  expect(receiptBody.root_cause, "The PATCH receipt must match this RCA revision").toContain(`effectiveness checkpoint and evidence-index ownership control ${suffix}`);
+  // Only a persisted, reloaded invite may say "Response locked"; a pending
+  // request instead reads "Submitting response…" in the real user interface.
   await expect(page.getByText("Response locked — no further submissions or changes are permitted.")).toBeVisible({ timeout: 30_000 });
   console.log(`CAR acceptance: ${suffix} response submitted`);
   await page.screenshot({path:`test-results/car-feedback-${suffix}-submitted.png`});
@@ -301,6 +316,18 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await internalPage.getByLabel("Controlled final due date").fill(futureDate(28));
     await internalPage.getByRole("button", { name: "Initialize control loop" }).click();
     await expect(internalPage.getByRole("status").filter({ hasText: "Staged CAR control initialized" })).toContainText("Staged CAR control initialized", { timeout: 30_000 });
+    // The POST receipt is not sufficient: a COMMIT resets PostgreSQL's
+    // transaction-local RLS context. Verify the control is still initialized
+    // after an independent, tenant-authorized server read-back.
+    const persistedControl = await authenticatedRequest(
+      internalPage, "GET",
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/control-loop`,
+    );
+    expect(persistedControl.status, JSON.stringify(persistedControl.body)).toBe(200);
+    expect((persistedControl.body as { initialized: boolean }).initialized).toBe(true);
+    expect((persistedControl.body as { milestones: unknown[] }).milestones).toHaveLength(5);
+    await expect(internalPage.getByRole("heading", { name: "Initialize staged control" })).toHaveCount(0);
+    await expect(internalPage.getByRole("heading", { name: "Staged CAR lifecycle" })).toBeVisible({ timeout: 30_000 });
 
     const internalFeedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
     console.log("CAR acceptance: exchanging live shared feedback and checking private-note isolation");
@@ -402,18 +429,54 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await expect(sharedGuest).toContainText("Root cause: REJECTED",{timeout:20000});
     await expect(sharedGuest).toContainText("identify the missing management-control checkpoint");
 
+    const reworkPatchBodies: Array<{ root_cause?: string; corrective_action?: string }> = [];
+    const captureReworkPatch = (request: import("@playwright/test").Request) => {
+      if (request.method() !== "PATCH" ||
+          !new URL(request.url()).pathname.endsWith(`/quality/cars/invite/${data.car_loop_invite_token}`)) return;
+      reworkPatchBodies.push(request.postDataJSON() as { root_cause?: string; corrective_action?: string });
+    };
+    publicPage.on("request", captureReworkPatch);
     await submitResponsibleManagerResponse(publicPage, data, "rework",async()=>{
       const feedback=internalPage.getByRole("region",{name:"CAR feedback and decision history"});
       await feedback.getByLabel("CAR feedback message",{exact:true}).fill("Rework guidance: retain your draft while linking the independent evidence owner.");
       await feedback.getByRole("button",{name:"Send feedback",exact:true}).click();
       await expect(publicFeedback).toContainText("Rework guidance: retain your draft",{timeout:20000});
     });
-    // Verify the new submission is actually committed and reviewable, not
-    // merely reported as successful in the invited browser.
+    publicPage.off("request", captureReworkPatch);
+    expect(reworkPatchBodies.length).toBeGreaterThan(0);
+    expect(reworkPatchBodies.at(-1)?.root_cause).toContain(
+      "effectiveness checkpoint and evidence-index ownership control rework",
+    );
+    // Verify both public persisted provenance and the authorized Quality
+    // projection. The public UI can display local drafts, but the server must
+    // retain the new narrative before the reviewer is shown its snapshot.
+    const committedPublic = await publicPage.request.get(
+      `/quality/cars/invite/${data.car_loop_invite_token}`,
+    );
+    expect(committedPublic.status()).toBe(200);
+    const publicRecord = await committedPublic.json() as { root_cause: string; submitted_at?: string; status?: string };
+    // Capture independent committed read models before the assertion. This
+    // intentionally does not accept a local/browser draft as proof of a save.
     const revisedResponses = await authenticatedRequest(
       internalPage, "GET",
       `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/cars/${data.car_loop_id}/responses?mark_open=false`,
     );
+    const registerResponse = await authenticatedRequest(internalPage, "GET", carEndpoint);
+    const activeRows = Array.isArray(revisedResponses.body) ? revisedResponses.body as Array<{
+      root_cause?: string; submitted_at?: string; status?: string;
+    }> : [];
+    const registerRecord = (registerResponse.body || {}) as { root_cause?: string; submitted_at?: string; status?: string };
+    console.log("CAR acceptance: committed rework provenance " + JSON.stringify({
+      patchNarrative: reworkPatchBodies.at(-1)?.root_cause,
+      inviteNarrative: publicRecord.root_cause,
+      inviteStatus: publicRecord.status, inviteSubmittedAt: publicRecord.submitted_at,
+      reviewerHttpStatus: revisedResponses.status, reviewerCount: activeRows.length,
+      reviewerNarrative: activeRows.at(0)?.root_cause,
+      reviewerSubmittedAt: activeRows.at(0)?.submitted_at,
+      registerHttpStatus: registerResponse.status, registerNarrative: registerRecord.root_cause,
+      registerStatus: registerRecord.status, registerSubmittedAt: registerRecord.submitted_at,
+    }));
+    expect(publicRecord.root_cause).toContain("effectiveness checkpoint and evidence-index ownership control rework");
     expect(revisedResponses.status, JSON.stringify(revisedResponses.body)).toBe(200);
     const responseRows = revisedResponses.body as Array<{
       root_cause: string; is_latest: boolean; submitted_by_name: string;
@@ -569,11 +632,59 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     expect(plan.plan_id).toBeTruthy();
 
     await internalPage.getByRole("button",{name:"Open Assurance Cases",exact:true}).click();
-    await internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref}).click({timeout:30000});
-    await internalPage.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id);
-    await internalPage.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
-    await internalPage.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
-    await internalPage.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
+    const selectedCaseButton = internalPage.locator(".qms-assurance-cases__case-list").getByRole("button").filter({hasText:plan.case_ref});
+    await selectedCaseButton.click({timeout:30000});
+    await expect(selectedCaseButton, "The adopted case must become the visible active selection").toHaveClass(/is-selected/, {timeout:15000});
+    const caseDetails = await authenticatedRequest(internalPage, "GET",
+      `/api/maintenance/${encodeURIComponent(data.amo_slug)}/quality/assurance-cases/${plan.case_id}`);
+    expect(caseDetails.status, JSON.stringify(caseDetails.body)).toBe(200);
+    const caseBody = caseDetails.body as { status: string; effectiveness_plans?: Array<{ id: string; status: string; planned_review_date: string; expected_outcome: string }> };
+    const selectedPlan = caseBody.effectiveness_plans?.find(item => item.id === plan.plan_id);
+    const casePanel = internalPage.locator(".qms-assurance-cases__detail");
+    console.log("CAR acceptance: selected case UI " + JSON.stringify({
+      caseStatus: caseBody.status, caseRef: plan.case_ref, planId: plan.plan_id,
+      selectionActive: await selectedCaseButton.getAttribute("class"),
+      panelText: (await casePanel.innerText()).slice(0,1800),
+    }));
+    await expect(casePanel, "The selected case must expose its governed effectiveness-plan count").toContainText("1 effectiveness plans", {timeout:15_000});
+    const effectivenessPanel = internalPage.getByRole("heading", {name:"Define, observe & conclude effectiveness"}).locator("xpath=ancestor::section[1]");
+    await expect(effectivenessPanel, "The adopted plan must appear in the actual effectiveness engineering workspace")
+      .toContainText(selectedPlan?.expected_outcome || "ADOPTED_PLAN_NOT_PRESENT", {timeout:15_000});
+    expect(selectedPlan, "Adopted effectiveness plan must belong to the selected governed case").toBeDefined();
+    const browserToday = await internalPage.evaluate(() => {
+      const value = new Date();
+      return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    });
+    const roleDenied = internalPage.getByText("Effectiveness planning and conclusions require CAR management permission.");
+    console.log("CAR acceptance: effectiveness review readiness " + JSON.stringify({
+      caseId: plan.case_id, planId: plan.plan_id, reviewer: data.realtime_user_a_id,
+      plannedReviewDate: selectedPlan?.planned_review_date, planStatus: selectedPlan?.status,
+      browserToday, permissionWarning: await roleDenied.isVisible(),
+    }));
+    expect( /^\d{4}-\d{2}-\d{2}$/.test(selectedPlan!.planned_review_date), "Planned review must be an ISO calendar date").toBe(true);
+    expect(selectedPlan!.planned_review_date <= browserToday, "Do not conclude an effectiveness plan before its planned review date").toBe(true);
+    await expect(roleDenied, "Quality reviewer must have the CAR management permission needed to conclude").toHaveCount(0);
+    // Inspect the *rendered* effectiveness gate as well as the committed API
+    // snapshot. This identifies permission/date/data mismatch without masking
+    // a missing form or bypassing the real reviewer workflow.
+    const effectivenessUi = await internalPage.evaluate(() => {
+      const area = document.querySelector(".qms-assurance-cases__workgrid");
+      const control = document.querySelector<HTMLSelectElement>("#conclusion-plan");
+      const today = new Date();
+      return {
+        localNow: today.toString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        workgridText: (area?.textContent || "").slice(0, 5500),
+        selectorPresent: Boolean(control),
+        visiblePlanOptions: Array.from(control?.options || []).map((option) => ({value: option.value, text: option.text})),
+      };
+    });
+    console.log("CAR acceptance: rendered effectiveness review gate " + JSON.stringify(effectivenessUi));
+    await internalPage.screenshot({path:"test-results/car-effectiveness-review-form-full.png",fullPage:true});
+    await effectivenessPanel.getByLabel("Plan ready for review",{exact:true}).selectOption(plan.plan_id,{timeout:15_000});
+    await effectivenessPanel.getByLabel("Conclusion",{exact:true}).selectOption("EFFECTIVE");
+    await effectivenessPanel.getByLabel("Evidence-backed rationale",{exact:true}).fill("Independent check confirms that the sampled CAR register has the effectiveness checkpoint and evidence owner.");
+    await effectivenessPanel.getByLabel("Authoritative evidence reference",{exact:true}).fill(`CAR:${data.car_loop_id}:CAR-SAMPLE:rework:effectiveness-observation`);
     await internalPage.screenshot({path:"test-results/car-feedback-effectiveness-review.png"});
     const concluding=internalPage.waitForResponse(r=>r.url().endsWith(`/effectiveness-plans/${plan.plan_id}/conclusion`)&&r.request().method()==="POST");
     await internalPage.getByRole("button",{name:"Record immutable effectiveness conclusion",exact:true}).click();
@@ -591,6 +702,22 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await effectivenessMilestone.getByPlaceholder("Control note").fill("Effectiveness accepted only after the appointed reviewer recorded the immutable effective conclusion.");
     await effectivenessMilestone.getByRole("button",{name:"Save",exact:true}).click();
     await expect(internalPage.getByRole("status").filter({hasText:`${stages[4]} updated`})).toContainText(`${stages[4]} updated`,{timeout:30000});
+    const finalReadiness = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/control-loop`);
+    expect(finalReadiness.status, JSON.stringify(finalReadiness.body)).toBe(200);
+    const finalControl = finalReadiness.body as {
+      closure_readiness: { ready: boolean; blockers: Array<{code: string; message: string; milestone_key?: string}> };
+      milestones: Array<{milestone_key: string; status: string; evidence_ref?: string}>;
+      dependencies: Array<{status: string; blocks_closure: boolean; title: string}>;
+      car: {status: string};
+    };
+    console.log("CAR acceptance: final closure readiness " + JSON.stringify({
+      carStatus: finalControl.car.status, readiness: finalControl.closure_readiness,
+      milestones: finalControl.milestones.map(({milestone_key,status,evidence_ref})=>({milestone_key,status,evidence_ref})),
+      dependencies: finalControl.dependencies.map(({status,blocks_closure,title})=>({status,blocks_closure,title})),
+    }));
+    expect(finalControl.closure_readiness.ready,
+      "Final closure must be blocked if any governed milestones or dependencies remain unresolved: "+
+      JSON.stringify(finalControl.closure_readiness.blockers)).toBe(true);
     await internalPage.getByLabel("Closure evidence reference",{exact:true}).fill("car-evidence:stage-5",{timeout:30000});
     await internalPage.getByLabel("Closure rationale",{exact:true}).fill("Quality accepts closure after rejected-response rework, controlled extension, independent action verification and concluded effectiveness.");
     const closing=internalPage.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/control-loop/close`)&&r.request().method()==="POST");

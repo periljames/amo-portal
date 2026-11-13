@@ -185,12 +185,22 @@ def test_downgraded_admin_grantless_session_does_not_open_department_homes() -> 
     assert db.execute.call_args.args[1]["implicit_admin"] is False
 
 
-def test_standing_admin_department_visibility_is_not_bound_to_browser_elevation() -> None:
+def test_standing_admin_department_visibility_is_not_bound_to_browser_elevation(monkeypatch) -> None:
     db = MagicMock()
 
-    assert active_admin_profile_session(
+    def reject_elevated_session_lookup(*_args, **_kwargs):
+        raise AssertionError("Standing tenant department visibility must not activate privileged Admin View")
+
+    monkeypatch.setattr(
+        "amodb.apps.accounts.department_home_router._admin_profile_active",
+        reject_elevated_session_lookup,
+    )
+    allowed = _allowed_departments(
         db,
         user(role="AMO_ADMIN", is_amo_admin=True, auth_session_id="browser-b"),
         SimpleNamespace(id="amo-a"),
-    ) is True
+    )
+
+    assert {"planning", "quality", "document-control", "maintenance", "safety"} <= allowed
+    assert "admin" not in allowed
     db.execute.assert_not_called()

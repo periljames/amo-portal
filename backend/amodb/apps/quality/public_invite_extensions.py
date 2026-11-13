@@ -160,6 +160,16 @@ def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, paylo
     side effect to the established handler.
     """
 
+    # Legacy callers can send the 500-character aliases. Never permit those
+    # aliases to disagree with a validated 8k narrative: the base handler used
+    # to apply them *after* structured RCA validation and silently replace the
+    # reviewed conclusion. Validate pairs before mutating the session.
+    legacy_pairs = (("root_cause", "root_cause_text"), ("corrective_action", "capa_text"))
+    for canonical, alias in legacy_pairs:
+        value, legacy = getattr(payload, canonical), getattr(payload, alias)
+        if value is not None and legacy is not None and value.strip() != legacy.strip():
+            raise HTTPException(status_code=422, detail=f"Conflicting {canonical} and {alias} narratives.")
+
     for field in _DETAILED_RESPONSE_FIELDS:
         value = getattr(payload, field)
         if value is not None:
@@ -172,6 +182,12 @@ def _persist_detailed_response_fields(car: models.CorrectiveActionRequest, paylo
                 car.root_cause_text = car.root_cause
             elif field == "corrective_action":
                 car.capa_text = car.corrective_action
+    for canonical, alias in legacy_pairs:
+        if getattr(payload, canonical) is None and getattr(payload, alias) is not None:
+            # Keep older invite clients working without bypassing the RCA gate.
+            value = _limit_car_invite_text(getattr(payload, alias), max_length=500)
+            setattr(car, canonical, value)
+            setattr(car, alias, value)
 
 
 @_extension_router.get("/cars/invite/{invite_token}", response_model=CARInviteWithAuditReportOut)
@@ -228,8 +244,15 @@ def submit_car_invite_with_detailed_response(
     from .tenant_security import set_postgres_tenant_context
     from .car_rca_router import submit_rca_document
     set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id="00000000-0000-0000-0000-000000000000")
+    # The compatibility submit handler acquires the CAR again with FOR UPDATE.
+    # Flush the new narratives under the resolved tenant context first: with
+    # autoflush=False, an ORM re-read can otherwise reuse the previous submitted
+    # register values and create an immutable response for the rejected attempt.
+    # This is still one transaction; any failed RCA/submission validation rolls
+    # back both the narrative and the structured investigation together.
+    db.flush()
     submit_rca_document(
-        db, car, payload.root_cause if payload.root_cause is not None else car.root_cause,
+        db, car, car.root_cause,
         responder_email=payload.submitted_by_email,
     )
 
@@ -238,7 +261,7 @@ def submit_car_invite_with_detailed_response(
     # retains the values above while the base function executes all established
     # submission validation, evidence, review-state, audit and notification work.
     delegated_payload = payload.model_copy(
-        update={field: None for field in _DETAILED_RESPONSE_FIELDS}
+        update={field: None for field in (*_DETAILED_RESPONSE_FIELDS, "root_cause_text", "capa_text")}
     )
     return _submit_car_from_invite_base(invite_token, delegated_payload, request, db)
 

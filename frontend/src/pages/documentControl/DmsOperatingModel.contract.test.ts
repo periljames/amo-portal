@@ -30,7 +30,7 @@ const readerExperience = readFileSync(new URL("../manuals/dmsReaderExperience.cs
 
 describe("DMS frontend operating-model contract", () => {
   it("exposes the reader-safe Records workspace alongside controlled Document Control workspaces", () => {
-    for (const label of ["Home", "Library", "Structure", "Records", "Changes", "Distribution", "Compliance", "Reports", "Administration"]) {
+    for (const label of ["Home", "Libraries", "Structure", "Records", "Changes", "Distribution", "Compliance", "Reports", "Administration", "My documents", "Shared with me", "Favorites", "Recent"]) {
       expect(shell).toContain(`label: "${label}"`);
     }
     expect(shell).not.toContain("Generated records");
@@ -38,6 +38,8 @@ describe("DMS frontend operating-model contract", () => {
     expect(shell).not.toContain("Temporary revisions");
     expect(shell).not.toContain("QMS and module links");
     expect(shell).toContain('{ id: "records", label: "Records", path: "/reports/records", icon: Archive }');
+    expect(shell).toContain('path: "/library?view=shared-with-me"');
+    expect(shell).toContain('path: "/structure"');
     expect(shell).toContain('if (pathname.includes("/reports/records")) return "records";');
   });
 
@@ -100,8 +102,10 @@ describe("DMS frontend operating-model contract", () => {
     expect(libraryPage).toContain("discoverLibrary");
     expect(libraryPage).toContain("Permission-filtered discovery · server-bounded");
     expect(libraryPage).toContain("alias, owner, revision, filename, hierarchy or indexed text");
-    expect(libraryPage).toContain('type LibraryPresentation = "shelf" | "register"');
-    expect(libraryPage).toContain('aria-label="Controlled document shelf"');
+    expect(libraryPage).toContain('type LibraryPresentation = "list" | "compact" | "cards" | "register"');
+    expect(libraryPage).toContain('aria-label="Controlled document cards"');
+    expect(libraryPage).toContain('className={`dlibrary__list-view');
+    expect(libraryPage).toContain('aria-label="Library presentation"');
     expect(libraryPage).toContain('data-document-type={item.library.node_type}');
     expect(libraryPage).toContain("Read current");
     expect(libraryPage).toContain('lazy(() => import("./DocumentLibraryRegisterGrid"))');

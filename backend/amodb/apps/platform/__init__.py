@@ -6,6 +6,7 @@ import os
 # startup/Alembic mapper checks so SQLAlchemy registers every control-plane table
 # in the shared metadata.
 from . import saas_models as _saas_models  # noqa: F401
+from . import storage_quota_models as _storage_quota_models  # noqa: F401
 from . import ops_data_models as _ops_data_models  # noqa: F401
 from . import saas_services as _saas_services
 from . import saas_webhooks as _saas_webhooks

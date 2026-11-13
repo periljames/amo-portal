@@ -42,7 +42,9 @@ body[data-color-scheme="light"] .pdfv4-reader {
   border-radius: 0;
   background: var(--pdfv4-toolbar-bg);
   color: var(--pdfv4-toolbar-text);
-  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  /* Foreground and background must change atomically across light/dark
+     schemes; intermediate transition colours violated 4.5:1 contrast. */
+  transition: none;
 }
 
 .pdfv4-reader .pdfv3-pages,
@@ -510,4 +512,11 @@ body[data-color-scheme="light"] .pdfv4-reader .pdfv3-offline-menu summary[data-s
    disabled/button style has greater specificity than reader theme styles. */
 .pdfv5-shell .pdfv4-reader .pdfv3-toolbar button[aria-label="Print PDF"] {
   color: var(--pdfv4-toolbar-text) !important;
+}
+
+/* Global button transitions must not lag behind the toolbar's switched
+   background and expose low-contrast icons during theme changes. */
+.pdfv5-shell .pdfv4-reader .pdfv3-toolbar button,
+.pdfv5-shell .pdfv4-reader .pdfv3-pages > span {
+  transition: none;
 }

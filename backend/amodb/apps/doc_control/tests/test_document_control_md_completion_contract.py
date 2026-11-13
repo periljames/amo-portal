@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +13,18 @@ def _source(name: str) -> str:
 
 def test_library_discovery_is_permission_filtered_and_bounded() -> None:
     source = _source("workspace_library_discovery_router.py")
-    assert 'pattern="^(all|my-documents|favorites|recently-opened|recently-revised|awaiting-my-review|external-technical-data|due-for-review|superseded|archived)$"' in source
+    # New shared-with-me discovery must not remove any previously supported
+    # governed view; assert the full backwards-compatible set, not an exact
+    # source-code formatting string tied to the old enum order.
+    match = re.search(r'pattern="\^\(([^"]+)\)\$"', source)
+    assert match, "Server must validate the library view against an explicit allowlist"
+    supported = set(match.group(1).split("|"))
+    required = {
+        "all", "my-documents", "shared-with-me", "favorites",
+        "recently-opened", "recently-revised", "awaiting-my-review",
+        "external-technical-data", "due-for-review", "superseded", "archived",
+    }
+    assert required.issubset(supported)
     assert "per_page: int = Query(default=50, ge=1, le=100)" in source
     assert "if not controller:" in source
     assert "_scope_match" in source

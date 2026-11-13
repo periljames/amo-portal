@@ -224,8 +224,10 @@ def create_case(
     db.add(row)
     db.flush()
     _add_event(db, row=row, event_type="CREATED", reason="Assurance case opened.", actor_user_id=ctx.user_id)
+    created_case_id = str(row.id)
     db.commit()
-    return _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=str(row.id)), detail=True)
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    return _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=created_case_id), detail=True)
 
 
 @router.get("/{case_id}")
@@ -279,6 +281,7 @@ def transition_case(
         row.closed_at = None; row.closed_by_user_id = None; row.closure_rationale = None; event_type = "REOPENED"
     _add_event(db, row=row, event_type=event_type, reason=payload.reason.strip(), actor_user_id=ctx.user_id, before=before)
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _case_dict(_load_case(db, amo_id=ctx.amo_id, case_id=case_id), detail=True)
 
 
@@ -326,6 +329,7 @@ def add_investigation_entry(
     db.flush()
     _add_event(db, row=case, event_type="INVESTIGATION_ADDED", reason=f"{payload.entry_type} recorded using {payload.method}.", actor_user_id=ctx.user_id)
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _entry_dict(entry)
 
 
@@ -357,6 +361,7 @@ def create_effectiveness_plan(
     db.flush()
     _add_event(db, row=case, event_type="EFFECTIVENESS_PLANNED", reason="Effectiveness plan created with explicit outcome, measure and verification method.", actor_user_id=ctx.user_id)
     db.commit()
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _plan_dict(row)
 
 
@@ -421,6 +426,9 @@ def conclude_effectiveness(
         reviewer = db.query(User).filter(User.id == ctx.user_id, User.amo_id == ctx.amo_id).first()
         record_shared_feedback(db, source_car, f"Effectiveness: {payload.conclusion}. {payload.rationale.strip()}", user=reviewer)
     db.commit()
+    # A PostgreSQL SET LOCAL tenant context ends at commit. Restore it before
+    # reading expired ORM attributes, notifying listeners, or reloading rows.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     if plan.source_type == "CAR":
         from .car_feedback import feedback_changed
         feedback_changed(source_car, ctx.user_id)

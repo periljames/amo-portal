@@ -537,7 +537,7 @@ def _normalized_upload_mime(file: UploadFile) -> str:
     return (file.content_type or "").split(";", 1)[0].strip().lower()
 
 
-def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str) -> tuple[str, str, str, int]:
+def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str, db: Session | None = None) -> tuple[str, str, str, int]:
     original_name = _sanitize_attachment_filename(file.filename or "attachment.bin")
     ext = Path(original_name).suffix.lower()
     mime = _normalized_upload_mime(file)
@@ -571,7 +571,7 @@ def _store_car_attachment(car_id: UUID, file: UploadFile, *, amo_id: str) -> tup
 
     from .car_rca_storage import store_car_file
     try:
-        object_uri = store_car_file(target_path, amo_id=amo_id, car_id=car_id, content_type=mime)
+        object_uri = store_car_file(target_path, amo_id=amo_id, car_id=car_id, content_type=mime, db=db)
     finally:
         target_path.unlink(missing_ok=True)
     return object_uri, original_name, digest.hexdigest(), total
@@ -6806,6 +6806,17 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
                 "due_date": related_car.due_date,
                 "priority": related_car.priority,
             })
+    # A submitted response is an immutable, reviewable record. Resolve the
+    # public projection from the response belonging to the current submission,
+    # not from mutable register fields that can outlive earlier rejected attempts.
+    # During rework (before a new submission), the editable register/draft
+    # remains visible; a recalled response is never promoted as current.
+    submitted_snapshot = None
+    if db is not None and car.submitted_at is not None:
+        latest_response = _car_invite_latest_active_response(db, car.id)
+        if latest_response is not None and latest_response.submitted_at == car.submitted_at:
+            submitted_snapshot = latest_response
+
     return {
         "car_id": car.id,
         "invite_token": car.invite_token,
@@ -6823,13 +6834,13 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
         "evidence_received_at": getattr(car, "evidence_received_at", None),
         "evidence_verified_at": getattr(car, "evidence_verified_at", None),
         "submitted_at": getattr(car, "submitted_at", None),
-        "containment_action": getattr(car, "containment_action", None),
-        "root_cause": getattr(car, "root_cause", None) or getattr(car, "root_cause_text", None),
-        "corrective_action": getattr(car, "corrective_action", None) or getattr(car, "capa_text", None),
-        "preventive_action": getattr(car, "preventive_action", None),
-        "evidence_ref": getattr(car, "evidence_ref", None),
-        "submitted_by_name": getattr(car, "submitted_by_name", None),
-        "submitted_by_email": getattr(car, "submitted_by_email", None),
+        "containment_action": submitted_snapshot.containment_action if submitted_snapshot is not None else getattr(car, "containment_action", None),
+        "root_cause": submitted_snapshot.root_cause if submitted_snapshot is not None else (getattr(car, "root_cause", None) or getattr(car, "root_cause_text", None)),
+        "corrective_action": submitted_snapshot.corrective_action if submitted_snapshot is not None else (getattr(car, "corrective_action", None) or getattr(car, "capa_text", None)),
+        "preventive_action": submitted_snapshot.preventive_action if submitted_snapshot is not None else getattr(car, "preventive_action", None),
+        "evidence_ref": submitted_snapshot.evidence_ref if submitted_snapshot is not None else getattr(car, "evidence_ref", None),
+        "submitted_by_name": submitted_snapshot.submitted_by_name if submitted_snapshot is not None else getattr(car, "submitted_by_name", None),
+        "submitted_by_email": submitted_snapshot.submitted_by_email if submitted_snapshot is not None else getattr(car, "submitted_by_email", None),
         "root_cause_status": getattr(car, "root_cause_status", None),
         "capa_status": getattr(car, "capa_status", None),
         "root_cause_review_note": getattr(car, "root_cause_review_note", None),
@@ -6917,10 +6928,19 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         if val is not None:
             setattr(car, field, _limit_car_invite_text(val) if field in text_fields else val)
 
+    # Keep the historical *_text aliases consistent with the submitted
+    # narrative. A prior rejected attempt must not remain the first nonempty
+    # value used to construct the next immutable CARResponse snapshot.
     if payload.root_cause_text is not None:
         car.root_cause_text = _limit_car_invite_text(payload.root_cause_text)
+        car.root_cause = car.root_cause_text
+    elif payload.root_cause is not None:
+        car.root_cause_text = car.root_cause
     if payload.capa_text is not None:
         car.capa_text = _limit_car_invite_text(payload.capa_text)
+        car.corrective_action = car.capa_text
+    elif payload.corrective_action is not None:
+        car.capa_text = car.corrective_action
 
     if not (car.root_cause_text or car.root_cause):
         raise HTTPException(status_code=400, detail="Root cause is required for CAR response")
@@ -6957,8 +6977,8 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     response = models.CARResponse(
         car_id=car.id,
         containment_action=car.containment_action,
-        root_cause=car.root_cause_text or car.root_cause,
-        corrective_action=car.capa_text or car.corrective_action,
+        root_cause=car.root_cause or car.root_cause_text,
+        corrective_action=car.corrective_action or car.capa_text,
         preventive_action=car.preventive_action,
         evidence_ref=car.evidence_ref,
         submitted_by_name=car.submitted_by_name,
@@ -7121,7 +7141,7 @@ def upload_car_invite_attachment(
     assert_invite_access(db, car)
     _require_public_car_invite_editable(db, car)
 
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id), db=db)
 
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
@@ -7202,7 +7222,7 @@ def delete_car_invite_attachment(
     from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
     if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
         raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
-    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id, amo_id=str(car.amo_id), db=db)
     db.delete(attachment)
     remaining_attachment = (
         db.query(models.CARAttachment.id)
@@ -7362,7 +7382,7 @@ def upload_car_attachment(
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=True)
     if car.status in {models.CARStatus.CLOSED, models.CARStatus.CANCELLED}:
         raise HTTPException(status_code=423, detail="Closed or cancelled CAR evidence is read-only.")
-    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id))
+    target_path, original_name, sha256, size_bytes = _store_car_attachment(car.id, file, amo_id=str(car.amo_id), db=db)
     clean_description = (description or "").strip()[:500] or None
     attachment = models.CARAttachment(
         car_id=car.id,
@@ -7434,7 +7454,7 @@ def delete_car_attachment(
     from .car_rca_storage import retained_car_attachment, delete_unretained_car_file
     if retained_car_attachment(db, car.id, attachment.id, amo_id=str(car.amo_id)):
         raise HTTPException(status_code=409, detail="This evidence belongs to a retained RCA or action revision and cannot be deleted.")
-    delete_unretained_car_file(attachment.file_ref, car_id=car.id)
+    delete_unretained_car_file(attachment.file_ref, car_id=car.id, amo_id=str(car.amo_id), db=db)
     db.delete(attachment)
     audit_services.log_event(
         db, amo_id=car.amo_id, actor_user_id=current_user.id, entity_type="qms_car_attachment", entity_id=str(attachment_id), action="deleted", metadata=_audit_metadata(request)
@@ -7447,13 +7467,41 @@ def delete_car_attachment(
 def list_car_responses_for_review(
     car_id: UUID,
     request: Request,
+    response: Response,
     mark_open: bool = Query(True),
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id, lock=mark_open)
     _require_car_review_access(db, current_user, car)
-    latest = _car_invite_latest_active_response(db, car.id) if car.status == models.CARStatus.PENDING_VERIFICATION else None
+    # The reviewer reads current, private CAR evidence. A prior response must
+    # never be replayed by browser/intermediary HTTP caches after resubmission.
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization, Cookie"
+    # Review reads must reflect the latest durably committed submission, even
+    # if CAR governance has transitioned to IN_PROGRESS for plan rework,
+    # implementation or effectiveness. Filtering by the parent status here
+    # silently hid the latest response after a successful resubmission.
+    # Access still requires the canonical tenant-scoped reviewer guard above.
+    latest = _car_invite_latest_active_response(db, car.id)
+    # Each public submission stores the *same* submitted_at on the CAR and its
+    # immutable response row. Use that transaction timestamp as the canonical
+    # read pointer when multiple attempts exist (especially after rejection).
+    # Ordering old response history alone must never show the previous attempt
+    # as the current resubmission. Historical records without an exact linked
+    # timestamp retain the original fallback behavior.
+    if car.submitted_at is not None:
+        committed_submission = (
+            db.query(models.CARResponse)
+            .filter(
+                models.CARResponse.car_id == car.id,
+                models.CARResponse.submitted_at == car.submitted_at,
+            )
+            .order_by(models.CARResponse.id.desc())
+            .first()
+        )
+        if committed_submission is not None and not _car_response_was_recalled(db, car.id, committed_submission):
+            latest = committed_submission
     responses = [latest] if latest is not None else []
     if mark_open and latest and car.status == models.CARStatus.PENDING_VERIFICATION:
         opened_at = _latest_action_at_after(db, car.id, CAR_INVITE_REVIEW_OPENED_PREFIX, latest.submitted_at)

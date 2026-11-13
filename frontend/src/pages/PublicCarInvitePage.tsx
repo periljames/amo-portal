@@ -901,17 +901,26 @@ const PublicCarInvitePage: React.FC = () => {
     try {
       if (current.invite.structured_rca_required && !await saveRca(tokenValue, true))
         throw new Error("The controlled RCA draft has not been saved. Resolve the save error before submitting.");
+      // The forced RCA save may update the controlled draft while this handler
+      // awaits persistence. Read the latest entry, not the render-time snapshot,
+      // so a returned CAR cannot silently submit its previous root-cause text.
+      const ready = latestEntries.current.find((entry) => entry.token === tokenValue);
+      if (!ready || !ready.invite) throw new Error("The response changed while submitting; reopen the current draft.");
+      if (ready.invite.structured_rca_required &&
+          ready.form.root_cause.trim() !== ready.rca.conclusion.trim()) {
+        throw new Error("The narrative no longer matches the saved RCA conclusion. Review the latest investigation before submission.");
+      }
       await qmsSubmitCarInvite(tokenValue, {
-        submitted_by_name: current.form.submitted_by_name.trim(),
-        submitted_by_email: current.form.submitted_by_email.trim(),
-        containment_action: clampResponseText(current.form.containment_action.trim()),
-        root_cause: clampResponseText(current.form.root_cause.trim()),
-        corrective_action: clampResponseText(current.form.corrective_action.trim()),
-        preventive_action: clampResponseText(current.form.preventive_action.trim()),
-        evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim()),
-        ...(current.invite.deadline_change_requires_review ? {} : {
-          due_date: current.form.due_date || null,
-          target_closure_date: current.form.target_closure_date || null,
+        submitted_by_name: ready.form.submitted_by_name.trim(),
+        submitted_by_email: ready.form.submitted_by_email.trim(),
+        containment_action: clampResponseText(ready.form.containment_action.trim()),
+        root_cause: clampResponseText(ready.form.root_cause.trim()),
+        corrective_action: clampResponseText(ready.form.corrective_action.trim()),
+        preventive_action: clampResponseText(ready.form.preventive_action.trim()),
+        evidence_ref: clampEvidenceReference(ready.form.evidence_ref.trim()),
+        ...(ready.invite.deadline_change_requires_review ? {} : {
+          due_date: ready.form.due_date || null,
+          target_closure_date: ready.form.target_closure_date || null,
         }),
       });
       removeCarInviteDraft(current.invite.car_id);
@@ -1493,7 +1502,11 @@ const PublicCarInvitePage: React.FC = () => {
                                     </label>
                                     <div className="car-invite-submit-row">
                                       <span className="car-invite-subtitle">
-                                        {locked ? "Response locked — no further submissions or changes are permitted." : "Preview is required before final submission."}
+                                        {!isInviteEditable(invite)
+                                           ? "Response locked — no further submissions or changes are permitted."
+                                           : entry.submitting
+                                             ? "Submitting response…"
+                                             : "Preview is required before final submission."}
                                       </span>
                                       <div className="car-invite-actions">
                                         {invite.can_recall ? (

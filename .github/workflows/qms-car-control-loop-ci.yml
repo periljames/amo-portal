@@ -9,6 +9,9 @@ on:
       - "backend/amodb/apps/quality/car_control_loop*.py"
       - "backend/amodb/apps/quality/tests/test_car_control_loop*.py"
       - "backend/amodb/apps/quality/tests/test_car_rca_phase3_contract.py"
+      - "backend/amodb/apps/quality/tests/test_car_quota_storage_integration.py"
+      - "backend/amodb/apps/quality/car_rca_storage.py"
+      - "backend/amodb/apps/platform/storage_quota_upload.py"
       - "backend/amodb/apps/quality/tests/test_public_invite_extensions.py"
       - "backend/amodb/apps/quality/car_rca_router.py"
       - "backend/amodb/apps/quality/car_closure_guards.py"
@@ -123,6 +126,7 @@ jobs:
           amodb/apps/quality/tests/test_car_control_loop_governance.py
           amodb/apps/quality/tests/test_public_invite_extensions.py
           amodb/apps/quality/tests/test_car_rca_phase3_contract.py
+          amodb/apps/quality/tests/test_car_quota_storage_integration.py
 
   postgres-contract:
     runs-on: ubuntu-latest
@@ -215,7 +219,7 @@ jobs:
               "const MAX_RESPONSE_CHARS = 8000;",
               "const MAX_EVIDENCE_REFERENCE_CHARS = 500;",
               'evidence_ref: clampEvidenceReference(invite.evidence_ref ?? "")',
-              "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())",
+              "evidence_ref: clampEvidenceReference(ready.form.evidence_ref.trim())",
               "maxChars={MAX_EVIDENCE_REFERENCE_CHARS}",
               "maxLength={maxChars}",
           ]
@@ -223,6 +227,8 @@ jobs:
           assert not missing, f"Public CAR invite length contract missing: {missing}"
           assert 'evidence_ref: clampResponseText(invite.evidence_ref ?? "")' not in source
           assert "evidence_ref: clampResponseText(current.form.evidence_ref.trim())" not in source
+          assert "evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim())" not in source
+          assert "ready.form.root_cause.trim() !== ready.rca.conclusion.trim()" in source
           PY
       - name: Verify CAR workspace uses governed evidence client
         run: |

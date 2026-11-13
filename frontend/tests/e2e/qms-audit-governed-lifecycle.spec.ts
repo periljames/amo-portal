@@ -185,7 +185,8 @@ async function prepareLifecycle(page: Page): Promise<void> {
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/document-requests`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/external-participants`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/applicability-context`) && method === "GET") return respond(route, { items: [], available_rules: [] });
-    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [] });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-bindings`) && method === "GET") return respond(route, { items: [], total: 0, offset: 0, limit: 50 });
+    if (path.endsWith(`/quality/audits/${AUDIT_ID}/checklist-binding-lineage`) && method === "GET") return respond(route, { items: [] });
     if (path.endsWith(`/quality/audits/${AUDIT_ID}/preparation-readiness`) && method === "GET") return respond(route, {
       issue_ready: false,
       fieldwork_ready: false,

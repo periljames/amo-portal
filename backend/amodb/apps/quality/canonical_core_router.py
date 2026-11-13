@@ -1096,7 +1096,7 @@ def _settings_response(row) -> dict[str, Any]:
     embedded = dict(row.get("payload") or {})
     return {
         **{key: row.get(key) for key in ("id", "created_at", "updated_at")},
-        **{key: row[key] if key in row else embedded.get(key, {}) for key in _SETTINGS_GROUPS},
+        **{key: row.get(key) if key in row and row.get(key) is not None else embedded.get(key, {}) for key in _SETTINGS_GROUPS},
     }
 
 
@@ -2086,6 +2086,12 @@ def update_qms_settings(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported settings fields supplied.")
     if any(not isinstance(value, dict) for value in changes.values()):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Each settings group must be an object.")
+    if "risk_matrix" in changes:
+        from .risk_matrix_policy import validate_versioned_risk_matrix
+        if expected is None:
+            raise HTTPException(428, "Supply expected_settings for the risk_matrix to prevent replacing a concurrent tenant methodology.")
+        previous = _settings_response(current).get("risk_matrix") if current else None
+        validate_versioned_risk_matrix(changes["risk_matrix"], previous)
     if "retention_rules" in changes:
         validate_retention_extensions(changes["retention_rules"])
     if "numbering_rules" in changes:
@@ -2320,6 +2326,16 @@ def _update_parent_status(
 def _require_governed_change_write(module: str) -> None:
     if module == "change-control":
         raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
+    if module == "management-review":
+        raise HTTPException(409, {"code": "GOVERNED_MANAGEMENT_REVIEW_REQUIRED", "message": "Use the governed management-review meetings and action workflow; generic record mutation cannot authorize approvals or closure.", "workflow": "management-review/meetings"})
+    if module == "risk":
+        raise HTTPException(409, {"code": "GOVERNED_RISK_REQUIRED", "message": "Use the governed source-backed risk register, independent control verification and residual decision; generic edits bypass assessment authority.", "workflow": "risk/register"})
+    if module == "system":
+        raise HTTPException(409, {"code": "GOVERNED_PROCESS_REQUIRED", "message": "Use the controlled process and objectives workflow; generic edits cannot amend approved scope or KPI history.", "workflow": "system/processes"})
+    if module == "external-interface":
+        raise HTTPException(409, {"code": "GOVERNED_EXTERNAL_INTERFACE_REQUIRED", "message": "Use controlled response approval, submission proof and independent commitment verification.", "workflow": "external-interface/governance"})
+    if module == "equipment-calibration":
+        raise HTTPException(409, {"code": "GOVERNED_CALIBRATION_REQUIRED", "message": "Calibration eligibility, certificate verification, quarantine and independent release cannot be altered through generic registers.", "workflow": "equipment-calibration/governance"})
 
 
 @core_router.post("/{module}/{record_id}/{action}")

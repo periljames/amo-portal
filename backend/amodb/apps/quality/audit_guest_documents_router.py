@@ -115,6 +115,7 @@ async def submit_guest_document(
         amo_id=str(grant.amo_id),
         audit_id=str(grant.audit_id),
         request_id=str(request_id),
+        db=db,
     )
     submission = QualityAuditDocumentSubmission(
         amo_id=grant.amo_id,
