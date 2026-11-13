@@ -702,6 +702,22 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
     await effectivenessMilestone.getByPlaceholder("Control note").fill("Effectiveness accepted only after the appointed reviewer recorded the immutable effective conclusion.");
     await effectivenessMilestone.getByRole("button",{name:"Save",exact:true}).click();
     await expect(internalPage.getByRole("status").filter({hasText:`${stages[4]} updated`})).toContainText(`${stages[4]} updated`,{timeout:30000});
+    const finalReadiness = await authenticatedRequest(internalPage, "GET", `${apiCarPath}/control-loop`);
+    expect(finalReadiness.status, JSON.stringify(finalReadiness.body)).toBe(200);
+    const finalControl = finalReadiness.body as {
+      closure_readiness: { ready: boolean; blockers: Array<{code: string; message: string; milestone_key?: string}> };
+      milestones: Array<{milestone_key: string; status: string; evidence_ref?: string}>;
+      dependencies: Array<{status: string; blocks_closure: boolean; title: string}>;
+      car: {status: string};
+    };
+    console.log("CAR acceptance: final closure readiness " + JSON.stringify({
+      carStatus: finalControl.car.status, readiness: finalControl.closure_readiness,
+      milestones: finalControl.milestones.map(({milestone_key,status,evidence_ref})=>({milestone_key,status,evidence_ref})),
+      dependencies: finalControl.dependencies.map(({status,blocks_closure,title})=>({status,blocks_closure,title})),
+    }));
+    expect(finalControl.closure_readiness.ready,
+      "Final closure must be blocked if any governed milestones or dependencies remain unresolved: "+
+      JSON.stringify(finalControl.closure_readiness.blockers)).toBe(true);
     await internalPage.getByLabel("Closure evidence reference",{exact:true}).fill("car-evidence:stage-5",{timeout:30000});
     await internalPage.getByLabel("Closure rationale",{exact:true}).fill("Quality accepts closure after rejected-response rework, controlled extension, independent action verification and concluded effectiveness.");
     const closing=internalPage.waitForResponse(r=>r.url().endsWith(`/cars/${data.car_loop_id}/control-loop/close`)&&r.request().method()==="POST");
