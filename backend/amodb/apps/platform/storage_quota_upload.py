@@ -7,6 +7,7 @@ before checksum-verified durable retention and quota finalization.
 from __future__ import annotations
 
 import hashlib
+import os
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,15 @@ from fastapi import HTTPException
 from amodb import storage
 from . import storage_quota_service
 from .storage_quota_models import TenantStorageObject
+
+
+def enforcement_enabled() -> bool:
+    """Opt-in only after tenant quota allocations and S3 recovery checks pass.
+
+    Existing production S3 uploads remain on their current path until the
+    operator explicitly enables byte-exact accounting for the deployment.
+    """
+    return os.getenv("AMO_STORAGE_QUOTA_ENFORCEMENT", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _quota_error(exc: ValueError) -> HTTPException:
