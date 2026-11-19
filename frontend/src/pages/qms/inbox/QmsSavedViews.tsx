@@ -73,7 +73,7 @@ export default function QmsSavedViews({
     </div>
     <div className="qms-saved-views__controls">
       <label>Saved view
-        <select value={selection} disabled={saved.isLoading || working}
+        <select aria-label="Saved view" value={selection} disabled={saved.isLoading || working}
           onChange={event => { setSelection(event.target.value); setNotice(""); setError(""); }}>
           <option value="">Choose a saved view</option>
           {rows.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
