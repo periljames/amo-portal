@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dateState } from "./QmsDailyFocus";
+import { dateState } from "./qmsFocusDates";
 
 function localDateKey(value: Date): string {
   const year = value.getFullYear();
