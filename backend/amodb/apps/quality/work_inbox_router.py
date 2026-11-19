@@ -118,6 +118,93 @@ def inbox_summary(ctx: TenantContext = Depends(resolve_tenant_context), db: Sess
     return {**counts, "source_errors": errors}
 
 
+class SavedWorkViewBody(StrictBody):
+    """User-owned filter preset; never stores authority or grants workflow access."""
+    title: str = Field(min_length=2, max_length=80)
+    view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"] = "assigned-to-me"
+    q: str = Field(default="", max_length=80)
+    source: str = Field(default="", max_length=40)
+    due: Literal["all", "today", "next-seven", "undated"] = "all"
+    sort: Literal["priority", "title"] = "priority"
+
+
+@router.get("/saved-views")
+def list_saved_work_views(
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_read_db),
+):
+    _context(db, ctx)
+    rows = db.execute(text(
+        "SELECT * FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL "
+        "ORDER BY title, id LIMIT 20"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
+    return {"items": [
+        {"id": str(row["id"]), "title": str(row["title"]), "filters": _payload(row)}
+        for row in rows
+    ], "limit": 20}
+
+
+@router.post("/saved-views", status_code=201)
+def create_saved_work_view(
+    body: SavedWorkViewBody,
+    request: Request,
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    _context(db, ctx)
+    title = body.title.strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=422, detail="Name the view using at least two characters.")
+    if body.source and body.source not in SOURCES:
+        raise HTTPException(status_code=422, detail="Choose a supported Quality source.")
+    existing = db.execute(text(
+        "SELECT id FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
+    if len(existing) >= 20:
+        raise HTTPException(status_code=409, detail="The 20 saved-view limit has been reached; remove an unused view.")
+    duplicate = db.execute(text(
+        "SELECT id FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL "
+        "AND LOWER(title)=LOWER(:title) LIMIT 1"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id, "title": title}).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="You already have a saved view with this name.")
+    filters = body.model_dump(exclude={"title"})
+    created = _save(
+        db, WATCH_TABLE, ctx,
+        {"title": title, "owner_user_id": ctx.user_id, "source_type": "QMS_SAVED_VIEW",
+         "status": "ACTIVE", "payload": filters},
+        event="SAVED_VIEW_CREATED", request=request, module="inbox",
+    )
+    db.commit()
+    return {"id": str(created["id"]), "title": title, "filters": filters}
+
+
+@router.delete("/saved-views/{saved_id}")
+def delete_saved_work_view(
+    saved_id: str,
+    request: Request,
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    _context(db, ctx)
+    row = db.execute(text(
+        "SELECT * FROM qms_task_assignments WHERE id=:id AND amo_id=:amo "
+        "AND owner_user_id=:actor AND source_type='QMS_SAVED_VIEW' "
+        "AND status='ACTIVE' AND deleted_at IS NULL"
+    ), {"id": saved_id, "amo": ctx.amo_id, "actor": ctx.user_id}).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Saved work view was not found.")
+    _save(
+        db, WATCH_TABLE, ctx, {"status": "INACTIVE", "payload": _payload(row)},
+        existing=_public(row), event="SAVED_VIEW_REMOVED", request=request, module="inbox",
+    )
+    db.commit()
+    return {"deleted": True}
+
+
 @router.get("/{view}")
 def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), source: str = Query("", max_length=40), due: Literal["all", "today", "next-seven", "undated"] = Query("all"), sort: Literal["priority", "title"] = Query("priority"), offset: int = Query(0, ge=0, le=100000),
           ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
