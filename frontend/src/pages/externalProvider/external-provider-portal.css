@@ -87,3 +87,20 @@
 @media(max-width:760px){.vendor-quality-workspace{padding:12px 8px 28px}.vendor-workspace-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.vendor-quality-workspace .vendor-header--quality{display:flex}.vendor-quality-workspace .vendor-card{padding:14px}.vendor-workspace-tabs{gap:5px}.vendor-workspace-tabs button{flex:1 1 40%}.vendor-decision-reason{min-width:0;flex-basis:100%}}
 
 #vendor-privilege-editor{scroll-margin-top:160px}
+
+
+/* Source-linked mail diagnostics: no blind success or exposure of one-time codes. */
+.vendor-account-delivery{display:grid;gap:8px;min-width:155px}
+.vendor-delivery-trigger{min-height:40px;text-align:left;font-weight:600}
+.vendor-delivery-history{scroll-margin-top:70px}
+.vendor-delivery-history .vendor-toolbar{align-items:center;gap:14px;flex-wrap:wrap}
+.vendor-delivery-history .vendor-toolbar p{margin:5px 0;color:var(--text-secondary,#536273);font-size:13px}
+.vendor-delivery-note{border-left:3px solid var(--brand-accent,#087e7b);padding:8px 12px;background:var(--surface-muted,#f3f7f8)}
+.vendor-delivery-attempts{display:grid;gap:12px;padding:0;list-style:none}
+.vendor-delivery-attempts>li{padding:16px;border:1px solid var(--surface-border,#cad9e2);border-radius:10px;overflow-wrap:anywhere}
+.vendor-delivery-attempt-head{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between}
+.vendor-delivery-attempt-head strong{font-size:14px}
+.vendor-delivery-attempt-head time,.vendor-delivery-attempts p{font-size:12px;color:var(--text-secondary,#536273)}
+.vendor-delivery-attempts ul{padding-left:20px;font-size:12px}
+.vendor-delivery-warning{color:#9a3412!important;font-weight:650}
+@media(max-width:760px){.vendor-account-delivery{min-width:0}.vendor-delivery-history .vendor-toolbar{align-items:flex-start}.vendor-delivery-history .vendor-actions{width:100%;display:flex;flex-wrap:wrap}.vendor-delivery-history .vendor-actions button{flex:1 1 auto}}
