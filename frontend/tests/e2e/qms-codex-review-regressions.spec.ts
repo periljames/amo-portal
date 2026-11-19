@@ -324,7 +324,7 @@ test("Connected work is scoped, next-action based and responsive without exposin
         { id: "document-acknowledgements:d1", record_id: "d1", source: "document-acknowledgements",
           source_label: "Document acknowledgement", title: "Acknowledge controlled distribution · Quality manual",
           status: "PENDING", due_date: "2020-01-01",
-          route: "/maintenance/tenant-a/quality/documents/distribution",
+          route: "/maintenance/tenant-a/document-control/distribution",
           scope: "ASSIGNED", next_action: "Acknowledge the issued controlled document", blocked: false },
         { id: "provider-approvals:p1", record_id: "p1", source: "provider-approvals",
           source_label: "External provider account", title: "Review verified provider representative",
@@ -340,8 +340,8 @@ test("Connected work is scoped, next-action based and responsive without exposin
     });
     return emptyRegister(route);
   });
-  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Connected work" }).click();
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me?mode=connected", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("button", { name: "Connected work" })).toBeVisible();
   const area = page.getByRole("region", { name: "Connected Quality work" });
   await expect(area.getByRole("heading", { name: "Connected responsibilities" })).toBeVisible();
   await expect(area.getByText("Assigned to you").first()).toBeVisible();
@@ -352,7 +352,7 @@ test("Connected work is scoped, next-action based and responsive without exposin
   await area.getByLabel("Connected source").selectOption("document-acknowledgements");
   await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveCount(1);
   await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveAttribute(
-    "href", "/maintenance/tenant-a/quality/documents/distribution",
+    "href", "/maintenance/tenant-a/document-control/distribution",
   );
   for (const width of [1920, 834, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -574,7 +574,7 @@ test("Quality work saved filters persist per user and apply without changing gov
     view: "assigned-to-me", source: "audits", due: "today", sort: "title",
   });
   await page.getByLabel("Quality source").selectOption("cars");
-  await saved.getByLabel("Saved view", { exact: true }).selectOption("saved-view-1");
+  await saved.locator("select").selectOption("saved-view-1");
   await saved.getByRole("button", { name: "Apply filters" }).click();
   await expect(page.getByLabel("Quality source")).toHaveValue("audits");
   await expect(page.getByLabel("Deadline")).toHaveValue("today");
