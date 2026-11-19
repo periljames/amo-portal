@@ -226,6 +226,39 @@ test("Quality work shows authorised counts, overdue urgency, source filtering an
   await expect(page.getByRole("heading", { name: "No pending management decisions" })).toBeVisible();
 });
 
+test("Watched cancelled, rejected and retired work retains its deadline without false urgency", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 1, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/watching")) {
+      const statuses = ["CANCELLED", "REJECTED", "RETIRED", "CLOSED", "OPEN"];
+      return json(route, {
+        items: statuses.map((status, index) => ({
+          id: "reviews:review-" + index, record_id: "review-" + index,
+          source: "reviews", source_label: "Management review",
+          title: "Watched " + status.toLowerCase() + " review", status,
+          due_date: "2020-01-01",
+          route: "/maintenance/tenant-a/quality/management-review/review-" + index + "/overview",
+          watching: true,
+        })),
+        total: statuses.length, limit: 30, offset: 0, source_errors: [],
+      });
+    }
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/watching", { waitUntil: "domcontentloaded" });
+  for (const status of ["cancelled", "rejected", "retired", "closed"]) {
+    const work = page.getByRole("article").filter({ hasText: "Watched " + status + " review" });
+    await expect(work).toBeVisible();
+    await expect(work.locator(".qms-inbox__due")).not.toContainText("overdue");
+    await expect(work.locator(".qms-inbox__due")).not.toContainText("Due in");
+    await expect(work.locator(".qms-inbox__due")).toContainText("2020");
+  }
+  const active = page.getByRole("article").filter({ hasText: "Watched open review" });
+  await expect(active.locator(".qms-inbox__due")).toContainText(/days overdue/);
+});
+
 test("Personal to-dos save reminders, complete, reopen and fit responsive viewports", async ({ page }) => {
   await prepare(page, async (route, url) => {
     if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
