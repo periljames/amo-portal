@@ -110,8 +110,8 @@ export default function QmsWorkInboxPage() {
     <main className="qms-inbox" aria-label="My Quality Work">
       <header className="qms-inbox__header"><div><h1>My Quality Work</h1>
         <p>Find Quality assignments, authorised review decisions and personal follow-ups in one place.</p></div>
-        <button type="button" onClick={() => setRevision(previous => previous + 1)}
-          disabled={data.isFetching || summary.isFetching}>Refresh work</button>
+        {!personal && <button type="button" onClick={() => setRevision(previous => previous + 1)}
+          disabled={data.isFetching || summary.isFetching}>Refresh work</button>}
       </header>
       <nav aria-label="Work areas" className="qms-inbox__area-tabs">
         <button type="button" aria-current={!personal ? "page" : undefined}
