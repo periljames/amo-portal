@@ -166,36 +166,25 @@ test("People uses authorization cases and does not duplicate audit assignment wo
   await expect(page.getByRole("dialog", { name: "Nominate person for Quality authorization" })).toBeVisible();
 });
 
-test("Inbox preserves notification receipt time without treating created_at as a deadline", async ({ page }) => {
+test("Governed inbox keeps notifications separate and undated source records neutral", async ({ page }) => {
   await prepare(page, async (route, url) => {
-    if (url.pathname.endsWith("/quality/inbox/assigned-to-me")) {
-      return json(route, {
-        module: "inbox",
-        view: "assigned-to-me",
-        table: "quality_inbox",
-        items: [{
-          id: "notification-1",
-          message: "Quality notice received from the assurance source",
-          severity: "INFO",
-          created_at: "2026-08-10T08:30:00Z",
-          read_at: null,
-        }],
-        columns: ["message", "severity", "created_at", "read_at"],
-        limit: 30,
-        offset: 0,
-        next_offset: null,
-        has_more: false,
-      });
-    }
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{ id: "risks:risk-1", record_id: "risk-1", source: "risks", source_label: "Risk assessment",
+        title: "Risk control follow-up", status: "OPEN", due_date: null,
+        route: "/maintenance/tenant-a/quality/risk/register?record=risk-1", watching: false }],
+      total: 1, limit: 30, offset: 0, source_errors: [],
+    });
     return emptyRegister(route);
   });
-
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  const task = page.locator(".qms-register-workspace .ag-center-cols-container .ag-row").first();
-  await expect(task).toContainText("Quality notice received from the assurance source");
-  await expect(task.locator('[col-id="received"]')).not.toHaveText("—");
-  await expect(task).not.toContainText("No due date returned");
-  await expect(task.locator('[col-id="due"]')).toHaveClass(/is-neutral/);
+  const work = page.getByRole("article").filter({ hasText: "Risk control follow-up" });
+  await expect(work).toContainText("No deadline");
+  await expect(work).not.toContainText("overdue");
+  await expect(work).not.toContainText("notification");
+  await expect(page.getByRole("link", { name: "Open workflow" })).toHaveAttribute("href", "/maintenance/tenant-a/quality/risk/register?record=risk-1");
 });
 
 test("Quality work shows authorised counts, overdue urgency, source filtering and shared approval semantics", async ({ page }) => {
