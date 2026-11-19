@@ -177,27 +177,30 @@ test("My Quality Work treats a date-only deadline due today as due today, expose
   let revision = 0;
   const today = localDateKey();
   await prepare(page, async (route, url) => {
-    if (url.pathname.endsWith("/quality/inbox/assigned-to-me")) return json(route, {
-      module: "inbox", view: "assigned-to-me", table: "quality_inbox",
-      items: [{ id: "task-1", message: revision === 0 ? "Initial source-backed task" : "Refreshed source-backed task", severity: "INFO", due_date: today, route: "/maintenance/tenant-a/quality?workspace=assurance" }],
-      columns: ["message", "severity", "due_date"], limit: 30, offset: 0, next_offset: null, has_more: false,
-      source_errors: [{ label: "Training register", message: "Training source was unavailable for one enrichment read.", type: "UPSTREAM_TIMEOUT" }],
-      trace_id: "trace-inbox-1", elapsed_ms: 12,
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{
+        id: "audits:audit-1", record_id: "audit-1", source: "audits", source_label: "Audit",
+        title: revision === 0 ? "Initial source-backed task" : "Refreshed source-backed task",
+        status: "IN_PROGRESS", due_date: today,
+        route: "/maintenance/tenant-a/quality/audits/audit-1/setup", watching: false,
+      }],
+      total: 1, limit: 30, offset: 0,
+      source_errors: [{ source: "Training register", message: "Training source was unavailable for one enrichment read." }],
     });
     return emptyRegister(route);
   });
-
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Initial source-backed task", { exact: true })).toBeVisible();
-  const marker = page.locator('.qms-register-workspace .ag-cell[col-id="due"]').first();
-  await expect(marker).toHaveClass(/is-warning/);
-  await expect(marker).not.toHaveClass(/is-danger/);
-  await page.getByText("Review 1 affected authoritative source", { exact: true }).click();
-  const sourceFailure = page.locator(".qms-register-warning details li").filter({ hasText: "Training register" });
-  await expect(sourceFailure).toContainText("Training source was unavailable for one enrichment read.");
-
+  const due = page.locator(".qms-inbox__due").first();
+  await expect(due).toContainText("Due today");
+  await expect(due).not.toContainText("overdue");
+  await expect(page.getByRole("alert").filter({ hasText: "This list is incomplete" })).toContainText("Training register");
+  await expect(page.getByRole("alert").filter({ hasText: "This list is incomplete" })).toContainText("Training source was unavailable");
   revision = 1;
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh work" }).click();
   await expect(page.getByText("Refreshed source-backed task", { exact: true })).toBeVisible();
 });
 
