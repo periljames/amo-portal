@@ -259,6 +259,112 @@ test("Watched cancelled, rejected and retired work retains its deadline without 
   await expect(active.locator(".qms-inbox__due")).toContainText(/days overdue/);
 });
 
+test("Connected work is scoped, next-action based and responsive without exposing mutation shortcuts", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/related")) {
+      const source = url.searchParams.get("source") || "";
+      const category = url.searchParams.get("category") || "all";
+      const items = [
+        { id: "training-steps:s1", record_id: "s1", source: "training-steps",
+          source_label: "Training workflow", title: "Document training · Sign off",
+          status: "PENDING", due_date: "2020-01-01", route: "/maintenance/tenant-a/training/competence",
+          scope: "ASSIGNED", next_action: "Await activation of an earlier training step", blocked: true },
+        { id: "document-acknowledgements:d1", record_id: "d1", source: "document-acknowledgements",
+          source_label: "Document acknowledgement", title: "Acknowledge controlled distribution · Quality manual",
+          status: "PENDING", due_date: "2020-01-01",
+          route: "/maintenance/tenant-a/quality/documents/distribution",
+          scope: "ASSIGNED", next_action: "Acknowledge the issued controlled document", blocked: false },
+        { id: "provider-approvals:p1", record_id: "p1", source: "provider-approvals",
+          source_label: "External provider account", title: "Review verified provider representative",
+          status: "AWAITING_QUALITY_APPROVAL", due_date: null,
+          route: "/maintenance/tenant-a/quality/external-accounts?view=accounts",
+          scope: "SHARED_REVIEW", next_action: "Quality Manager to review the verified account grant", blocked: false },
+      ].filter(item => (!source || item.source === source) &&
+        (category !== "overdue" || item.due_date !== null));
+      return json(route, { items, total: items.length, limit: 30, offset: 0, source_errors: [] });
+    }
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Connected work" }).click();
+  const area = page.getByRole("region", { name: "Connected Quality work" });
+  await expect(area.getByRole("heading", { name: "Connected responsibilities" })).toBeVisible();
+  await expect(area.getByText("Assigned to you").first()).toBeVisible();
+  await expect(area.getByText("Shared decision queue")).toBeVisible();
+  await expect(area.getByText("Await activation of an earlier training step")).toBeVisible();
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveCount(3);
+  await expect(area.getByRole("button", { name: "Complete" })).toHaveCount(0);
+  await area.getByLabel("Connected source").selectOption("document-acknowledgements");
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveCount(1);
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveAttribute(
+    "href", "/maintenance/tenant-a/quality/documents/distribution",
+  );
+  for (const width of [1920, 834, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(docWidth).toBeLessThanOrEqual(width + 2);
+  }
+});
+
+test("Vendor invitations distinguish Resend acceptance, sandbox and real delivery receipts", async ({ page }) => {
+  const account = {
+    grant_id: "grant-1", provider_id: "provider-1", supplier_id: 1, version: 1,
+    legal_name: "Test Provider", supplier_code: "TP-001",
+    email: "representative@example.test", display_name: "Test Representative",
+    identity_id: "identity-1", role_code: "READ_ONLY", capabilities_json: [],
+    object_scope_json: {}, grant_state: "PENDING", portal_state: "PENDING",
+    identity_state: "INVITED", verified_at: null, restrict_new_work: false,
+  };
+  let mailed = false;
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/quality/external-accounts/events")) return json(route, { items: [] });
+    if (path.endsWith("/quality/external-accounts")) return json(route, { items: mailed ? [account] : [account] });
+    if (path.includes("/quality/external-accounts/grants/grant-1/delivery-history"))
+      return json(route, {
+        grant_id: "grant-1", grant_status: "PENDING", verified: false,
+        recipient: account.email, note: "Provider acceptance is not recipient-server delivery or inbox placement.",
+        attempts: [{
+          email_status: "SENT", email_delivery_status: "ACCEPTED",
+          email_log_id: "log-1", provider_message_id: "email-resend-1",
+          sending_mode: "SANDBOX", provider_accepted: true,
+          attempted_at: "2026-11-19T08:30:00Z", recipient: account.email,
+          effective_recipient: "sandbox@example.test", template_key: "external-provider-invitation",
+          events: [{ event: "email.sent", at: "2026-11-19T08:30:00Z" }],
+        }],
+      });
+    if (path.endsWith("/quality/external-accounts/suppliers")) return json(route, {
+      items: [{ id: 1, supplier_code: "TP-001", legal_name: "Test Provider",
+        status: "ACTIVE", is_active: true, external_import_pending_activation: false }],
+      has_more: false,
+    });
+    if (path.endsWith("/quality/external-accounts/invitations") && route.request().method() === "POST") {
+      mailed = true;
+      return json(route, {
+        id: "grant-1", status: "PENDING", delivery_status: "SENT",
+        delivery: {
+          email_status: "SENT", email_delivery_status: "ACCEPTED", email_log_id: "log-1",
+          provider_message_id: "email-resend-1", sending_mode: "SANDBOX", provider_accepted: true,
+        },
+      }, 201);
+    }
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/external-accounts?view=accounts", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Inspect invitation delivery for Test Representative" }).click();
+  const panel = page.getByRole("region", { name: "Provider invitation delivery history" });
+  await expect(panel.getByText("Accepted by Resend — recipient delivery not confirmed")).toBeVisible();
+  await expect(panel.getByText(/Sandbox routing was active/)).toBeVisible();
+  await expect(panel.getByText("email-resend-1")).toBeVisible();
+  await expect(panel.getByText("sandbox@example.test")).toBeVisible();
+  await expect(panel).not.toContainText("one-time-secret");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(392);
+});
+
 test("Personal to-dos save reminders, complete, reopen and fit responsive viewports", async ({ page }) => {
   await prepare(page, async (route, url) => {
     if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
