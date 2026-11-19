@@ -19,6 +19,7 @@ const sources = [
   ["", "All connected sources"], ["training-steps", "Training workflow"],
   ["training-remedial", "Remedial training"], ["document-reviews", "Controlled document reviews"],
   ["document-acknowledgements", "Document acknowledgements"],
+  ["provider-invitations", "External provider invitations"],
   ["provider-approvals", "External provider account approvals"],
 ] as const;
 function dueState(value: string | null) {
