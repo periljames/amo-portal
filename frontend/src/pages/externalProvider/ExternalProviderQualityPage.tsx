@@ -404,7 +404,7 @@ export default function ExternalProviderQualityPage() {
             </li>)}
           </ol> : <p role="status">No correlated email receipts have been recorded for this grant.
             Legacy invitations may predate delivery-correlation tracking.</p>}
-          {manager && <p><Link to={\`/maintenance/\${encodeURIComponent(amoCode)}/quality/mail-identity/overview\`}>
+          {manager && <p><Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/mail-identity/overview`}>
             Check Quality mail identity</Link></p>}
         </>}
       </section>}
