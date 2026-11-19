@@ -126,6 +126,10 @@ def test_connected_unavailable_source_is_error_not_zero_work(client, monkeypatch
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
     monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.document.view")
+    monkeypatch.setitem(related.SOURCES, "document-acknowledgements", {
+        **related.SOURCES["document-acknowledgements"],
+        "projection": "SELECT id,title,status,due_date FROM source_deliberately_unavailable",
+    })
     result = client.get("/work-inbox/related?source=document-acknowledgements")
     assert result.status_code == 200
     data = result.json()
