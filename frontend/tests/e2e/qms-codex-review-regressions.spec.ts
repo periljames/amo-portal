@@ -530,3 +530,56 @@ test("People read access does not expose mutation controls to a Quality Auditor"
   await expect(page.getByRole("button", { name: /Revoke/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
 });
+
+
+test("Quality work saved filters persist per user and apply without changing governed source authority", async ({ page }) => {
+  const stored: Array<{
+    id: string; title: string; filters: { view: string; q: string; source: string; due: string; sort: string };
+  }> = [];
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/work-inbox/saved-views")) {
+      if (route.request().method() === "GET") return json(route, { items: stored, limit: 20 });
+      if (route.request().method() === "POST") {
+        const { title, ...filters } = route.request().postDataJSON();
+        const view = { id: "saved-view-1", title, filters };
+        stored.push(view);
+        return json(route, view, 201);
+      }
+    }
+    if (path.endsWith("/work-inbox/saved-views/saved-view-1") &&
+      route.request().method() === "DELETE") {
+      stored.splice(0, stored.length);
+      return json(route, { deleted: true });
+    }
+    if (path.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (path.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [], total: 0, limit: 30, offset: 0, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  const saved = page.getByRole("region", { name: "My saved Quality work views" });
+  await expect(saved.getByText("My saved filters")).toBeVisible();
+  await page.getByLabel("Quality source").selectOption("audits");
+  await page.getByLabel("Deadline").selectOption("today");
+  await page.getByLabel("Order").selectOption("title");
+  await saved.getByLabel("Save current filters as").fill("My audit deadlines");
+  await saved.getByRole("button", { name: "Save view" }).click();
+  await expect(saved.getByText('Saved "My audit deadlines" for your own account.')).toBeVisible();
+  expect(stored).toHaveLength(1);
+  expect(stored[0].filters).toMatchObject({
+    view: "assigned-to-me", source: "audits", due: "today", sort: "title",
+  });
+  await page.getByLabel("Quality source").selectOption("cars");
+  await saved.getByLabel("Saved view", { exact: true }).selectOption("saved-view-1");
+  await saved.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByLabel("Quality source")).toHaveValue("audits");
+  await expect(page.getByLabel("Deadline")).toHaveValue("today");
+  await expect(page.getByLabel("Order")).toHaveValue("title");
+  await saved.getByRole("button", { name: "Remove saved view" }).click();
+  await expect(saved.getByText("Saved view removed.")).toBeVisible();
+  await expect(saved.getByRole("option", { name: "My audit deadlines" })).toHaveCount(0);
+});
