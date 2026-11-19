@@ -71,3 +71,16 @@
 .qms-connected-work__list .qms-inbox__work-card:first-child{border-top:0}
 .qms-connected-work__next{font-size:13px;line-height:1.5;color:var(--text-secondary,#596577);margin:8px 0 0;overflow-wrap:anywhere}
 @media(max-width:680px){.qms-connected-work{padding:14px}.qms-inbox__area-tabs{overflow-x:auto}.qms-inbox__area-tabs button{flex:1 0 auto;white-space:nowrap}.qms-connected-work__filters{display:grid;grid-template-columns:minmax(0,1fr)}.qms-connected-work__categories button{flex:1 1 43%}}
+
+
+/* The consolidated preview is deliberately bounded; source queues retain total authority. */
+.qms-daily-focus{margin-top:18px;padding:24px;background:var(--surface,#fff);border:1px solid var(--border,#cbd5df);border-radius:12px}
+.qms-daily-focus .qms-personal-tasks__heading{flex-wrap:wrap}
+.qms-daily-focus__shortcuts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:22px 0}
+.qms-daily-focus__shortcuts a{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:60px;padding:12px 14px;border:1px solid var(--border,#cbd5df);border-radius:10px;text-decoration:none;font-size:13px}
+.qms-daily-focus__shortcuts a strong{font-size:22px}
+.qms-daily-focus__list{border:1px solid var(--border,#cbd5df);border-radius:10px;overflow:hidden}
+.qms-daily-focus__list>.qms-inbox__work-card:first-child{border-top:0}
+.qms-daily-focus__footnote{font-size:12px;line-height:1.5;color:var(--text-secondary,#596577);margin:16px 2px 0}
+@media(max-width:980px){.qms-daily-focus__shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.qms-daily-focus{padding:14px}.qms-daily-focus__shortcuts{gap:8px}.qms-daily-focus__shortcuts a{padding:10px;flex-direction:column;align-items:flex-start}.qms-daily-focus__shortcuts a strong{font-size:20px}}
