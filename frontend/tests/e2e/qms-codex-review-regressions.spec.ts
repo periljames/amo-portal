@@ -259,6 +259,58 @@ test("Watched cancelled, rejected and retired work retains its deadline without 
   await expect(active.locator(".qms-inbox__due")).toContainText(/days overdue/);
 });
 
+test("Today focus ranks overdue personal and governed work without changing source authority", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, overdue: 1, approvals: 1, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{
+        id: "risks:risk-1", record_id: "risk-1", source: "risks", source_label: "Risk assessment",
+        title: "Review open hazard", status: "OPEN", due_date: "2020-01-01",
+        next_action: "Review risk treatment in source", scope: "ASSIGNED",
+        route: "/maintenance/tenant-a/quality/risk/register?record=risk-1", watching: false,
+      }],
+      total: 1, limit: 30, offset: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/related")) return json(route, {
+      items: [{ id: "provider-invitations:grant-1", record_id: "grant-1",
+        source: "provider-invitations", source_label: "Provider invitation",
+        title: "Confirm representative invite", status: "PENDING_VERIFICATION", due_date: null,
+        next_action: "Review mail receipt and verification", scope: "SHARED_REVIEW",
+        route: "/maintenance/tenant-a/quality/external-accounts?view=accounts&grant=grant-1",
+      }],
+      total: 1, limit: 30, offset: 0,
+      source_errors: [{ source: "Document acknowledgement", message: "Unavailable source" }],
+    });
+    return emptyRegister(route);
+  });
+  await page.route("**/tasks/personal**", route => json(route, {
+    items: [{
+      id: "personal-1", title: "High urgency personal follow-up", description: "",
+      due_at: "2020-01-01T10:00:00Z", status: "OPEN", priority: 1,
+      entity_type: "quality_personal", metadata_json: {},
+    }],
+    total: 1, offset: 0, limit: 30,
+  }));
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Today & next steps" }).click();
+  const focus = page.getByRole("region", { name: "Today and next steps" });
+  await expect(focus.getByRole("heading", { name: "Today & next steps" })).toBeVisible();
+  await expect(focus.getByText("High urgency personal follow-up")).toBeVisible();
+  await expect(focus.getByText("Review open hazard")).toBeVisible();
+  await expect(focus.getByText("Confirm representative invite")).toBeVisible();
+  await expect(focus.getByRole("alert")).toContainText("Document acknowledgement");
+  const first = focus.locator(".qms-inbox__work-card").first();
+  await expect(first).toContainText("High urgency personal follow-up");
+  await expect(focus.getByRole("link", { name: "Open workflow" })).toHaveCount(2);
+  await expect(focus.getByRole("button", { name: "Complete" })).toHaveCount(0);
+  for (const width of [1920, 834, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2);
+  }
+});
+
 test("Connected work is scoped, next-action based and responsive without exposing mutation shortcuts", async ({ page }) => {
   await prepare(page, async (route, url) => {
     if (url.pathname.endsWith("/work-inbox/related")) {
