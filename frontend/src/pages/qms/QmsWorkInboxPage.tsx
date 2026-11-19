@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
 import { apiRequest, qmsPath } from "../../services/apiClient";
@@ -10,6 +10,7 @@ import "./inbox/qms-work-inbox.css";
 const QmsPersonalTasks = lazy(() => import("./inbox/QmsPersonalTasks"));
 const QmsConnectedWork = lazy(() => import("./inbox/QmsConnectedWork"));
 const QmsDailyFocus = lazy(() => import("./inbox/QmsDailyFocus"));
+const QmsSavedViews = lazy(() => import("./inbox/QmsSavedViews"));
 type WorkItem = { id: string; record_id: string; source: string; source_label: string; title: string; status: string; due_date: string | null; route: string; watching: boolean; next_action?: string; scope?: string; updated_at?: string | null };
 type WorkList = { items: WorkItem[]; total: number; offset: number; limit: number; source_errors: { source: string; message: string }[] };
 type Summary = { assigned_to_me: number; approvals: number; overdue: number; completed: number; source_errors: { source: string; message: string }[] };
@@ -49,6 +50,7 @@ function emptyText(view: string, filtered: boolean) {
 }
 export default function QmsWorkInboxPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const context = classifyQmsPath(location.pathname);
   const amoCode = context.amoCode || "";
   const view = context.relativePath?.split("/")[1] || "assigned-to-me";
@@ -150,6 +152,22 @@ export default function QmsWorkInboxPage() {
         {summary.isError && <p role="alert" className="qms-inbox__notice">Overview counts could not be loaded. Work lists remain available.</p>}
         {!!summary.data?.source_errors.length && <p role="alert" className="qms-inbox__notice">Some Quality sources could not be counted. Totals may be incomplete.</p>}
         <QmsSectionTabs amoCode={amoCode} />
+        <Suspense fallback={<p role="status">Loading your saved work filters…</p>}>
+          <QmsSavedViews amoCode={amoCode} filters={{ view, q, source, due: dueFilter, sort }}
+            onApply={saved => {
+              if (!titles[saved.view]) {
+                setError("This saved work view is no longer supported.");
+                return;
+              }
+              setSearch(saved.q || "");
+              const next = new URLSearchParams();
+              if (saved.q) next.set("q", saved.q);
+              if (saved.source) next.set("source", saved.source);
+              if (saved.due && saved.due !== "all") next.set("due", saved.due);
+              if (saved.sort && saved.sort !== "priority") next.set("sort", saved.sort);
+              navigate(base + saved.view + (next.size ? "?" + next.toString() : ""));
+            }} />
+        </Suspense>
         <section className="qms-inbox__panel" aria-labelledby="qms-inbox-list-title">
           <div className="qms-inbox__panel-heading">
             <div><h2 id="qms-inbox-list-title">{titles[view] || "Quality work"}</h2>
