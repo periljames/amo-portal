@@ -153,7 +153,7 @@ def test_connected_unavailable_source_is_error_not_zero_work(client, monkeypatch
 def test_unverified_external_invites_project_expiry_without_dropping_tenant_scope(client, monkeypatch):
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
-    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.external.manage")
+    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.audit.manage")
     _assign_quality_role(client, "QUALITY_MANAGER")
     _table(client, "external_tenant_grants (id text,amo_id text,identity_id text,tenant_provider_id text,status text)")
     _table(client, "external_identities (id text,email text,verified_at timestamp)")
