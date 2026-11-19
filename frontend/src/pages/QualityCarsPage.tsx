@@ -533,9 +533,9 @@ const QualityCarsPage: React.FC = () => {
     setReviewCar(car);
     setReviewForm({
       root_cause_status: "",
-      root_cause_review_note: car.root_cause_review_note ?? "",
+      root_cause_review_note: "",
       capa_status: "",
-      capa_review_note: car.capa_review_note ?? "",
+      capa_review_note: "",
       message: "",
     });
     setReviewAttachmentsLoading(true);
@@ -642,7 +642,7 @@ const QualityCarsPage: React.FC = () => {
       <div className="qms-surface-root qms-car-ops car-register">
       {localError ? <div className="card card--error" role="alert">{localError}</div> : null}
       {directCarId ? (cars[0] ? <CarRecordView car={cars[0]} amoCode={amoSlug} owner={cars[0].responsible_personnel || assigneeLookup.get(cars[0].assigned_to_user_id || "")?.full_name || "Unassigned"}
-        canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
+        assignees={assignees} canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
         onEdit={()=>openEdit(cars[0])} onReview={()=>void openReview(cars[0])} onInvite={()=>void handleCopyInvite(cars[0])} onExport={()=>void handleExport(cars[0])}/> : <section className="case-workspace"><button onClick={clearRouteScope}>Back to corrective actions</button><p role={registerQuery.isError?"alert":"status"}>{registerQuery.isError?"This corrective action could not be loaded.":registerQuery.isPending?"Loading corrective action…":"Corrective action not found."}</p>{registerQuery.isError?<button onClick={()=>void registerQuery.refetch()}>Retry</button>:null}</section>) : <>
       <header className="page-header qms-car-page-heading">
         <div>
@@ -1053,11 +1053,16 @@ const QualityCarsPage: React.FC = () => {
                 </select>
               </label>
             </div>
+            {(reviewCar.root_cause_review_note || reviewCar.capa_review_note) && <details className="qms-card"><summary>Previous review reasons</summary>
+              {reviewCar.root_cause_review_note && <p><strong>Root cause:</strong> {reviewCar.root_cause_review_note}</p>}
+              {reviewCar.capa_review_note && <p><strong>Action plan:</strong> {reviewCar.capa_review_note}</p>}
+            </details>}
+            <p className="text-muted">Enter a new review reason. Reasons are required for returns and evidence requests.</p>
             <label>Root cause review note
-              <textarea className="input" rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
+              <textarea className="input" aria-label="Root cause review note" maxLength={8000} rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
             </label>
             <label>Corrective action review note
-              <textarea className="input" rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
+              <textarea className="input" aria-label="Corrective action review note" maxLength={8000} rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
             </label>
             <label>Message to auditee
               <textarea className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
@@ -1097,7 +1102,7 @@ const QualityCarsPage: React.FC = () => {
 
             <div className="upsell-modal__actions">
               <button type="button" className="secondary-chip-btn" onClick={() => { setReviewCar(null); setReviewAttachments([]); }} disabled={reviewBusy}>Cancel</button>
-              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy || reviewAttachmentsLoading || !reviewForm.root_cause_status || !reviewForm.capa_status}>
+              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy || reviewAttachmentsLoading || !reviewForm.root_cause_status || !reviewForm.capa_status || (reviewForm.root_cause_status === "REJECTED" && !reviewForm.root_cause_review_note.trim()) || (["REJECTED", "NEEDS_EVIDENCE"].includes(reviewForm.capa_status) && !reviewForm.capa_review_note.trim())}>
                 {reviewBusy ? "Saving review…" : "Record review decision"}
               </button>
             </div>

@@ -21,6 +21,7 @@ export const QMS_WORKSPACE_PURPOSE: Record<string, string> = {
 };
 
 export const qmsViewLabel = (view: string): string => ({
+  "regulator-findings": "External & regulatory findings",
   "qms-scope": "QMS scope", "assigned-to-me": "Assigned to me", "supplier-audits": "Provider audits", "supplier-findings": "Provider findings",
   "risk-register": "Risk register", "out-of-tolerance": "Out of tolerance", "executive-dashboard": "Executive overview",
   "immutable-archive": "Retained archive", "new": "Create", "register": "Register",

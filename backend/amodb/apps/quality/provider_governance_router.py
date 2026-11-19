@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from amodb.apps.audit import services as audit_services
 from amodb.database import get_read_db, get_write_db
 from .provider_review_policy import apply_review_status
+from amodb.apps.procurement.supplier_identifiers import new_supplier_code
 
 from .tenant_security import (
     TenantContext,
@@ -371,7 +372,8 @@ def _provider_detail(db: Session, *, ctx: TenantContext, provider_id: int) -> di
 
 
 class ProviderCreate(BaseModel):
-    supplier_code: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+    # Kept optional for older clients; the server always assigns the identifier.
+    supplier_code: str | None = Field(default=None, max_length=64)
     legal_name: str = Field(min_length=2, max_length=255)
     trading_name: str | None = Field(default=None, max_length=255)
     provider_kind: ProviderKind = "SUPPLIER"
@@ -395,6 +397,9 @@ class ProviderCreate(BaseModel):
 
     @model_validator(mode="after")
     def review_within_mopm_interval(self):
+        self.legal_name = self.legal_name.strip()
+        if len(self.legal_name) < 2 or not any(char.isalnum() for char in self.legal_name):
+            raise ValueError("Enter the registered legal name of the provider.")
         if self.next_review_due_on and self.next_review_due_on > _today() + timedelta(days=self.review_interval_days):
             raise ValueError("MOPM 3.13 requires provider review within the annual interval or sooner.")
         return self
@@ -619,6 +624,7 @@ def create_external_provider(
     assert_quality_permission(db, ctx, "qms.supplier.manage")
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     profile_id = str(uuid.uuid4())
+    supplier_code = new_supplier_code()
     try:
         provider_id = db.execute(
             text(
@@ -638,7 +644,7 @@ def create_external_provider(
             ),
             {
                 "amo_id": ctx.amo_id,
-                "supplier_code": payload.supplier_code.strip().upper(),
+                "supplier_code": supplier_code,
                 "legal_name": payload.legal_name.strip(),
                 "trading_name": payload.trading_name,
                 "supplier_type": payload.provider_kind,
@@ -692,7 +698,7 @@ def create_external_provider(
             entity_type="external_provider",
             entity_id=str(provider_id),
             action="create",
-            after={"supplier_code": payload.supplier_code, "legal_name": payload.legal_name, "provider_kind": payload.provider_kind},
+            after={"supplier_code": supplier_code, "legal_name": payload.legal_name, "provider_kind": payload.provider_kind},
             correlation_id=f"qms-provider-create:{provider_id}",
             metadata={"source_master": "procurement_suppliers"},
             critical=True,

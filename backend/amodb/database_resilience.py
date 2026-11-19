@@ -71,21 +71,25 @@ class DatabaseCircuitBreaker:
         exponent = max(0, min(self._probe_failures - 1, 8))
         return min(self._max_delay, self._base_delay * (2**exponent))
 
-    def mark_failure(self, error: BaseException | str) -> bool:
+    def mark_failure(self, error: BaseException | str, *, probe: bool = False) -> bool:
         """Open the circuit and return True only for the outage transition."""
         now_mono = time.monotonic()
         now_epoch = time.time()
         message = str(error).strip()[:500] or type(error).__name__
         with self._lock:
             self._consecutive_failures += 1
-            self._probe_failures += 1
             self._last_failure_at = now_epoch
             self._last_error = message
             transitioned = self._state == "online" and self._consecutive_failures >= self._failure_threshold
             if transitioned:
                 self._state = "offline"
                 self._opened_at = self._opened_at or now_epoch
-            if self._state == "offline":
+                self._probe_failures = 1
+            elif probe:
+                self._probe_failures += 1
+            # In-flight requests from the same outage must not continually move
+            # the recovery deadline. Only a failed recovery attempt backs off.
+            if transitioned or probe:
                 self._next_probe_at = now_mono + self._delay()
             return transitioned
 

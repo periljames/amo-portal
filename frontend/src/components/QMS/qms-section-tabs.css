@@ -1,0 +1,5 @@
+.qms-section-tabs { display:flex;align-items:center;gap:4px;overflow-x:auto;max-width:100%;border-bottom:1px solid var(--surface-border,#d5dce5);padding-bottom:3px;margin-block:10px;scrollbar-width:thin; }
+.qms-section-tabs a { display:flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;color:inherit;font-size:13px;padding:10px 12px;border-bottom:3px solid transparent; }
+.qms-section-tabs a[aria-current=page] { border-color:var(--accent-primary,#2454c6);font-weight:650;background:color-mix(in srgb,var(--accent-primary,#2454c6) 7%,transparent); }
+.qms-section-tabs a:focus-visible { outline:2px solid var(--accent-primary,#2454c6);outline-offset:-2px; }
+.qms-section-tabs__back { border-right:1px solid var(--surface-border,#d5dce5); }

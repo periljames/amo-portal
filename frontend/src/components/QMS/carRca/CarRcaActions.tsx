@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { CarRcaAction, CarRcaActionCreate } from "../../../services/qmsCarRca";
 import { addCarRcaInviteAction, reviseCarRcaInviteAction, progressCarRcaInviteAction } from "../../../services/qmsCarRca";
 
+import { caseDate } from "../../../pages/qualityAudits/carCaseModel";
+
 const EMPTY: CarRcaActionCreate = {
   kind: "CORRECTIVE", description: "", cause_node_ids: [], evidence_references: [],
   external_owner_name: null, target_date: null, priority: "MEDIUM",
@@ -68,22 +70,22 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
     </div></div>
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error} <button type="button" onClick={()=>void onChanged().then(()=>setError(null),()=>setError("Latest actions could not be refreshed. Your recorded actions are retained."))}>Refresh actions</button></p>}
-    {displayed.length > 0 ? <div className="car-rca-table-scroll"><table>
+    {displayed.length > 0 ? <div className="car-rca-table-scroll"><table className="car-rca-public-list" role="table">
       <caption>{displayed.length} linked actions</caption>
-      <thead><tr><th>No.</th><th>Action</th><th>Responsible</th><th>Due</th><th>State / review</th><th>Implementation</th></tr></thead>
+      <thead><tr><th>Action</th><th>Responsible</th><th>Due</th><th>State / review</th><th>Implementation</th></tr></thead>
       <tbody>{displayed.map(action => <tr key={action.id}>
-        <td>{action.action_number}</td><td><strong>{action.kind}</strong><p>{action.description}</p>
+        <td><strong>Action {action.action_number} · {action.kind}</strong><p>{action.description}</p>
           {((!disabled && ["PROPOSED", "REJECTED"].includes(action.state)) || (canReviseReturned && action.state === "REJECTED")) && <button type="button" disabled={Boolean(busy)}
             onClick={() => { setEditingActionId(action.id); setDraft({ kind: action.kind, description: action.description,
               cause_node_ids: action.cause_node_ids, evidence_references: action.evidence_references,
               external_owner_name: action.external_owner_name, target_date: action.target_date, priority: action.priority }); }}>
             Revise proposed action</button>}
-          {action.cause_node_ids.length > 0 && <small>Causes: {action.cause_node_ids.join(", ")}</small>}</td>
-        <td>{action.external_owner_name || "Not assigned"}</td><td>{action.target_date || "Not set"}</td>
-        <td>{action.state.replaceAll("_", " ")}{action.quality_review_note && <p>Quality: {action.quality_review_note}</p>}
+          {action.cause_node_ids.length > 0 && <details><summary>Linked causes ({action.cause_node_ids.length})</summary><ul>{action.cause_node_ids.map(id => <li key={id}>{causeIds.find(cause=>cause.id===id)?.statement || "Retained investigation cause"}</li>)}</ul></details>}</td>
+        <td data-label="Responsible">{action.external_owner_name || "Not assigned"}</td><td data-label="Due">{action.target_date ? caseDate(action.target_date) : "Not set"}</td>
+        <td data-label="State / review">{action.state.replaceAll("_", " ")}{action.quality_review_note && <p>Quality: {action.quality_review_note}</p>}
           {action.state === "PROPOSED" && <p>Awaiting independent Quality approval.</p>}
           {action.state === "REJECTED" && <p>Returned for revision.</p>}</td>
-        <td>{canProgress && ["ACCEPTED", "IN_PROGRESS"].includes(action.state) &&
+        <td data-label="Implementation">{activeId !== action.id && <p>{action.completion_note || "No implementation recorded."}</p>}{canProgress && ["ACCEPTED", "IN_PROGRESS"].includes(action.state) &&
           <button type="button" disabled={Boolean(busy)} onClick={() => { setActiveId(activeId === action.id ? null : action.id); setNote(action.completion_note || ""); setProof(action.evidence_references.join("\n")); }}>Record progress</button>}
           {activeId === action.id && canProgress && <div className="car-rca-action-progress">
             <label className="car-rca-field">Completion declaration<textarea value={note} disabled={Boolean(busy)} onChange={e => setNote(e.target.value)} rows={2}/></label>

@@ -1,0 +1,38 @@
+/* A common reading scale for Quality workspaces, including lazy-loaded pages. */
+.tenant-shell[data-workspace-module="quality"] {
+  --qms-type-body: .875rem;
+  --qms-type-label: .875rem;
+  --qms-type-meta: .8125rem;
+  font-size: var(--qms-type-body);
+  line-height: 1.5;
+}
+.tenant-shell[data-workspace-module="quality"] :is(h1,.qa-workspace-current-page-heading h2) { font-size:1.5rem; line-height:1.3; }
+.tenant-shell[data-workspace-module="quality"] h2 { font-size:1.25rem; line-height:1.4; }
+.tenant-shell[data-workspace-module="quality"] h3 { font-size:1rem; line-height:1.4; }
+.tenant-shell[data-workspace-module="quality"] :is(table,.record-table,.qms-review table,.qms-provider-table) { font-size:var(--qms-type-body); line-height:1.5; }
+.tenant-shell[data-workspace-module="quality"] :is(th,.record-table th,.qms-provider-table th) { font-size:var(--qms-type-meta); line-height:1.4; letter-spacing:normal; text-transform:none; }
+.tenant-shell[data-workspace-module="quality"] :is(label,.qms-review label,.qms-provider-form label) { font-size:var(--qms-type-label); line-height:1.5; }
+.tenant-shell[data-workspace-module="quality"] :is(input,select,textarea) { font-size:var(--qms-type-body); line-height:1.5; min-width:0; }
+.tenant-shell[data-workspace-module="quality"] :is(button,.qms-provider-button,.qms-review button) { font-size:var(--qms-type-meta); line-height:1.4; }
+.tenant-shell[data-workspace-module="quality"] :is(.qms-provider-status,.qms-provider-risk,.qms-review__status,.qms-provider-meta) { font-size:var(--qms-type-meta); }
+.tenant-shell[data-workspace-module="quality"] :is(th,td) { vertical-align:top; overflow-wrap:anywhere; white-space:normal; overflow:visible; text-overflow:clip; }
+.tenant-shell[data-workspace-module="quality"] td > :is(strong,span,small,a) { white-space:normal; overflow:visible; text-overflow:clip; }
+.tenant-shell[data-workspace-module="quality"] .record-table .qa-audits-grid__scheduled { white-space:pre-line; font-variant-numeric:tabular-nums; overflow:visible; text-overflow:clip; }
+.tenant-shell[data-workspace-module="quality"] .record-table :is(.qa-audits-grid__identity strong,.qa-register-grid__primary span) { display:block; -webkit-line-clamp:unset; overflow:visible; }
+.tenant-shell[data-workspace-module="quality"] .qms-review__table table { min-width:42rem; table-layout:auto; }
+.tenant-shell[data-workspace-module="quality"] .qms-review__table td:first-child { min-width:12rem; max-width:30rem; }
+.tenant-shell[data-workspace-module="quality"] .qms-review__table td:last-child { min-width:7rem; }
+.tenant-shell[data-workspace-module="quality"] .qms-review__table small { display:block; font-size:var(--qms-type-meta); margin-top:4px; }
+.tenant-shell[data-workspace-module="quality"] .qms-review__table { max-width:100%; overscroll-behavior-x:contain; }
+.tenant-shell[data-workspace-module="quality"] .qms-provider-register:is([aria-label="External provider notification controls"],[aria-label="Provider management review"]) { padding:1rem 1.25rem; margin-block:1rem; }
+.tenant-shell[data-workspace-module="quality"] .qms-provider-section-heading h3 { display:flex; align-items:center; gap:.5rem; }
+.tenant-shell[data-workspace-module="quality"] :is(.qa-audits-list__status,.qa-audits-list__attention) { font-size:var(--qms-type-meta); font-weight:600; line-height:1.4; }
+html[data-color-scheme="dark"] .tenant-shell[data-workspace-module="quality"] .qa-audits-list__attention { color:#fda4af; background:#4c1725; }
+html[data-color-scheme="dark"] .tenant-shell[data-workspace-module="quality"] .qa-audits-list__status--cap_open { color:#fdba74; background:#472716; }
+html[data-color-scheme="dark"] .tenant-shell[data-workspace-module="quality"] .qa-audits-list__status--closed { color:#6ee7b7; background:#12372b; }
+@media(max-width:700px) {
+  .tenant-shell[data-workspace-module="quality"] .record-table [data-pinned="right"] { position:static; }
+  .tenant-shell[data-workspace-module="quality"] .qms-review__heading { align-items:flex-start; }
+  .tenant-shell[data-workspace-module="quality"] .qms-review__heading .qms-review__buttons { width:100%; }
+  .tenant-shell[data-workspace-module="quality"] .qms-review__heading label { flex:1 1 10rem; }
+}

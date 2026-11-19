@@ -30,9 +30,7 @@ const AuditClosingNarrativePanel = lazy(() => import("../../features/qms/auditSe
 const AuditClosingWorkspace = lazy(() => import("../../features/qms/auditSession/AuditClosingWorkspace"));
 const AuditFollowUpWorkspace = lazy(() => import("../../features/qms/auditSession/AuditFollowUpWorkspace"));
 const AuditArchiveWorkspace = lazy(() => import("../../features/qms/auditSession/AuditArchiveWorkspace"));
-const QualityAuditHandoffHost = lazy(() => import("./QualityAuditHandoffHost"));
 const QualityAuditGovernancePanelHost = lazy(() => import("./QualityAuditGovernancePanelHost"));
-const QualityEffectivenessResponseHost = lazy(() => import("./QualityEffectivenessResponseHost"));
 const QualityPlannerStrategicHost = lazy(() => import("./QualityPlannerStrategicHost"));
 
 type AuditRoute = { amoCode: string; auditKey: string };
@@ -188,8 +186,6 @@ const QualityEnhancementsHost: React.FC = () => {
     <QualityDialogFocusRestorer />
 
     {amoCode ? <Suspense fallback={null}>
-      <QualityAuditHandoffHost key={location.pathname} amoCode={amoCode} />
-      <QualityEffectivenessResponseHost key={location.pathname} amoCode={amoCode} />
       <QualityPlannerStrategicHost key={location.pathname} amoCode={amoCode} />
       {/* Checklist library is owned by QmsCanonicalPage on /audits/checklists; Prepare owns bind. */}
     </Suspense> : null}

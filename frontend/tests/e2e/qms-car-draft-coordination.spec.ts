@@ -2,7 +2,7 @@ import {test,expect,type Page} from "@playwright/test";
 import {mockQualityShell} from "./helpers/mockQualityShell";
 
 const carId="11111111-1111-4111-8111-111111111111";
-async function prepare(page:Page,closed=false,holdFirst=false){
+async function prepare(page:Page,closed=false,holdFirst=false,withAction=false){
   await mockQualityShell(page);
   let revision=0;
   const writes:Array<{expected_revision:number;form:Record<string,string>;investigation:Record<string,unknown>}>=[];
@@ -23,10 +23,10 @@ async function prepare(page:Page,closed=false,holdFirst=false){
         expect(payload.expected_revision).toBe(revision);
         revision++;draft={form:payload.form,investigation:payload.investigation};
       }
-      return json({car_id:carId,revision,draft,submitted_revision:null,submitted_snapshot:null,submitted_at:null,actions:[],action_events:[],retained_responses:[],history:[]});
+      return json({car_id:carId,revision,draft,submitted_revision:null,submitted_snapshot:null,submitted_at:null,actions:withAction?[{id:"action-mobile",car_id:carId,sequence_no:1,action_number:"CA-001",kind:"CORRECTIVE",description:"Maintain an independently verified effectiveness checkpoint and accountable evidence owner.",external_owner_name:"SIMULATED responsible manager",target_date:"2026-11-01",state:"VERIFIED",cause_node_ids:[],evidence_references:[],priority:"MEDIUM",completion_note:"Controlled register and evidence index updated.",quality_review_note:"Independently verified against the retained evidence."}]:[],action_events:[],retained_responses:[],history:[]});
     }
     if(path.endsWith("/attachments")||path.endsWith("/actions"))return json([]);
-    return json({car_id:carId,car_number:"QA-CAR-001",title:"Synthetic draft coordination",summary:"Synthetic finding",priority:"HIGH",status:closed?"CLOSED":"OPEN",can_edit:!closed,can_submit:!closed,related_cars:[],evidence_required:false,structured_rca_required:true,...draft.form,submitted_at:null,submission_count:0,remaining_submissions:2});
+    return json({car_id:carId,car_number:"QA-CAR-001",title:"Synthetic draft coordination",summary:"Synthetic finding",priority:"HIGH",status:closed?"CLOSED":"OPEN",can_edit:!closed&&!withAction,can_submit:!closed&&!withAction,root_cause_status:withAction?"ACCEPTED":"PENDING",capa_status:withAction?"ACCEPTED":"PENDING",related_cars:[],evidence_required:false,structured_rca_required:true,...draft.form,submitted_at:null,submission_count:0,remaining_submissions:2});
   });
   return {writes,release};
 }
@@ -54,4 +54,17 @@ test("continue flushes edits made during an earlier autosave without losing the 
   expect(state.writes.length).toBeGreaterThanOrEqual(2);
   expect(state.writes.at(-1)?.form.root_cause).toBe("A newer conclusion entered while the first save is in flight.");
   expect(state.writes.at(-1)?.investigation.conclusion).toBe(state.writes.at(-1)?.form.root_cause);
+});
+
+
+test("public action review is readable on a phone without horizontal scrolling",async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await prepare(page,false,false,true);
+  await page.goto("/qms/car-access/synthetic-token");
+  const actions=page.getByRole("region",{name:"Individual corrective actions"});
+  await expect(actions).toContainText("Independently verified against the retained evidence.",{timeout:15000});
+  await expect(actions).toContainText("Controlled register and evidence index updated.");
+  expect(await actions.evaluate(element=>element.scrollWidth<=element.clientWidth+1)).toBe(true);
+  expect(await actions.locator(".car-rca-table-scroll").evaluate(element=>element.scrollWidth<=element.clientWidth+1)).toBe(true);
+  await actions.screenshot({path:"../.artifacts/qms-live-20261030/public-action-mobile.png"});
 });

@@ -13,7 +13,7 @@
   min-height: 3rem;
 }
 
-.qms-modern-planner-v2 .qms-planner-title strong { font-size: clamp(1.12rem, 1.35vw, 1.35rem); }
+.qms-modern-planner-v2 .qms-planner-title :is(strong,h1) { font-size: clamp(1.12rem, 1.35vw, 1.35rem); }
 .qms-modern-planner-v2 .qms-planner-title span { font-size: .81rem; }
 
 .qms-modern-planner-v2 .qms-planner-icon-button,

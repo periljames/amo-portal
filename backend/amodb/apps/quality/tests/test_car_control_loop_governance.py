@@ -236,7 +236,8 @@ def test_plain_legacy_car_keeps_backwards_compatible_transition() -> None:
             db, amo_id="amo-1", actor_user_id="reviewer-a",
             car=car, target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE",
         )
-    assert car.status == "CLOSED"
+    from amodb.apps.quality.enums import CARStatus
+    assert car.status is CARStatus.CLOSED
     assert car.evidence_ref == "LEGACY:EVIDENCE"
     audit.assert_called_once()
 
@@ -304,3 +305,49 @@ def test_optional_effectiveness_policy_does_not_waive_structured_action_verifica
         db, amo_id="amo-1", car_id=car_id, effectiveness_required=False,
     )
     assert db.query.call_count == 2, "The expressly optional effectiveness plan should not be queried"
+
+
+def test_legacy_close_establishes_rls_context_before_reading_governance() -> None:
+    from amodb.apps.quality.transitions import transition_car
+
+    car = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000125"),
+                          status="PENDING_VERIFICATION", finding_id=None)
+    db = MagicMock()
+    scoped = MagicMock()
+    scoped.filter.return_value.first.return_value = SimpleNamespace(effectiveness_required=True)
+    with patch("amodb.apps.quality.tenant_security.set_postgres_tenant_context") as context:
+        def scoped_query(*args):
+            context.assert_called_once_with(db, amo_id="amo-1", user_id="reviewer-a")
+            return scoped
+        db.query.side_effect = scoped_query
+        with pytest.raises(HTTPException) as error:
+            transition_car(db, amo_id="amo-1", actor_user_id="reviewer-a", car=car,
+                           target_status="CLOSED", evidence_ref="LEGACY:EVIDENCE")
+    assert error.value.status_code == 409
+    assert car.status == "PENDING_VERIFICATION"
+    db.add.assert_not_called()
+
+
+def test_legacy_edit_audits_string_status_and_sets_tenant_context() -> None:
+    from importlib import import_module
+    router = import_module("amodb.apps.quality.router")
+    from amodb.apps.quality.schemas import CARUpdate
+
+    car = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000126"), amo_id="amo-1",
+                          status="IN_PROGRESS", title="Before", assigned_to_user_id="owner", finding_id=None)
+    user = SimpleNamespace(id="reviewer-a")
+    db = MagicMock()
+    with patch.object(router, "_get_car_for_amo", return_value=car), \
+         patch.object(router, "_current_amo_id", return_value="amo-1"), \
+         patch.object(router, "_require_car_not_escalated"), \
+         patch.object(router, "_require_car_write_access"), \
+         patch.object(router, "set_postgres_tenant_context") as context, \
+         patch.object(router, "_audit_metadata", return_value={}), \
+         patch.object(router.audit_services, "log_event") as audit:
+        result = router.update_car(car.id, CARUpdate(title="After"), MagicMock(), db, user)
+    assert result is car
+    assert car.title == "After"
+    context.assert_called_once_with(db, amo_id="amo-1", user_id="reviewer-a")
+    assert audit.call_args.kwargs["before"]["status"] == "IN_PROGRESS"
+    assert audit.call_args.kwargs["after"]["status"] == "IN_PROGRESS"
+    db.commit.assert_called_once()

@@ -29,6 +29,7 @@ import {
 import "../../styles/qms/missions.css";
 import QmsWorkspaceGrid from "./components/QmsWorkspaceGrid";
 import QmsMissionActions from "./missions/QmsMissionActions";
+import QualityAuditHandoffHost from "../../components/QMS/QualityAuditHandoffHost";
 
 const ACTIVE_STATUSES: Array<{ value: "" | QmsMissionStatus; label: string }> = [
   { value: "", label: "All stages" },
@@ -122,6 +123,7 @@ const MissionDetail: React.FC<{ amoCode: string; missionId: string; onBack: () =
       </div>
 
       <QmsMissionActions key={`${mission.id}:${mission.updated_at}`} amoCode={amoCode} mission={mission} />
+      {mission.status !== "CANCELLED" ? <QualityAuditHandoffHost key={mission.id} amoCode={amoCode} sourceType="MISSION" sourceId={mission.id} sourceLabel={`${mission.mission_ref} - ${mission.title}`} /> : null}
       <section className="qms-mission-detail__gates">
         <header>
           <div><ShieldCheck size={17} /><strong>Readiness gates</strong></div>

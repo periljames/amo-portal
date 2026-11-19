@@ -97,6 +97,18 @@ a.qms-settings__card:hover { border-color:var(--accent-primary,#2454c6); }
 .qms-page-menu__panel { position:absolute;left:0;top:calc(100% + 6px);z-index:100;width:350px;max-width:calc(100vw - 32px);max-height:min(70dvh,620px);overflow:auto;display:grid;gap:4px;padding:10px;border:1px solid var(--surface-border,#cbd5e1);border-radius:10px;background:var(--surface-elevated,#fff);box-shadow:0 10px 30px #0b1d3026; }
 .qms-page-menu__panel a { display:block;min-height:36px;padding:8px 10px;color:var(--text-primary);font-size:13px;line-height:1.5;text-decoration:none;border-radius:5px;overflow-wrap:anywhere; }
 .qms-page-menu__panel a:is(:hover,[aria-current="page"]) { background:var(--tenant-nav-hover,#eaf1fd);color:var(--accent-primary,#2454c6); }
+.qms-page-menu__destination { border-bottom:1px solid var(--surface-border,#cbd5e1); padding-bottom:7px; margin-bottom:5px; }
+.qms-page-menu__destination > a { font-weight:700; }
+.qms-page-menu__views { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;padding-left:8px; }
+.qms-page-menu__views a { font-size:12px; }
+.qms-page-menu--directory { margin-left:auto; }
+.qms-page-directory { left:auto;right:0;width:550px; }
+.qms-page-directory label { font-weight:700;font-size:13px;padding:4px; }
+.qms-page-directory input { width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--surface-border,#cbd5e1);border-radius:6px;background:var(--surface-elevated,#fff);color:var(--text-primary);font:inherit; }
+.qms-page-directory p { margin:5px;font-size:12px;color:var(--text-secondary); }
+.qms-page-directory nav { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px; }
+.qms-page-directory a small { display:block;font-size:11px;color:var(--text-secondary); }
+@media(max-width:600px) { .qms-page-directory nav {grid-template-columns:1fr;} }
 .qms-page-menu__destination+.qms-page-menu__destination { border-top:1px solid var(--surface-border,#dbe2ea);padding-top:4px; }
 .qms-page-menu__module>summary { padding:9px 10px;cursor:pointer;font-size:14px;font-weight:500;color:var(--text-primary); }
 .qms-page-menu__module>div { margin:3px 0 6px 14px;padding-left:6px;border-left:2px solid var(--surface-border,#dbe2ea); }

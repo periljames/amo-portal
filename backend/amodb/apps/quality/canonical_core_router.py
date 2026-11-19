@@ -1395,11 +1395,8 @@ QMS_ROUTE_TREE: dict[str, dict[str, Any]] = {
         "path": "management-review",
         "permission": "qms.management_review.view",
         "children": [
-            "dashboard", "meetings", "meetings/new", "meetings/:reviewId/agenda",
-            "meetings/:reviewId/inputs", "meetings/:reviewId/minutes",
-            "meetings/:reviewId/decisions", "meetings/:reviewId/actions",
-            "meetings/:reviewId/attachments", "meetings/:reviewId/approval",
-            "actions", "open-actions", "closed-actions", "reports",
+            "dashboard", "meetings", "new", ":reviewId/overview",
+            "actions", "open-actions", "closed-actions",
         ],
     },
     "reports": {
@@ -2018,13 +2015,27 @@ def _log_qms_activity(
 
 @core_router.get("/activity-log")
 def qms_activity_log(
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100000),
+    q: str = Query("", max_length=80),
+    module: str = Query("", max_length=80),
     ctx: TenantContext = Depends(require_quality_permission("qms.settings.view")),
     db: Session = Depends(get_read_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    rows = _select_records(db, table="qms_activity_logs", amo_id=ctx.amo_id, record_id=None, limit=limit)
-    return {"module": "activity-log", "items": rows}
+    params = {"amo": ctx.amo_id, "limit": limit, "offset": offset, "q": "%" + q.lower() + "%", "module": module}
+    where = "l.amo_id=:amo"
+    if q:
+        where += " AND (lower(COALESCE(l.action,'')) LIKE :q OR lower(COALESCE(l.entity_id,'')) LIKE :q OR lower(COALESCE(l.entity_type,'')) LIKE :q)"
+    if module: where += " AND l.module=:module"
+    total = db.execute(text(f"SELECT count(*) FROM qms_activity_logs l WHERE {where}"), params).scalar_one()
+    rows = db.execute(text(f"""SELECT l.id,l.actor_user_id,l.action,l.module,l.entity_type,l.entity_id,
+            l.previous_value,l.new_value,l.created_at,
+            COALESCE(NULLIF(u.full_name,''),u.email,l.actor_user_id) AS actor_name
+        FROM qms_activity_logs l LEFT JOIN users u ON u.id=l.actor_user_id AND u.amo_id=l.amo_id
+        WHERE {where} ORDER BY l.created_at DESC,l.id DESC LIMIT :limit OFFSET :offset"""), params).mappings().all()
+    modules = db.execute(text("SELECT DISTINCT module FROM qms_activity_logs WHERE amo_id=:amo ORDER BY module"), params).scalars().all()
+    return {"module": "activity-log", "items": [dict(row) for row in rows], "total": total, "offset": offset, "limit": limit, "modules": modules}
 
 
 
@@ -2318,6 +2329,10 @@ def _update_parent_status(
 
 
 def _require_governed_change_write(module: str) -> None:
+    if module in {"risk", "system", "equipment-calibration", "external-interface"}:
+        raise HTTPException(409, {"code": "CONTROLLED_REGISTER_REQUIRED", "message": "Use the Quality register workspace to validate fields, ownership and record versions.", "workflow": "register-workspace"})
+    if module == "management-review":
+        raise HTTPException(409, {"code": "GOVERNED_REVIEW_REQUIRED", "message": "Use the Management Review meeting workspace for inputs, decisions, approvals and follow-up actions.", "workflow": "management-review/workspace"})
     if module == "change-control":
         raise HTTPException(409, {"code": "GOVERNED_CHANGE_REQUIRED", "message": "Use the controlled change project workflow for creation, evidence and approvals. Historical change-register records are read-only.", "workflow": "missions"})
 
@@ -2515,6 +2530,8 @@ def generic_qms_create(
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     view = _resolve_view(module, parts[1:])
     table = _resolve_table(module, view)
+    if table == "qms_supplier_findings":
+        raise HTTPException(409, "Use the provider findings register workspace to capture the provider, issued level and closure evidence.")
     row = _insert_record(db, table=table, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, payload=payload)
     _log_qms_activity(db, amo_id=ctx.amo_id, actor_user_id=ctx.user_id, action="record_created", module=module, entity_type=table, entity_id=str(row.get("id")), new_value=row, request=request)
     db.commit()
@@ -2539,6 +2556,8 @@ def generic_qms_update(
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or config["permission"]))
     view = _resolve_view(module, parts[1:])
     table = _resolve_table(module, view)
+    if table == "qms_supplier_findings":
+        raise HTTPException(409, "Use the provider findings register workspace to capture the provider, issued level and closure evidence.")
     record_id = _record_id_from_parts(parts[1:], table, module)
     if not record_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")
@@ -2568,6 +2587,8 @@ def generic_qms_delete(
     assert_quality_permission(db, ctx, str(config.get("manage_permission") or "qms.settings.manage"))
     view = _resolve_view(module, parts[1:])
     table = _resolve_table(module, view)
+    if table == "qms_supplier_findings":
+        raise HTTPException(409, "Use the provider findings register workspace to capture the provider, issued level and closure evidence.")
     record_id = _record_id_from_parts(parts[1:], table, module)
     if not record_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Record id is required.")

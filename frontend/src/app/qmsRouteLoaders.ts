@@ -22,6 +22,11 @@ export const qmsPageLoaders = {
   providerAccess: () => import("../pages/externalProvider/ExternalProviderQualityPage"),
   settings: () => import("../pages/qms/QmsSettingsPage"),
   register: () => import("../pages/qms/QmsRegisterPage"),
+  managementReview: () => import("../pages/qms/QmsManagementReviewPage"),
+  controlledRegister: () => import("../pages/qms/QmsControlledRegisterPage"),
+  workInbox: () => import("../pages/qms/QmsWorkInboxPage"),
+  activityLog: () => import("../pages/qms/QmsActivityLogPage"),
+  findingViews: () => import("../pages/qms/QmsFindingViewsPage"),
   planner: () => import("../pages/qms/planner/QmsPlannerLivePage"),
   setup: () => import("../features/qms/auditSession/AuditSetupWorkspace"),
   prepare: () => import("../features/qms/auditSession/AuditPrepareWorkspace"),
@@ -53,10 +58,15 @@ export function qmsRouteLoaderKey(path: string): keyof typeof qmsPageLoaders | n
   if (/\/audits\/program(?:\/|$)/i.test(pathname)) return "programme";
   if (/\/suppliers(?:\/|$)/i.test(pathname)) return "providers";
   if (/\/external-accounts(?:\/|$)/i.test(pathname)) return "providerAccess";
+  if (/\/settings\/audit-log(?:\/|$)/i.test(pathname)) return "activityLog";
   if (/\/settings(?:\/|$)/i.test(pathname)) return "settings";
   if (/\/reports(?:\/|$)/i.test(pathname) && !path.includes("analysis=1")) return "reports";
   if (/\/reports\/car-performance(?:\/|$)/i.test(pathname)) return "carReport";
   if (/\/evidence-vault(?:\/|$)/i.test(pathname)) return "register";
+  if (/\/inbox(?:\/|$)/i.test(pathname)) return "workInbox";
+  if (/\/findings(?:\/(?:register|new|by-process|by-severity|trends|linked-cars))?\/?$/i.test(pathname)) return "findingViews";
+  if (/\/management-review(?:\/|$)/i.test(pathname)) return "managementReview";
+  if (/\/(risk|system|equipment-calibration|external-interface)(?:\/|$)/i.test(pathname)) return "controlledRegister";
   if (/\/cars(?:\/|$)/i.test(pathname)) return "cars";
   return "canonical";
 }

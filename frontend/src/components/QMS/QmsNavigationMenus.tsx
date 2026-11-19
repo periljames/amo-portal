@@ -4,6 +4,8 @@ import { Link, useLocation } from "react-router-dom";
 import { hasQmsRolePermission } from "../../app/routeGuards";
 import { QMS_ROUTE_REGISTRY, qmsBasePath, qmsModulePath } from "../../pages/qms/routes/qmsRouteRegistry";
 import { qmsPeopleWorkspacePath, qmsWorkspaceEntryPath } from "../../pages/qms/routes/qmsWorkspaceRegistry";
+import { qmsViewLabel } from "../../pages/qms/qmsWorkspaceCopy";
+import { qmsNavigationCatalogue, searchQualityDestinations, qmsViewPermission } from "./qmsNavigationCatalogue";
 
 const groups = [
   { id: "work", label: "Work", sections: ["command"] },
@@ -18,6 +20,9 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   const location = useLocation();
   const root = useRef<HTMLElement>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const catalogue = qmsNavigationCatalogue(amoCode).filter(item => hasQmsRolePermission(item.permission));
+  const results = searchQualityDestinations(catalogue, search);
   const base = qmsBasePath(amoCode);
   const moduleActive = (segment: string) => location.pathname === `${base}/${segment}` || location.pathname.startsWith(`${base}/${segment}/`);
   const openGroup = (id: string) => {
@@ -44,9 +49,10 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   return <nav ref={root} className="qms-menu-bar quality-context-bar" aria-label="QMS page menus" onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(null); }}>
     <Link className="qms-menu-bar__home" to={base} onClick={() => setOpen(null)}>QMS</Link>
     {groups.map(group => {
-      const modules = QMS_ROUTE_REGISTRY.filter(module => (group.sections as readonly string[]).includes(module.section) && !["documents", "aerodoc", "mail-identity"].includes(module.id) && hasQmsRolePermission(module.permission));
-      if (!modules.length && group.id !== "work") return null;
-      const active = modules.some(module => moduleActive(module.segment));
+      const modules = QMS_ROUTE_REGISTRY.filter(module => (group.sections as readonly string[]).includes(module.section) && !["documents", "aerodoc"].includes(module.id) && hasQmsRolePermission(module.permission));
+      const hubDestinations = group.id === "controls" ? catalogue.filter(item => item.moduleLabel === "Assurance controls") : [];
+      if (!modules.length && group.id !== "work" && !hubDestinations.length) return null;
+      const active = modules.some(module => moduleActive(module.segment)) || hubDestinations.some(item => current(item.path));
       return <div className="qms-page-menu" key={group.id}>
         <button type="button" className={active ? "is-active" : undefined} aria-expanded={open === group.id} aria-controls={`qms-menu-${group.id}`} onClick={() => open === group.id ? setOpen(null) : openGroup(group.id)} onKeyDown={event => {
           if (["ArrowDown", "ArrowUp"].includes(event.key)) {
@@ -66,12 +72,28 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
             {hasQmsRolePermission("qms.change.view") && link(qmsWorkspaceEntryPath(amoCode, "missions"), "Missions")}
             {hasQmsRolePermission("qms.people.view") && link(qmsPeopleWorkspacePath(amoCode), "People & authorizations")}
           </>}
+          {group.id === "assurance" && hasQmsRolePermission("qms.audit.view") && link(`${base}?workspace=assurance`, "Assurance cases")}
+          {group.id === "reports" && hasQmsRolePermission("qms.reports.view") && link(qmsWorkspaceEntryPath(amoCode, "intelligence"), "Quality Intelligence")}
           {modules.map(module => <div className="qms-page-menu__destination" key={module.id}>
             {link(qmsModulePath(amoCode, module.id, module.defaultView), module.navigationLabel)}
+            <div className="qms-page-menu__views">{module.validViews.filter(view => view !== module.defaultView && hasQmsRolePermission(qmsViewPermission(module, view))).map(view => link(qmsModulePath(amoCode, module.id, view), `${qmsViewLabel(view)}`))}</div>
           </div>)}
+          {hubDestinations.length > 0 && <div className="qms-page-menu__destination">
+            {link(hubDestinations[0].path, hubDestinations[0].label)}
+            <div className="qms-page-menu__views">{hubDestinations.slice(1).map(item => link(item.path, item.label))}</div>
+          </div>}
         </nav>}
       </div>;
     })}
+    <div className="qms-page-menu qms-page-menu--directory">
+      <button type="button" aria-expanded={open === "directory"} aria-controls="qms-page-directory" onClick={() => { setOpen(open === "directory" ? null : "directory"); setSearch(""); requestAnimationFrame(() => root.current?.querySelector<HTMLInputElement>("#qms-page-search")?.focus()); }}>Find a page<ChevronDown size={14} aria-hidden="true" /></button>
+      {open === "directory" && <section className="qms-page-menu__panel qms-page-directory" id="qms-page-directory" aria-label="Quality page directory">
+        <label htmlFor="qms-page-search">Find any Quality page</label><input id="qms-page-search" type="search" placeholder="Try minutes, calibration, audit or people" value={search} onChange={event => setSearch(event.target.value)} autoComplete="off" />
+        <p role="status">{results.length} accessible destinations</p>
+        <nav aria-label="Quality page search results" onKeyDown={panelKeys}>{results.map(item => <Link key={item.path} to={item.path} onClick={() => setOpen(null)} aria-current={current(item.path) ? "page" : undefined}><strong>{item.label}</strong><small>{item.moduleLabel}</small></Link>)}</nav>
+        {!results.length && <p>No accessible page matches. Try a module name or a shorter search.</p>}
+      </section>}
+    </div>
   </nav>;
 }
 

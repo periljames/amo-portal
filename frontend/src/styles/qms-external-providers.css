@@ -624,3 +624,5 @@
   .qms-provider-record { grid-template-columns: auto minmax(0, 1fr); }
   .qms-provider-record__actions { grid-column: 2; flex-wrap: wrap; }
 }
+.qms-provider-form-note{margin:0;padding:12px 14px;background:color-mix(in srgb,var(--surface,#fff) 92%,var(--text-primary,#162638) 8%);border-radius:8px;font-size:14px;line-height:1.5}
+.qms-provider-table td:last-child a{display:inline-flex;padding:8px;align-items:center;gap:5px}

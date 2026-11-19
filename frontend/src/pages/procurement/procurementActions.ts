@@ -57,7 +57,7 @@ export async function submitProcurementForm(
   }
   if (modal === "supplier") {
     return createProcurementSupplier(amoCode, {
-      supplier_code: text("code"), legal_name: text("name"), trading_name: text("tradingName") || null,
+      legal_name: text("name"), trading_name: text("tradingName") || null,
       supplier_type: text("supplierType") || "DISTRIBUTOR", vendor_id: number("vendorId") || null,
       risk_level: text("risk") || "MEDIUM", email: text("email") || null, country: text("country") || null,
       default_currency: text("currency") || "USD", quality_contact_name: text("qualityContact") || null,

@@ -2,12 +2,13 @@ import InlineLoading from "../../components/shared/InlineLoading";
 import { caseDate } from "../qualityAudits/carCaseModel";
 import "../qualityAudits/caseWorkspace.css";
 import { personDisplay } from "../../utils/personDisplay";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { getContext } from "../../services/auth";
+import { portalErrorMessage } from "../../services/portalError";
 import { qmsListCarAssignees, type CARAssignee } from "../../services/qms";
 import { canCloseCars, canManageCars } from "../../features/qms/auditSession/qmsAuditActionGates";
 import QmsCarControlOperations from "./QmsCarControlOperations";
@@ -49,6 +50,12 @@ const INITIAL_MILESTONES = [
 ] as const;
 type InitialMilestoneKey = (typeof INITIAL_MILESTONES)[number]["key"];
 type InitialMilestoneDraft = { owner_user_id: string; due_date: string };
+
+function retainEdits<T extends object>(draft: T | undefined, baseline: T | undefined, fresh: T): T {
+  if (!draft || !baseline) return fresh;
+  return Object.fromEntries((Object.keys(fresh) as (keyof T)[]).map(key =>
+    [key, draft[key] === baseline[key] ? fresh[key] : draft[key]])) as T;
+}
 
 function humanize(value: string | null | undefined): string {
   if (!value) return "—";
@@ -94,14 +101,12 @@ const QmsCarControlLoopPage: React.FC = () => {
   const context = getContext();
   const amoCode = params.amoCode || context.amoSlug || context.amoCode || "UNKNOWN";
   const carId = params.carId || searchParams.get("control") || searchParams.get("carId") || "";
-  const canManage = canManageCars();
-  const canClose = canCloseCars();
+  const canManageAuthority = canManageCars();
 
   const [busy, setBusy] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [initOwner, setInitOwner] = useState("");
-  const [initDue, setInitDue] = useState("");
   const [effectivenessRequired, setEffectivenessRequired] = useState(true);
   const [initialMilestones, setInitialMilestones] = useState<Record<InitialMilestoneKey, InitialMilestoneDraft>>(() => Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: "", due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);
   const [milestoneDrafts, setMilestoneDrafts] = useState<Record<string, MilestoneDraft>>({});
@@ -123,6 +128,7 @@ const QmsCarControlLoopPage: React.FC = () => {
   const [dependencyMitigation, setDependencyMitigation] = useState("");
   const [closureEvidence, setClosureEvidence] = useState("");
   const [closureReason, setClosureReason] = useState("");
+  const previousControl = useRef<CarControlLoop | null>(null);
 
   const controlQuery = useQuery({
     queryKey: ["qms-car-control-loop", amoCode, carId],
@@ -142,6 +148,10 @@ const QmsCarControlLoopPage: React.FC = () => {
   });
 
   const control = controlQuery.data;
+  const isReadOnly = ["CLOSED", "CANCELLED", "ESCALATED"].includes(control?.car.status || "");
+  const canManage = canManageAuthority && !isReadOnly;
+  const canClose = canCloseCars() && !isReadOnly;
+  const initDue = control?.car.target_closure_date || control?.car.due_date || "";
   const assignees = useMemo(() => assigneesQuery.data ?? [], [assigneesQuery.data]);
   const assigneeOptions = useMemo(() => {
     const next = [...assignees];
@@ -163,27 +173,28 @@ const QmsCarControlLoopPage: React.FC = () => {
 
   useEffect(() => {
     if (!control) return;
+    const previous = previousControl.current?.car.id === control.car.id ? previousControl.current : null;
+    previousControl.current = control;
     if (!control.initialized) {
       const defaultOwner = control.car.assigned_to_user_id || "";
-      setInitOwner(defaultOwner);
-      setInitDue(control.car.target_closure_date || control.car.due_date || "");
-      setInitialMilestones(Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: defaultOwner, due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);
+      setInitOwner(value => !previous || value === (previous.car.assigned_to_user_id || "") ? defaultOwner : value);
+      if (!previous) setInitialMilestones(Object.fromEntries(INITIAL_MILESTONES.map((item) => [item.key, { owner_user_id: defaultOwner, due_date: "" }])) as Record<InitialMilestoneKey, InitialMilestoneDraft>);
       return;
     }
     if (control.profile) {
-      setProfileOwner(control.profile.accountable_owner_user_id || "");
-      setProfileEffectiveness(control.profile.effectiveness_required);
+      setProfileOwner(value => !previous?.profile || value === (previous.profile.accountable_owner_user_id || "") ? control.profile!.accountable_owner_user_id || "" : value);
+      setProfileEffectiveness(value => !previous?.profile || value === previous.profile.effectiveness_required ? control.profile!.effectiveness_required : value);
     }
-    const nextDrafts: Record<string, MilestoneDraft> = {};
-    control.milestones.forEach((milestone) => {
-      nextDrafts[milestone.id] = {
+    const draftFor = (milestone: CarControlLoop["milestones"][number]): MilestoneDraft => ({
         owner_user_id: milestone.owner_user_id || "",
         status: milestone.status,
         notes: milestone.notes || "",
         evidence_ref: milestone.evidence_ref || "",
-      };
     });
-    setMilestoneDrafts(nextDrafts);
+    setMilestoneDrafts(current => Object.fromEntries(control.milestones.map(milestone => {
+      const baseline = previous?.milestones.find(item => item.id === milestone.id);
+      return [milestone.id, retainEdits(current[milestone.id], baseline ? draftFor(baseline) : undefined, draftFor(milestone))];
+    })));
   }, [control]);
 
   async function runAction(label: string, action: () => Promise<CarControlLoop>, success: string): Promise<boolean> {
@@ -196,7 +207,7 @@ const QmsCarControlLoopPage: React.FC = () => {
       setActionMessage(success);
       return true;
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "The governed CAR action could not be completed.");
+      setActionError(portalErrorMessage(error, "The CAR action was not confirmed. Your entries are retained; check the latest status before retrying."));
       return false;
     } finally {
       setBusy(null);
@@ -215,14 +226,14 @@ const QmsCarControlLoopPage: React.FC = () => {
     return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="page"><div className="card"><InlineLoading label={"Loading CAR control loop…"}/></div></main></DepartmentLayout>;
   }
 
-  if (controlQuery.isError || !control) {
+  if (!control) {
     return (
       <DepartmentLayout amoCode={amoCode} activeDepartment="quality">
         <main className="page">
           <div className="card">
             <h1>CAR control loop</h1>
-            <p className="text-danger">{controlQuery.error instanceof Error ? controlQuery.error.message : "Unable to load the CAR control loop."}</p>
-            <button className="btn" type="button" onClick={() => void controlQuery.refetch()}>Retry</button>
+            <p role="alert">{portalErrorMessage(controlQuery.error, "The CAR could not be loaded. Reconnect and retry.")}</p>
+            <button className="btn" type="button" disabled={controlQuery.isFetching} onClick={() => void controlQuery.refetch()}>{controlQuery.isFetching ? "Reconnecting…" : "Retry"}</button>
           </div>
         </main>
       </DepartmentLayout>
@@ -235,7 +246,6 @@ const QmsCarControlLoopPage: React.FC = () => {
         <div className="page-header">
           <div>
             <button className="btn btn--ghost" type="button" onClick={() => navigate(`/maintenance/${amoCode}/quality/cars?carId=${encodeURIComponent(carId)}`)}>← CAR details</button>
-            <p className="eyebrow">Corrective action governance</p>
             <h1>{control.car.car_number}</h1>
             <p>{control.car.title}</p>
             <details><summary>Finding statement</summary><p>{control.car.summary}</p></details>
@@ -248,12 +258,12 @@ const QmsCarControlLoopPage: React.FC = () => {
 
         {actionError ? <div className="alert alert--danger" role="alert">{actionError}</div> : null}
         {actionMessage ? <div className="alert alert--success" role="status">{actionMessage}</div> : null}
+        {isReadOnly ? <p className="alert alert--info" role="status">{humanize(control.car.status)} CAR · retained record is read only. Evidence and history remain available.</p> : null}
+        {controlQuery.isError ? <div className="alert alert--warning" role="alert">{portalErrorMessage(controlQuery.error, "The latest CAR status could not be refreshed.")} Showing the last loaded record; your unsaved entries are retained. <button className="btn btn--ghost" disabled={controlQuery.isFetching} onClick={() => void controlQuery.refetch()}>Refresh CAR</button></div> : null}
 
         <section className="card">
-          <div className="card__header"><div><h2>Ownership & accountability</h2></div></div>
+          <div className="card__header"><div><h2>CAR overview</h2></div></div>
           <div className="stats-grid">
-            <div><span className="muted">Health</span><strong>{humanize(control.health.state)}</strong></div>
-            <div><span className="muted">Risk score</span><strong>{control.health.risk_score}/100</strong></div>
             <div><span className="muted">Final deadline</span><strong>{formatDate(control.profile?.current_due_date || control.car.target_closure_date || control.car.due_date)}</strong></div>
             <div><span className="muted">Next action</span><strong>{control.health.next_action}</strong></div>
           </div>
@@ -276,7 +286,8 @@ const QmsCarControlLoopPage: React.FC = () => {
                   </select>
                 </label>
                 <label>Controlled final due date
-                  <input className="input" type="date" value={initDue} onChange={(event) => setInitDue(event.target.value)} />
+                  <input className="input" type="date" value={control.car.target_closure_date || control.car.due_date || ""} readOnly aria-describedby="car-initial-deadline-help" />
+                  <small id="car-initial-deadline-help">Current CAR deadline. Use a deadline-change request after initialization to revise it.</small>
                 </label>
                 <div style={{ gridColumn: "1 / -1" }}>
                   <strong>Lifecycle milestone plan</strong>
@@ -284,7 +295,7 @@ const QmsCarControlLoopPage: React.FC = () => {
                   <div className="table-wrap"><table className="table"><thead><tr><th>Stage</th><th>Owner</th><th>Planned due</th></tr></thead><tbody>{INITIAL_MILESTONES.map((item, index) => { const draft = initialMilestones[item.key]; return <tr key={item.key}><td><strong>{index + 1}. {item.label}</strong></td><td><select className="input" value={draft.owner_user_id} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], owner_user_id: event.target.value } }))}><option value="">Unassigned</option>{assigneeOptions.map((person) => <option key={person.id} value={person.id}>{personDisplay(person.full_name || person.email)}{person.department_name ? ` · ${person.department_name}` : ""}</option>)}</select></td><td><input className="input" type="date" value={draft.due_date} max={initDue || undefined} onChange={(event) => setInitialMilestones((current) => ({ ...current, [item.key]: { ...current[item.key], due_date: event.target.value } }))} /></td></tr>; })}</tbody></table></div>
                 </div>
                 <label className="checkbox-row"><input type="checkbox" checked={effectivenessRequired} onChange={(event) => setEffectivenessRequired(event.target.checked)} /> Effectiveness review required before closure</label>
-                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: initDue || undefined, effectiveness_required: effectivenessRequired, milestones: INITIAL_MILESTONES.map((item) => ({ milestone_key: item.key, owner_user_id: initialMilestones[item.key].owner_user_id || undefined, due_date: initialMilestones[item.key].due_date || undefined })) }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
+                <div><button className="btn btn--primary" type="button" disabled={!initDue || busy !== null} onClick={() => void runAction("initialize", () => initializeCarControlLoop(amoCode, carId, { accountable_owner_user_id: initOwner || null, final_due_date: control.car.target_closure_date || control.car.due_date || undefined, effectiveness_required: effectivenessRequired, milestones: INITIAL_MILESTONES.map((item) => ({ milestone_key: item.key, owner_user_id: initialMilestones[item.key].owner_user_id || undefined, due_date: initialMilestones[item.key].due_date || undefined })) }), "Staged CAR control initialized.")}>{busy === "initialize" ? "Initializing…" : "Initialize control loop"}</button></div>
               </div>
             )}
           </section>
@@ -317,7 +328,7 @@ const QmsCarControlLoopPage: React.FC = () => {
             <section className="card">
               <div className="card__header"><div><h2>Staged CAR lifecycle</h2><p>Each stage has a named owner, immutable original deadline, current approved deadline, governed status and evidence.</p></div></div>
               <div className="table-wrap">
-                <table className="table">
+                <table className="table car-stage-table" role="table">
                   <thead><tr><th>Stage</th><th>Owner</th><th>Original due</th><th>Current due</th><th>Status</th><th>Evidence / note</th><th /></tr></thead>
                   <tbody>
                     {control.milestones.map((milestone) => {

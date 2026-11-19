@@ -20,7 +20,7 @@ TENANT_COLUMNS = {table: "amo_id" for table in (
     "quality_assurance_events", "quality_intelligence_reviews", "training_records",
     "qms_supplier_approvals", "qms_calibration_records", "qms_risks", "qms_changes",
     "qms_management_review_actions", "qms_regulator_findings", "qms_external_commitments",
-    "qms_change_controls", "qms_out_of_tolerance_events",
+    "qms_change_controls", "qms_out_of_tolerance_events", "qms_equipment",
 )}
 ACTOR_COLUMNS = {
     "qms_audits": AUDIT_ACTORS,
@@ -29,6 +29,7 @@ ACTOR_COLUMNS = {
     "quality_assurance_controls": ("owner_user_id",),
     "qms_documents": ("owner_user_id",),
     "training_records": ("user_id",),
+    "qms_equipment": ("owner_user_id",),
 }
 SOURCE_PERMISSIONS = {
     "qms_audits": "qms.audit.view", "qms_audit_schedules": "qms.audit.view",
@@ -36,6 +37,7 @@ SOURCE_PERMISSIONS = {
     "qms_audit_findings": "qms.finding.view", "quality_cars": "qms.car.view",
     "qms_documents": "qms.document.view", "training_records": "qms.training.view",
     "qms_supplier_approvals": "qms.supplier.view", "qms_calibration_records": "qms.equipment.view",
+    "qms_equipment": "qms.equipment.view",
     "qms_risks": "qms.risk.view", "qms_changes": "qms.change.view",
     "qms_change_controls": "qms.change.view", "qms_out_of_tolerance_events": "qms.equipment.view",
     "qms_management_review_actions": "qms.management_review.view",

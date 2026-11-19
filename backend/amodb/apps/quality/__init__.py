@@ -77,6 +77,7 @@ from . import audit_programme_schedule_router as _audit_programme_schedule_route
 from . import people_router as _people_router  # noqa: F401,E402
 from . import people_authorization_router as _people_authorization_router  # noqa: F401,E402
 from . import assurance_case_router as _assurance_case_router  # noqa: F401,E402
+from . import effectiveness_response_router as _effectiveness_response_router  # noqa: F401,E402
 from . import intelligence_router as _intelligence_router  # noqa: F401,E402
 from . import intelligence_governance_router as _intelligence_governance_router  # noqa: F401,E402
 from . import audit_preparation_router as _audit_preparation_router  # noqa: F401,E402
@@ -176,6 +177,10 @@ _include_once(
     _assurance_case_router.router,
     "/api/maintenance/{amo_code}/quality/assurance-cases",
 )
+
+# Case-specific effectiveness responses share the same governed case family.
+# Register before family promotion so legacy module dispatch cannot capture them.
+_canonical_router.router.include_router(_effectiveness_response_router.router)
 
 # Quality Intelligence is a bounded read model over governed source records. It
 # exposes transparent calculations and deterministic surveillance factors; it

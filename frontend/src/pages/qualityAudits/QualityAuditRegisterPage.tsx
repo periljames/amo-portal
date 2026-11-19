@@ -1,7 +1,8 @@
 import Pagination from "../../components/shared/Pagination";
 import WorkspaceLoading from "../../components/shared/WorkspaceLoading";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import RecordTable from "../../components/shared/RecordTable";
@@ -31,7 +32,7 @@ import {
   type QualityWorkflowSettingsOut,
 } from "../../services/qms";
 import { auditNavigationHref } from "./auditNavigation";
-import { qmsBasePath, qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
+import { classifyQmsPath, qmsBasePath, qmsModulePath, qmsRecordPath } from "../qms/routes/qmsRouteRegistry";
 import { parseQmsRegisterFilters, withQmsQuery, buildPreservedQmsQuery } from "../qms/routes/qmsQueryState";
 import QualityAuditsSectionLayout from "./QualityAuditsSectionLayout";
 import {
@@ -97,12 +98,15 @@ function parseReminderPercentages(value: string): number[] | null {
 const QualityAuditRegisterPage: React.FC = () => {
   const params = useParams<{ amoCode?: string }>();
   const context = getContext();
-  const amoCode = params.amoCode ?? context.amoCode ?? "UNKNOWN";
+  const location = useLocation();
+  const amoCode = params.amoCode ?? classifyQmsPath(location.pathname).amoCode ?? context.amoCode ?? "UNKNOWN";
   const navigate = useNavigate();
+  const findingSubview = location.pathname.includes("/quality/findings/");
+  const onlyWithCars = /\/findings\/linked-cars\/?$/.test(location.pathname);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = parseQmsRegisterFilters(searchParams);
-  const { view: actorView, period, status: findingStatus, stage, timing, auditId, q: search, pageSize, page, level } = filters;
+  const { view: actorView, period, status: findingStatus, stage, timing, auditId, q: search, pageSize, page, level, severity, process, processUnmapped } = filters;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const infoRef = useRef<HTMLDetailsElement>(null);
   const settingsRef = useRef<HTMLDetailsElement>(null);
@@ -133,12 +137,12 @@ const QualityAuditRegisterPage: React.FC = () => {
   const canCreateCar = hasQmsRolePermission("qms.car.create");
 
   const registerQuery = useQuery({
-    queryKey: ["qms-assurance-register", amoCode, actorView, period, findingStatus, level, auditId, stage, timing, search, pageSize, page],
+    queryKey: ["qms-assurance-register", amoCode, actorView, period, findingStatus, level, auditId, stage, timing, search, pageSize, page, onlyWithCars, severity, process, processUnmapped],
     queryFn: ({ signal }) => qmsGetAuditRegisterPage({
       amoCode,
       domain: "AMO", view: actorView, period, status: findingStatus || undefined, level: level || undefined,
       auditId: auditId || undefined,
-      onlyWithCars: false,
+      onlyWithCars, severity: severity || undefined, process: process || undefined, processUnmapped,
       workflowStage: toRegisterWorkflowStage(stage),
       carTiming: timing || undefined,
       search: search || undefined,
@@ -316,18 +320,20 @@ const QualityAuditRegisterPage: React.FC = () => {
   useEffect(() => {
     if (registerQuery.data && page > totalPages) patchFilters({ page: totalPages }, true);
   }, [page, totalPages, registerQuery.data, patchFilters]);
-  const hasFilters = Boolean(auditId || search || stage !== "all" || timing || findingStatus || level || period || actorView === "mine");
-  const hasFacetFilters = Boolean(auditId || stage !== "all" || timing || findingStatus || level || period || actorView === "mine");
+  const hasFilters = Boolean(auditId || search || stage !== "all" || timing || findingStatus || level || period || actorView === "mine" || severity || process || processUnmapped);
+  const hasFacetFilters = Boolean(auditId || stage !== "all" || timing || findingStatus || level || period || actorView === "mine" || severity || process || processUnmapped);
   const updateFilter = (key: string, value: string) => patchFilters({ [key]: value, page: null });
-  const clearFilters = () => patchFilters({ q: null, stage: null, timing: null, auditId: null, status: null, level: null, period: null, view: null, page: null });
+  const clearFilters = () => patchFilters({ q: null, stage: null, timing: null, auditId: null, status: null, level: null, period: null, view: null, page: null, severity: null, process: null, processUnmapped: null });
   const auditsHref = withQmsQuery(qmsModulePath(amoCode, "audits", "workspace"), buildPreservedQmsQuery(searchParams));
   const settings = workflowQuery.data;
 
   return (
     <QualityAuditsSectionLayout
-      title="Findings Register"
+      title={onlyWithCars ? "Findings linked to CARs" : "Findings Register"}
       subtitle="Register of findings and linked corrective actions."
     >
+      {findingSubview && <QmsSectionTabs amoCode={amoCode} />}
+      {(process || processUnmapped) && <p>Process classification: <strong>{processUnmapped ? "No current verified process mapping" : process}</strong>. Based on verified links to approved active controls.</p>}
       <section className="qa-register-grid-page" aria-label="Findings register">
         <header className="qa-register-grid-page__toolbar">
           <div className="qa-register-grid-page__primary">
@@ -488,6 +494,7 @@ const QualityAuditRegisterPage: React.FC = () => {
                 <label>Year<input aria-label="Year" type="number" min={2000} max={2200} value={period ?? ""} placeholder="All years" onChange={(event) => updateFilter("period", event.target.value)} tabIndex={filtersOpen ? 0 : -1} /></label>
                 <label>Status<select aria-label="Status" value={findingStatus} onChange={(event) => updateFilter("status", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
                 <label>Level<select aria-label="Level" value={level} onChange={(event) => updateFilter("level", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{[1, 2, 3, 4].map((number) => <option key={number} value={`LEVEL_${number}`}>Level {number}</option>)}</select></label>
+                <label>Severity<select aria-label="Severity" value={severity} onChange={event => updateFilter("severity", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{["MINOR", "MAJOR", "CRITICAL"].map(value => <option key={value} value={value}>{humanize(value)}</option>)}</select></label>
                 <label>Stage<select aria-label="Stage" value={stage} onChange={(event) => updateFilter("stage", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
                     {FINDING_LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>

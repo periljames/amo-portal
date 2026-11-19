@@ -10,6 +10,8 @@ const QmsAuditProgrammeWorkspacePage = lazy(qmsPageLoaders.programme);
 const QmsModuleWorkspacePage = lazy(qmsPageLoaders.module);
 const QmsCarControlLoopPage = lazy(qmsPageLoaders.carControl);
 const QmsReportsPage = lazy(() => import("./QmsReportsPage"));
+const QmsManagementReviewPage = lazy(() => import("./QmsManagementReviewPage"));
+const QmsControlledRegisterPage = lazy(() => import("./QmsControlledRegisterPage"));
 const QmsCarPerformanceReportPage = lazy(qmsPageLoaders.carReport);
 const QmsExternalProvidersPage = lazy(qmsPageLoaders.providers);
 const QmsRegisterPage = lazy(qmsPageLoaders.register);
@@ -116,6 +118,8 @@ function QmsCanonicalContent(): React.ReactElement {
     if (pathname.endsWith("/car-performance") && searchParams.get("analysis") === "1") return <QmsCarPerformanceReportPage />;
     return <QmsReportsPage />;
   }
+  if (pathname.includes("/quality/management-review")) return <QmsManagementReviewPage />;
+  if (/\/quality\/(risk|system|equipment-calibration|external-interface)(?:\/|$)/.test(pathname)) return <QmsControlledRegisterPage />;
 
   // Evidence Vault list/search stays the bounded register owner; when reached from the
   // Assurance rail it keeps Audit Assurance chrome instead of a bare register shell.

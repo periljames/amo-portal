@@ -628,6 +628,37 @@ def quality_grant_update(amo_code:str,grant_id:str,payload:GrantUpdate,db:Sessio
     db.commit()
     return {"status":"UPDATED","version":payload.version+1}
 
+@quality_router.get("/grants/{grant_id}/scope-options")
+def quality_scope_options(amo_code: str, grant_id: str,
+                          kind: Literal["contracts", "rfqs", "purchase_orders", "assignments"] = "contracts",
+                          search: str = "", offset: int = 0,
+                          db: Session = Depends(get_db), user: accounts.User = Depends(get_current_active_user)):
+    _quality_manager(user)
+    amo = _authorized_quality(db, amo_code, user)
+    grant = core.one("""SELECT p.supplier_id FROM external_tenant_grants g
+        JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=g.amo_id
+        WHERE g.amo_id=:amo AND g.id=:id""", db, amo=amo, id=grant_id)
+    if not grant:
+        raise HTTPException(404, "Grant not found")
+    if offset < 0 or offset > 10000 or len(search) > 200:
+        raise HTTPException(422, "Invalid record search")
+    sources = {
+        "contracts": """SELECT CAST(id AS TEXT) id, concat_ws(' - ',contract_number,title) label
+            FROM quality_external_provider_contracts WHERE amo_id=:amo AND supplier_id=:supplier""",
+        "rfqs": """SELECT CAST(r.id AS TEXT) id, r.rfq_number label FROM procurement_rfqs r
+            WHERE r.amo_id=:amo AND r.issued_at IS NOT NULL AND r.status NOT IN ('DRAFT','CANCELLED')
+            AND EXISTS (SELECT 1 FROM procurement_rfq_suppliers rs WHERE rs.rfq_id=r.id AND rs.supplier_id=:supplier)""",
+        "purchase_orders": """SELECT CAST(id AS TEXT) id, po_number label FROM procurement_purchase_orders
+            WHERE amo_id=:amo AND supplier_id=:supplier AND sent_at IS NOT NULL""",
+        "assignments": """SELECT CAST(id AS TEXT) id, concat_ws(' - ',audit_ref,title) label
+            FROM qms_audits WHERE amo_id=:amo""",
+    }
+    rows = core.many("SELECT id,label FROM (" + sources[kind] + """
+        ) options WHERE lower(label) LIKE :search ORDER BY label,id LIMIT 51 OFFSET :offset""",
+        db, amo=amo, supplier=grant["supplier_id"], search="%"+search.strip().lower()+"%", offset=offset)
+    return {"items": rows[:50], "has_more": len(rows)>50, "offset": offset}
+
+
 @quality_router.get("/events")
 def quality_events(amo_code:str,db:Session=Depends(get_db),
                    user:accounts.User=Depends(get_current_active_user)):

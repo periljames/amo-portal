@@ -1,0 +1,40 @@
+.qms-review { max-width: 1440px; margin: auto; padding: 20px; color: var(--text); }
+.qms-review__heading { display:flex; flex-wrap:wrap; justify-content:space-between; gap:16px; align-items:center; margin-bottom:16px; }
+.qms-review h1 { margin:0 0 6px; font-size:26px; }
+.qms-review h2 { margin:0 0 10px; font-size:20px; }
+.qms-review h3 { margin:18px 0 10px; }
+.qms-review p { line-height:1.6; }
+.qms-review__section { padding:22px; margin:18px 0; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+.qms-review__stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:20px 0; }
+.qms-review__stats a,.qms-review__stats > div { display:flex; flex-direction:column; padding:18px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:inherit; text-decoration:none; }
+.qms-review__stats strong { font-size:28px; }
+.qms-review__stats span { margin-top:5px; color:var(--text-secondary); }
+.qms-review__stats button { display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:8px; }
+.qms-register__rating { display:block;margin-top:5px;color:var(--text-secondary); }
+.qms-review nav[aria-label="Register pages"] { display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:16px; }
+.qms-review__buttons { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
+.qms-review button,.qms-review__buttons a { border:1px solid var(--border); padding:9px 13px; border-radius:7px; background:var(--surface); color:var(--text); font:inherit; font-size:13px; cursor:pointer; text-decoration:none; }
+.qms-review button:disabled { cursor:default; opacity:.5; }
+.qms-review .qms-review__primary { background:var(--primary, #155e75); color:white; }
+.qms-review label { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:600; margin:10px 0; }
+.qms-review input,.qms-review select,.qms-review textarea { width:100%; padding:10px; font:inherit; font-weight:400; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); box-sizing:border-box; }
+.qms-review textarea { resize:vertical; min-height:85px; }
+.qms-review select[multiple] { min-height:110px; }
+.qms-review__fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 18px; }
+.qms-review__form>fieldset { border:0; margin:0; padding:0; min-width:0; }
+.qms-review__item { border:1px solid var(--border); border-radius:8px; padding:16px; margin:14px 0; scroll-margin-top:100px; }
+.qms-review__item:target { outline:2px solid var(--primary,#155e75); }
+.qms-review__item legend { padding:0 5px; }
+.qms-review__transition { border-top:1px solid var(--border); margin-top:14px; padding-top:6px; }
+.qms-review__error { padding:12px; border:1px solid #b45309; border-radius:6px; }
+.qms-review__success { padding:12px; border:1px solid #15803d; border-radius:6px; }
+.qms-review__table { overflow:auto; }
+.qms-review .qms-review__matrix table { table-layout:fixed;font-size:12px; }
+.qms-review .qms-review__matrix th:first-child { width:85px; }
+.qms-review .qms-review__matrix :is(th,td) { padding:8px 4px;text-align:center;white-space:normal; }
+.qms-review table { width:100%; border-collapse:collapse; text-align:left; font-size:13px; }
+.qms-review th,.qms-review td { padding:12px; border-bottom:1px solid var(--border); }
+.qms-review__status { display:inline-block; padding:3px 8px; border-radius:5px; background:color-mix(in srgb,var(--primary,#155e75) 12%,transparent); text-transform:capitalize; font-size:12px; }
+.qms-review__prose { white-space:pre-wrap; overflow-wrap:anywhere; }
+.qms-review nav[aria-label="Management review pages"] { display:flex; gap:14px; align-items:center; margin-top:16px; }
+@media(max-width:700px) { .qms-review { padding:12px; } .qms-review__stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .qms-review__fields { grid-template-columns:1fr; } .qms-review__section { padding:14px; } }

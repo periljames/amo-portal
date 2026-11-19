@@ -43,7 +43,7 @@ export default function RecordTable<T>({ rows, columns, label, loading = false, 
         {column.resizable !== false && column.minWidth !== column.maxWidth ? <span className="record-table-resize" role="separator" aria-label={`Resize ${column.headerName || "actions"} column`} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => resize(event, index)} onKeyDown={(event) => keyResize(event, index)} /> : null}
       </th>)}</tr></thead>
       <tbody>{rows.map((row) => <tr key={getRowId(row)} onClick={(event) => onRowClick?.(row, event)} onDoubleClick={(event) => onRowDoubleClick?.(row, event)}>
-        {columns.map((column, index) => <td key={index} data-pinned={column.pinned || undefined} className={typeof column.cellClass === "string" ? column.cellClass : undefined}>{cell(column, row)}</td>)}
+        {columns.map((column, index) => <td key={index} data-pinned={column.pinned || undefined} style={column.wrapText ? { whiteSpace: "pre-wrap", textOverflow: "clip", overflow: "visible" } : undefined} className={typeof column.cellClass === "string" ? column.cellClass : undefined}>{cell(column, row)}</td>)}
       </tr>)}</tbody>
     </table>
     {!rows.length ? <div className="record-table-empty">{loading ? <InlineLoading label={`Loading ${label.toLowerCase()}`} /> : "No records in this view"}</div> : null}

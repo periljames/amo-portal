@@ -19,6 +19,20 @@ def test_canonical_finding_register_read_owns_paged_url():
     assert matched.endpoint is register_pagination.get_audit_register_paged
 
 
+def test_severity_drilldown_filters_the_retained_register(db_session):
+    amo = account_models.AMO(amo_code="SEVERITY", name="Severity", login_slug="severity")
+    db_session.add(amo)
+    db_session.commit()
+    user = _user(db_session, amo_id=amo.id)
+    finding = _finding(db_session, amo_id=amo.id)
+    for severity, total in (("MINOR", 1), ("MAJOR", 0), ("CRITICAL", 0)):
+        result = register_pagination.get_audit_register_paged(domain=None, period=None,
+            severity=severity, limit=25, offset=0, db=db_session, current_user=user)
+        assert result.total == total
+        if total:
+            assert result.rows[0].finding.id == finding.id
+
+
 @pytest.mark.parametrize("status,rc,cap,expected", [
     ("OPEN", "SUBMITTED", "PENDING", "needs_review"),
     ("CANCELLED", "PENDING", "PENDING", "needs_review"),

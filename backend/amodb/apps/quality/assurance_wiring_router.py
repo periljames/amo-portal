@@ -53,14 +53,14 @@ SOURCE_REGISTRY: dict[str, SourceSpec] = {
     "TRAINING": SourceSpec("TRAINING", "Training / competence", "training_records", ("id",), ("course_code", "course_id", "user_id"), ("valid_until",), "/maintenance/{amo_code}/training/competence/people/{user_id}/course-history", "Current personnel qualification or recurrent-training evidence."),
     "SUPPLIER": SourceSpec("SUPPLIER", "Supplier", "qms_suppliers", ("id", "supplier_code", "reference"), ("supplier_code", "name", "title"), ("approval_expiry", "valid_until"), "/maintenance/{amo_code}/quality/suppliers/{id}/profile", "Approved supplier identity, scope and monitoring status."),
     "SUPPLIER_APPROVAL": SourceSpec("SUPPLIER_APPROVAL", "Supplier approval", "qms_supplier_approvals", ("id", "reference"), ("reference", "title", "supplier_id"), ("valid_until", "expiry_date", "approval_expiry"), "/maintenance/{amo_code}/quality/suppliers/{supplier_id}/approvals", "Supplier approval decision and validity period."),
-    "CALIBRATION": SourceSpec("CALIBRATION", "Calibration record", "qms_calibration_records", ("id", "certificate_number", "reference"), ("certificate_number", "reference", "equipment_id"), ("next_due_date", "due_date", "valid_until"), "/maintenance/{amo_code}/quality/equipment-calibration/{equipment_id}/calibration-history", "Traceable calibration result and next-due status."),
-    "CALIBRATION_CERTIFICATE": SourceSpec("CALIBRATION_CERTIFICATE", "Calibration certificate", "qms_calibration_certificates", ("id", "certificate_number", "reference"), ("certificate_number", "reference", "equipment_id"), ("valid_until", "expiry_date"), "/maintenance/{amo_code}/quality/equipment-calibration/{equipment_id}/certificates", "Calibration certificate and traceability evidence."),
-    "EQUIPMENT": SourceSpec("EQUIPMENT", "Equipment", "qms_equipment", ("id", "equipment_code", "asset_number"), ("equipment_code", "asset_number", "name", "title"), ("calibration_due_date", "next_due_date"), "/maintenance/{amo_code}/quality/equipment-calibration/{id}/profile", "Controlled inspection, test or measuring equipment record."),
+    "CALIBRATION": SourceSpec("CALIBRATION", "Calibration record", "qms_calibration_records", ("id", "certificate_number", "reference"), ("certificate_number", "reference", "equipment_id"), ("next_due_date", "due_date", "valid_until"), "/maintenance/{amo_code}/quality/equipment-calibration/calibration-history?record={id}", "Traceable calibration result and next-due status."),
+    "CALIBRATION_CERTIFICATE": SourceSpec("CALIBRATION_CERTIFICATE", "Calibration certificate", "qms_calibration_certificates", ("id", "certificate_number", "reference"), ("certificate_number", "reference", "equipment_id"), ("valid_until", "expiry_date"), "/maintenance/{amo_code}/quality/equipment-calibration/certificates?record={id}", "Calibration certificate and traceability evidence."),
+    "EQUIPMENT": SourceSpec("EQUIPMENT", "Equipment", "qms_equipment", ("id", "equipment_code", "asset_number"), ("equipment_code", "asset_number", "name", "title"), ("calibration_due_date", "next_due_date"), "/maintenance/{amo_code}/quality/equipment-calibration/register?record={id}", "Controlled inspection, test or measuring equipment record."),
     "RISK": SourceSpec("RISK", "Risk", "qms_risks", ("id", "reference"), ("reference", "title", "description"), ("review_due_date", "due_date"), "/maintenance/{amo_code}/quality/risk/{id}/overview", "Risk assessment, controls and treatment evidence."),
     "CHANGE": SourceSpec("CHANGE", "Change control", "qms_change_controls", ("id", "reference"), ("reference", "title", "description"), ("review_due_date", "due_date"), "/maintenance/{amo_code}/quality/change-control/{id}/overview", "Impact, risk, approval and post-implementation review record."),
-    "MANAGEMENT_REVIEW_ACTION": SourceSpec("MANAGEMENT_REVIEW_ACTION", "Management-review action", "qms_management_review_actions", ("id", "reference"), ("reference", "title", "description"), ("due_date",), "/maintenance/{amo_code}/quality/management-review/actions", "Management-review decision and assigned action."),
-    "REGULATOR_FINDING": SourceSpec("REGULATOR_FINDING", "Regulator finding", "qms_regulator_findings", ("id", "reference"), ("reference", "title", "description"), ("due_date", "target_close_date"), "/maintenance/{amo_code}/quality/external-interface/regulator-findings", "Authority finding, response and closure commitment."),
-    "EXTERNAL_COMMITMENT": SourceSpec("EXTERNAL_COMMITMENT", "External commitment", "qms_external_commitments", ("id", "reference"), ("reference", "title", "description"), ("due_date",), "/maintenance/{amo_code}/quality/external-interface/commitments", "Authority, customer or contractual commitment."),
+    "MANAGEMENT_REVIEW_ACTION": SourceSpec("MANAGEMENT_REVIEW_ACTION", "Management-review action", "qms_management_review_actions", ("id", "reference"), ("reference", "title", "description"), ("due_date",), "/maintenance/{amo_code}/quality/management-review/actions?record={id}", "Management-review decision and assigned action."),
+    "REGULATOR_FINDING": SourceSpec("REGULATOR_FINDING", "Regulator finding", "qms_regulator_findings", ("id", "reference"), ("reference", "title", "description"), ("due_date", "target_close_date"), "/maintenance/{amo_code}/quality/external-interface/regulator-findings?record={id}", "Authority finding, response and closure commitment."),
+    "EXTERNAL_COMMITMENT": SourceSpec("EXTERNAL_COMMITMENT", "External commitment", "qms_external_commitments", ("id", "reference"), ("reference", "title", "description"), ("due_date",), "/maintenance/{amo_code}/quality/external-interface/commitments?record={id}", "Authority, customer or contractual commitment."),
     "REPORT": SourceSpec("REPORT", "Quality report", "qms_report_exports", ("id", "reference"), ("reference", "title", "name"), ("valid_until",), "/maintenance/{amo_code}/quality/reports/exports", "Governed report export or management information pack."),
 }
 
@@ -221,7 +221,7 @@ def _source_label(spec: SourceSpec, record: dict[str, Any]) -> str:
         value = _string(record.get(field))
         if value and value not in values:
             values.append(value)
-    return " · ".join(values[:2]) or f"{spec.label} {record.get('id', '')}".strip()
+    return " Â· ".join(values[:2]) or f"{spec.label} {record.get('id', '')}".strip()
 
 
 def _source_valid_until(spec: SourceSpec, record: dict[str, Any]) -> date | None:
@@ -905,7 +905,7 @@ def evidence_graph(
     nodes = [{
         "id": f"control:{row.id}",
         "kind": "control",
-        "label": f"{row.control_code} · {row.title}",
+        "label": f"{row.control_code} Â· {row.title}",
         "framework": row.framework,
         "process_area": row.process_area,
         "criticality": row.criticality,

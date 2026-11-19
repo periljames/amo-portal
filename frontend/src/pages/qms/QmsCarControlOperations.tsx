@@ -582,9 +582,9 @@ const QmsCarControlOperations: React.FC<Props> = ({ amoCode, carId, control, ass
             {effectivenessAdopting ? "Establishing plan…" : "Adopt governed effectiveness plan"}
           </button>
         </div>}
-        {effectivenessResult && <p role="status">Assurance Case {effectivenessResult.case_ref} created.
-          <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality?workspace=assurance`)}>
-            Open Assurance Cases</button></p>}
+        {effectivenessResult && <p role="status">Assurance Case {effectivenessResult.case_ref} created.</p>}
+        <button className="btn" type="button" onClick={() => navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality?workspace=assurance`)}>
+          Open Assurance Cases</button>
       </section>}
       <CarInviteGovernance amoCode={amoCode} carId={carId} canManage={canManage}
         onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["qms-car-control-source", carId] }); }} />

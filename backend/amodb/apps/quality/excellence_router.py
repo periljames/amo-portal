@@ -159,6 +159,15 @@ def _overview_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], 
     params = {"amo_id": ctx.amo_id, "today": today, "due_30": due_30}
     warnings: list[dict[str, str]] = []
     queries = {
+        "open_external_findings": """
+            SELECT COUNT(*) FROM qms_regulator_findings
+            WHERE amo_id=:amo_id AND deleted_at IS NULL AND status NOT IN ('CLOSED','CANCELLED')
+        """,
+        "overdue_external_findings": """
+            SELECT COUNT(*) FROM qms_regulator_findings
+            WHERE amo_id=:amo_id AND deleted_at IS NULL AND status NOT IN ('CLOSED','CANCELLED')
+              AND due_date < :today
+        """,
         "overdue_audits": """
             SELECT COUNT(*) FROM qms_audit_schedules
             WHERE amo_id = :amo_id AND is_active IS TRUE
@@ -236,6 +245,14 @@ def _overview_metrics(db: Session, ctx: TenantContext) -> tuple[dict[str, int], 
 
 def _priority_queue(metrics: dict[str, int], amo_code: str) -> list[dict[str, Any]]:
     candidates = [
+        {
+            "id": "external-findings",
+            "label": "External / regulatory findings requiring response",
+            "count": metrics.get("open_external_findings", 0),
+            "severity": "CRITICAL" if metrics.get("overdue_external_findings", 0) else "HIGH",
+            "why": "External findings retain the issuer's classification and response deadline. An overdue response requires immediate review; closure must be accepted by the issuing authority where applicable.",
+            "path": f"/maintenance/{amo_code}/quality/external-interface/regulator-findings",
+        },
         {
             "id": "overdue-cars",
             "label": "Overdue corrective actions",

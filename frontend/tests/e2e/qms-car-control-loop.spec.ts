@@ -213,7 +213,13 @@ async function prepare(page: Page): Promise<{ evaluateCalls: () => number }> {
     }
     if (url.includes(controlLoopBase)) {
       if (url.endsWith("/evaluate") && request.method() === "POST") evaluations += 1;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(controlLoopPayload()) });
+      const refreshed = controlLoopPayload();
+      if(evaluations){
+        refreshed.milestones[1].status="SUBMITTED";
+        refreshed.milestones[1].notes="Implementation was submitted by another participant.";
+        refreshed.health.risk_score=54;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(refreshed) });
       return;
     }
     if (url.includes(`/quality/cars/${CAR_ID}/responses`)) {
@@ -296,7 +302,18 @@ test("CAR staged control loop exposes accountability, deadlines, blockers and go
   await expect(page.getByRole("heading", { name: "Control event timeline" })).toBeVisible();
   await expect(page.getByText("Deadline Change Approved")).toBeVisible();
 
+  const implementation=lifecycleSection.getByRole("row").filter({hasText:"3. Corrective actions implemented"});
+  await implementation.getByPlaceholder("Control note").fill("Unsaved independent reviewer observation.");
+  await implementation.getByPlaceholder("Evidence reference").fill("local-draft:inspection-evidence");
+  await page.getByRole("combobox",{name:"Accountable owner",exact:true}).selectOption("owner-2");
   await page.getByRole("button", { name: "Evaluate reminders & escalation" }).click();
   await expect.poll(state.evaluateCalls).toBe(1);
   await expect(page.getByText("Risk, reminder and escalation controls evaluated.")).toBeVisible();
+  await expect(implementation.getByPlaceholder("Control note")).toHaveValue("Unsaved independent reviewer observation.");
+  await expect(implementation.getByPlaceholder("Evidence reference")).toHaveValue("local-draft:inspection-evidence");
+  await expect(implementation.getByRole("combobox").last()).toHaveValue("SUBMITTED");
+  await expect(page.getByRole("combobox",{name:"Accountable owner",exact:true})).toHaveValue("owner-2");
+  await page.screenshot({path:"../.artifacts/qms-ux-20261028/control-desktop.png"});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:"../.artifacts/qms-ux-20261028/control-mobile.png",fullPage:true});
 });

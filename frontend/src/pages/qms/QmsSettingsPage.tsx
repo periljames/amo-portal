@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowRight, Hash, Bell, ShieldCheck, Workflow, Building2, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, Hash, Bell, ShieldCheck, Workflow, Building2, SlidersHorizontal, History } from "lucide-react";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest, qmsPath } from "../../services/apiClient";
 import { hasQmsRolePermission } from "../../app/routeGuards";
@@ -23,8 +23,9 @@ const sections = [
   { id: "numbering", label: "Numbering", description: "Reference rules for Quality records.", keys: ["numbering_rules"] },
   { id: "notifications", label: "Notifications", description: "Email identity, reply addresses and notification rules.", keys: [] },
   { id: "retention", label: "Retention", description: "Retention policies and governed evidence.", keys: ["retention_rules"] },
+  { id: "audit-log", label: "Activity history", description: "Inspect attributable Quality changes and retained before / after records.", keys: [] },
 ];
-const icons = { general: SlidersHorizontal, workflows: Workflow, numbering: Hash, notifications: Bell, retention: ShieldCheck };
+const icons = { general: SlidersHorizontal, workflows: Workflow, numbering: Hash, notifications: Bell, retention: ShieldCheck, "audit-log": History };
 
 export default function QmsSettingsPage() {
   const queryClient = useQueryClient();

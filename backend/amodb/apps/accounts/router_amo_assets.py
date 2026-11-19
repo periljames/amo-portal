@@ -172,6 +172,18 @@ def _materialize_asset(asset: models.AMOAsset, *, missing_detail: str) -> Path:
     try:
         return storage.materialize(asset.storage_path, expected_sha256=asset.sha256)
     except (FileNotFoundError, ValueError, OSError) as exc:
+        # Existing installations uploaded tenant assets here before shared
+        # object storage was introduced. Keep access confined to this tenant's
+        # legacy directory; never allow arbitrary database paths to be served.
+        if not asset.storage_path.startswith("s3://"):
+            legacy_root = (Path(__file__).resolve().parents[3] / "uploads" / "amo_assets" / asset.amo_id).resolve()
+            legacy_path = Path(asset.storage_path).resolve()
+            try:
+                legacy_path.relative_to(legacy_root)
+                if legacy_path.is_file() and (not asset.sha256 or hashlib.sha256(legacy_path.read_bytes()).hexdigest() == asset.sha256):
+                    return legacy_path
+            except (ValueError, OSError):
+                pass
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing_detail) from exc
 
 

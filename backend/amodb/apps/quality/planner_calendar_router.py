@@ -22,12 +22,13 @@ from .canonical_core_router import (
 from .tenant_security import (
     TenantContext,
     require_quality_permission,
+    has_quality_permission,
     set_postgres_tenant_context,
 )
 from .tenant_timezone import resolve_tenant_timezone
 
 
-_VALID_SOURCES = {"all", "audits", "cars", "training", "month", "week", "list", "agenda", "year"}
+_VALID_SOURCES = {"all", "audits", "cars", "training", "reviews", "management-review", "month", "week", "list", "agenda", "year"}
 
 
 def _as_clock(value: Any) -> str | None:
@@ -438,6 +439,31 @@ def _qms_planner_calendar(
                 "type": "ModuleNotEnabled",
             }
         )
+
+    if requested_source in {"all", "reviews", "management-review", "month", "week", "list", "agenda", "year"} and has_quality_permission(db, ctx, "qms.management_review.view"):
+        for table, entity_type, event_type in (
+            ("qms_management_reviews", "management_review", "management_review"),
+            ("qms_management_review_actions", "management_review_action", "management_review_action_due"),
+        ):
+            rows = _append_calendar_rows(db, ctx=ctx, label=table, params=params, source_errors=source_errors,
+                sql=f"""SELECT id, title, due_date AS event_date, status, owner_user_id, payload
+                    FROM {table} WHERE amo_id=:amo_id AND deleted_at IS NULL
+                    AND due_date BETWEEN :start_date AND :end_date
+                    AND status NOT IN ('DRAFT', 'CANCELLED') ORDER BY due_date, id LIMIT :limit""")
+            for row in rows:
+                payload = row.get("payload") or {}
+                if isinstance(payload, str):
+                    import json
+                    payload = json.loads(payload)
+                parent = row["id"] if entity_type == "management_review" else payload.get("review_id")
+                if not parent:
+                    continue
+                events.append(_calendar_event_row(module="management-review", entity_type=entity_type,
+                    entity_id=row["id"], title=row["title"], event_date=row["event_date"], event_type=event_type,
+                    link=f"/maintenance/{ctx.amo_code}/quality/management-review/{parent}/overview",
+                    today=today, extra={"calendar_group": "reviews", "status": row["status"],
+                        "owner_user_id": row.get("owner_user_id"), "can_reschedule": False,
+                        **({"due_state": "completed"} if row["status"] in {"CLOSED", "COMPLETED"} else {})}))
 
     visible, has_more, next_offset = _calendar_page(
         events=events,
