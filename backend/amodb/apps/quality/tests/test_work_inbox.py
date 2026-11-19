@@ -66,3 +66,35 @@ def test_inbox_summary_and_source_filter_follow_canonical_permissions(client):
     assert client.get("/work-inbox/assigned-to-me?source=risks").json()["items"][0]["record_id"] == own["id"]
     assert client.get("/work-inbox/assigned-to-me?source=audits").json()["total"] == 0
     assert client.get("/work-inbox/assigned-to-me?source=untrusted").status_code == 422
+
+
+def test_governed_due_filters_and_source_owned_next_action(client):
+    today = date.today()
+    base = risk_body()
+    for title, date_due in (
+        ("Historical overdue exposure", today - timedelta(days=4)),
+        ("Action due today", today),
+        ("Upcoming task", today + timedelta(days=2)),
+    ):
+        created = client.post(
+            "/register-workspace/risk/register",
+            json={**base, "title": title, "due_date": date_due.isoformat()},
+        )
+        assert created.status_code == 201, created.text
+    due_today = client.get("/work-inbox/assigned-to-me?source=risks&due=today")
+    assert due_today.status_code == 200, due_today.text
+    assert [row["title"] for row in due_today.json()["items"]] == ["Action due today"]
+    soon = client.get("/work-inbox/assigned-to-me?source=risks&due=next-seven")
+    assert soon.json()["total"] == 2
+    overdue = client.get("/work-inbox/assigned-to-me?source=risks&sort=priority")
+    assert overdue.json()["items"][0]["title"] == "Historical overdue exposure"
+    alpha = client.get("/work-inbox/assigned-to-me?source=risks&sort=title")
+    assert [row["title"] for row in alpha.json()["items"]] == sorted(
+        row["title"] for row in alpha.json()["items"]
+    )
+    first = overdue.json()["items"][0]
+    assert first["scope"] == "ASSIGNED"
+    assert "risk" in first["next_action"].lower()
+    assert first["route"].startswith("/maintenance/A/quality/risk/")
+    assert client.get("/work-inbox/assigned-to-me?due=wrong").status_code == 422
+    assert client.get("/work-inbox/assigned-to-me?sort=random").status_code == 422
