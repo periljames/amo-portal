@@ -158,9 +158,15 @@ def create_saved_work_view(
         raise HTTPException(status_code=422, detail="Name the view using at least two characters.")
     if body.source and body.source not in SOURCES:
         raise HTTPException(status_code=422, detail="Choose a supported Quality source.")
+    # Serialize create decisions per owner; two browser tabs must not bypass
+    # duplicate-name or maximum-view checks.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {
+            "key": f"quality-saved-views:{ctx.amo_id}:{ctx.user_id}",
+        })
     existing = db.execute(text(
         "SELECT id FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
-        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL"
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL LIMIT 20"
     ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
     if len(existing) >= 20:
         raise HTTPException(status_code=409, detail="The 20 saved-view limit has been reached; remove an unused view.")
