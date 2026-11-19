@@ -28,7 +28,10 @@ function duePresentation(item: WorkItem) {
   const now = new Date();
   const days = Math.round((Date.UTC(due.getFullYear(), due.getMonth(), due.getDate()) -
     Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
-  const finished = ["CLOSED", "COMPLETED", "COMPLETE", "DONE", "ARCHIVED", "RESOLVED"].includes(item.status.toUpperCase());
+  // Match backend work_inbox_router.TERMINAL. Watched terminal records remain visible,
+  // but never imply that an action is still overdue or approaching its deadline.
+  const terminal = ["CLOSED", "COMPLETED", "COMPLETE", "DONE", "ARCHIVED", "CANCELLED", "REJECTED", "RESOLVED", "RETIRED"];
+  const finished = terminal.includes(item.status.toUpperCase());
   const timing = finished ? "" : days < 0 ? String(-days) + " days overdue" :
     days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : "Due in " + days + " days";
   return { date: due.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
