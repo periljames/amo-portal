@@ -9,7 +9,7 @@ import "./inbox/qms-work-inbox.css";
 
 const QmsPersonalTasks = lazy(() => import("./inbox/QmsPersonalTasks"));
 const QmsConnectedWork = lazy(() => import("./inbox/QmsConnectedWork"));
-type WorkItem = { id: string; record_id: string; source: string; source_label: string; title: string; status: string; due_date: string | null; route: string; watching: boolean };
+type WorkItem = { id: string; record_id: string; source: string; source_label: string; title: string; status: string; due_date: string | null; route: string; watching: boolean; next_action?: string; scope?: string; updated_at?: string | null };
 type WorkList = { items: WorkItem[]; total: number; offset: number; limit: number; source_errors: { source: string; message: string }[] };
 type Summary = { assigned_to_me: number; approvals: number; overdue: number; completed: number; source_errors: { source: string; message: string }[] };
 const titles: Record<string, string> = {
@@ -56,6 +56,8 @@ export default function QmsWorkInboxPage() {
   const connected = params.get("mode") === "connected";
   const q = params.get("q") || "";
   const source = params.get("source") || "";
+  const dueFilter = ["today", "next-seven", "undated"].includes(params.get("due") || "") ? params.get("due")! : "all";
+  const sort = params.get("sort") === "title" ? "title" : "priority";
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const [search, setSearch] = useState(q);
   const [revision, setRevision] = useState(0);
@@ -79,10 +81,10 @@ export default function QmsWorkInboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, q]);
   const data = useQuery({
-    queryKey: ["quality-work-inbox", amoCode, view, q, source, offset, revision],
+    queryKey: ["quality-work-inbox", amoCode, view, q, source, dueFilter, sort, offset, revision],
     enabled: !personal && !connected && !!amoCode,
     queryFn: ({ signal }) => apiRequest<WorkList>(
-      qmsPath(amoCode, "/work-inbox/" + view) + "?" + new URLSearchParams({ q, source, offset: String(offset) }),
+      qmsPath(amoCode, "/work-inbox/" + view) + "?" + new URLSearchParams({ q, source, due: dueFilter, sort, offset: String(offset) }),
       { signal, cacheTtlMs: 0 },
     ),
   });
@@ -154,6 +156,17 @@ export default function QmsWorkInboxPage() {
                 onChange={event => update({ source: event.target.value, offset: null })}>
                 {sources.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select></label>
+              <label>Deadline<select value={dueFilter} onChange={event => update({ due: event.target.value, offset: null })}>
+                <option value="all">Any deadline</option>
+                <option value="today">Due today</option>
+                <option value="next-seven">Next 7 days</option>
+                <option value="undated">Not dated</option>
+              </select></label>
+              <label>Order<select value={sort} onChange={event =>
+                update({ sort: event.target.value === "title" ? "title" : null, offset: null })}>
+                <option value="priority">Urgency first</option>
+                <option value="title">Title A to Z</option>
+              </select></label>
             </div>
           </div>
           {error && <p role="alert" className="qms-inbox__notice">{error}</p>}
@@ -170,8 +183,10 @@ export default function QmsWorkInboxPage() {
               const due = duePresentation(item);
               return <article className="qms-inbox__work-card" key={item.id}>
                 <div className="qms-inbox__work-main"><div className="qms-inbox__eyebrow">
-                  <span>{item.source_label}</span><span>{item.status.replaceAll("_", " ").toLowerCase()}</span>
-                </div><h3><Link to={item.route}>{item.title || "Untitled source record"}</Link></h3></div>
+                  <span>{item.source_label}</span><span>{item.scope === "SHARED_REVIEW" ? "Shared review queue" : item.scope === "WATCHING" ? "Following" : "My assignment"}</span><span>{item.status.replaceAll("_", " ").toLowerCase()}</span>
+                </div><h3><Link to={item.route}>{item.title || "Untitled source record"}</Link></h3>
+                  {item.next_action && <p className="qms-connected-work__next"><strong>Next:</strong> {item.next_action}</p>}
+                </div>
                 <div className={"qms-inbox__due" + (due.overdue ? " qms-inbox__due--overdue" : "")}>
                   <span>{due.date}</span>{due.timing && <strong>{due.timing}</strong>}</div>
                 <div className="qms-inbox__item-actions">
@@ -186,11 +201,11 @@ export default function QmsWorkInboxPage() {
           </div>}
           {data.data && !data.data.items.length && !data.isError && <div className="qms-inbox__empty" role="status">
             <h3>{data.data.source_errors.length ? "No records available from loaded sources" :
-              offset > 0 ? "No further records" : emptyText(view, Boolean(q || source))[0]}</h3>
+              offset > 0 ? "No further records" : emptyText(view, Boolean(q || source || dueFilter !== "all"))[0]}</h3>
             <p>{data.data.source_errors.length ? "Try again when the unavailable sources have recovered." :
-              offset > 0 ? "Go back to the previous page." : emptyText(view, Boolean(q || source))[1]}</p>
-            {(q || source) && <button type="button"
-              onClick={() => { setSearch(""); update({ q: null, source: null, offset: null }); }}>Clear filters</button>}
+              offset > 0 ? "Go back to the previous page." : emptyText(view, Boolean(q || source || dueFilter !== "all"))[1]}</p>
+            {(q || source || dueFilter !== "all" || sort !== "priority") && <button type="button"
+              onClick={() => { setSearch(""); update({ q: null, source: null, due: null, sort: null, offset: null }); }}>Clear filters</button>}
           </div>}
           {!!data.data?.total && <nav className="qms-inbox__paging" aria-label="Work pages">
             <span>{offset + 1}–{Math.min(offset + data.data.items.length, data.data.total)} of {data.data.total} records</span>
