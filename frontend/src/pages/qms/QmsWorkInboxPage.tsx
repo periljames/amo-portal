@@ -8,6 +8,7 @@ import { classifyQmsPath } from "./routes/qmsRouteRegistry";
 import "./inbox/qms-work-inbox.css";
 
 const QmsPersonalTasks = lazy(() => import("./inbox/QmsPersonalTasks"));
+const QmsConnectedWork = lazy(() => import("./inbox/QmsConnectedWork"));
 type WorkItem = { id: string; record_id: string; source: string; source_label: string; title: string; status: string; due_date: string | null; route: string; watching: boolean };
 type WorkList = { items: WorkItem[]; total: number; offset: number; limit: number; source_errors: { source: string; message: string }[] };
 type Summary = { assigned_to_me: number; approvals: number; overdue: number; completed: number; source_errors: { source: string; message: string }[] };
@@ -52,6 +53,7 @@ export default function QmsWorkInboxPage() {
   const view = context.relativePath?.split("/")[1] || "assigned-to-me";
   const [params, setParams] = useSearchParams();
   const personal = params.get("mode") === "personal";
+  const connected = params.get("mode") === "connected";
   const q = params.get("q") || "";
   const source = params.get("source") || "";
   const offset = Math.max(0, Number(params.get("offset")) || 0);
@@ -78,7 +80,7 @@ export default function QmsWorkInboxPage() {
   }, [search, q]);
   const data = useQuery({
     queryKey: ["quality-work-inbox", amoCode, view, q, source, offset, revision],
-    enabled: !personal && !!amoCode,
+    enabled: !personal && !connected && !!amoCode,
     queryFn: ({ signal }) => apiRequest<WorkList>(
       qmsPath(amoCode, "/work-inbox/" + view) + "?" + new URLSearchParams({ q, source, offset: String(offset) }),
       { signal, cacheTtlMs: 0 },
@@ -113,18 +115,23 @@ export default function QmsWorkInboxPage() {
     <main className="qms-inbox" aria-label="My Quality Work">
       <header className="qms-inbox__header"><div><h1>My Quality Work</h1>
         <p>Find Quality assignments, authorised review decisions and personal follow-ups in one place.</p></div>
-        {!personal && <button type="button" onClick={() => setRevision(previous => previous + 1)}
+        {!personal && !connected && <button type="button" onClick={() => setRevision(previous => previous + 1)}
           disabled={data.isFetching || summary.isFetching}>Refresh work</button>}
       </header>
       <nav aria-label="Work areas" className="qms-inbox__area-tabs">
-        <button type="button" aria-current={!personal ? "page" : undefined}
+        <button type="button" aria-current={!personal && !connected ? "page" : undefined}
           onClick={() => update({ mode: null })}>Governed assignments</button>
         <button type="button" aria-current={personal ? "page" : undefined}
           onClick={() => update({ mode: "personal" })}>Personal to-dos</button>
+        <button type="button" aria-current={connected ? "page" : undefined}
+          onClick={() => update({ mode: "connected" })}>Connected work</button>
       </nav>
       {personal ? <Suspense fallback={<p role="status">Loading personal tasks…</p>}>
         <QmsPersonalTasks amoCode={amoCode} />
-      </Suspense> : <>
+      </Suspense> : connected ?
+        <Suspense fallback={<p role="status">Loading connected responsibilities…</p>}>
+          <QmsConnectedWork amoCode={amoCode} />
+        </Suspense> : <>
         <div className="qms-inbox__overview" aria-label="Quality work summary">
           {counts.map(([target, label, count]) => <Link to={base + target} key={target}
             className={"qms-inbox__metric" + (target === "overdue" && count ? " qms-inbox__metric--attention" : "")}>
