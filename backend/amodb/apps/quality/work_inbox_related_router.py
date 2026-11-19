@@ -64,7 +64,7 @@ SOURCES = {
           JOIN manuals m ON m.id=r.manual_id AND m.tenant_id=r.tenant_id
           WHERE r.tenant_id=:amo AND r.owner_user_id=:actor
             AND UPPER(r.status) NOT IN ('DONE','COMPLETE','COMPLETED','CLOSED','CANCELLED','REJECTED')""",
-        "route": "quality/documents/library",
+        "route": "document-control/compliance?view=reviews",
         "next_action": "Review the controlled manual in Document Control",
         "scope": "ASSIGNED",
     },
@@ -81,7 +81,7 @@ SOURCES = {
             AND c.issued_at IS NOT NULL
             AND c.acknowledgement_required IS TRUE
             AND UPPER(r.status) NOT IN ('DONE','COMPLETE','COMPLETED','ACKNOWLEDGED','CANCELLED','REJECTED')""",
-        "route": "quality/documents/distribution",
+        "route": "document-control/distribution",
         "next_action": "Acknowledge the issued controlled document",
         "scope": "ASSIGNED",
     },
