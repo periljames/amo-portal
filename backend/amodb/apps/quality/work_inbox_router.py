@@ -1,6 +1,7 @@
 """My Quality work is a projection of authoritative assignments, not unread mail."""
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -27,6 +28,17 @@ SOURCES = {
 TERMINAL = "'CLOSED','COMPLETED','COMPLETE','DONE','ARCHIVED','CANCELLED','REJECTED','RESOLVED','RETIRED'"
 COMPLETE = "'CLOSED','COMPLETED','COMPLETE','DONE','ARCHIVED','RESOLVED'"
 WATCH_TABLE = "qms_task_assignments"
+# These are navigation instructions, not authority to change the source record.
+NEXT_ACTION = {
+    "audits": "Open audit preparation or fieldwork and check outstanding requirements",
+    "cars": "Review the CAR/RCA and respond using its governed control loop",
+    "review-actions": "Supply completion evidence or review the pending verification",
+    "reviews": "Review the management review decision and linked action evidence",
+    "risks": "Update risk treatment or review the current assessment",
+    "treatments": "Record the treatment's progress and completion evidence",
+    "commitments": "Review the external obligation and record its response",
+}
+
 
 
 class WatchBody(StrictBody):
@@ -107,14 +119,14 @@ def inbox_summary(ctx: TenantContext = Depends(resolve_tenant_context), db: Sess
 
 
 @router.get("/{view}")
-def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), source: str = Query("", max_length=40), offset: int = Query(0, ge=0, le=100000),
+def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), source: str = Query("", max_length=40), due: Literal["all", "today", "next-seven", "undated"] = Query("all"), sort: Literal["priority", "title"] = Query("priority"), offset: int = Query(0, ge=0, le=100000),
           ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
     _context(db, ctx)
     if source and source not in SOURCES:
         raise HTTPException(422, "Choose a supported Quality source.")
     watches = _watches(db, ctx)
     items, errors, total, unions = [], [], 0, []
-    params = {"amo": ctx.amo_id, "actor": ctx.user_id, "q": "%" + q.lower() + "%", "limit": 30, "offset": offset}
+    params = {"amo": ctx.amo_id, "actor": ctx.user_id, "q": "%" + q.lower() + "%", "limit": 30, "offset": offset, "until": date.today() + timedelta(days=7)}
     for key, spec in SOURCES.items():
         if source and key != source: continue
         if not has_quality_permission(db, ctx, spec["permission"]): continue
@@ -128,6 +140,16 @@ def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "c
                 where = "amo_id=:amo"
                 if "deleted_at" in columns: where += " AND deleted_at IS NULL"
                 if q: where += " AND lower(COALESCE(title,'')) LIKE :q"
+                if due != "all":
+                    if due == "undated":
+                        where += f" AND {due_sql} IS NULL"
+                    elif due_sql == "NULL":
+                        continue
+                    elif due == "today":
+                        where += f" AND DATE({due_sql}) = CURRENT_DATE"
+                    elif due == "next-seven":
+                        where += f" AND DATE({due_sql}) BETWEEN CURRENT_DATE AND :until"
+
                 source_params = dict(params)
                 if view == "watching":
                     ids = [record_id for source, record_id in watches if source == key]
@@ -154,18 +176,36 @@ def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "c
                 total += db.execute(text(f"SELECT count(*) FROM {spec['table']} WHERE {where}"), source_params).scalar_one()
                 # Merge/paginate inside the database. Large offsets must not
                 # materialize every preceding assignment in application memory.
-                unions.append(f"SELECT CAST(id AS TEXT) AS id,title,CAST(status AS TEXT) AS status,DATE({due_sql}) AS due_date,'{key}' AS source FROM {spec['table']} WHERE {where}")
+                updated_sql = "updated_at" if "updated_at" in columns else "NULL"
+                unions.append(f"SELECT CAST(id AS TEXT) AS id,title,CAST(status AS TEXT) AS status,DATE({due_sql}) AS due_date,CAST({updated_sql} AS TEXT) AS updated_at,'{key}' AS source FROM {spec['table']} WHERE {where}")
                 params.update(source_params)
         except Exception:
             errors.append({"source": spec["label"], "message": "This assignment source could not be loaded. Refresh or open its register."})
     if unions:
-        rows = db.execute(text("SELECT * FROM (" + " UNION ALL ".join(unions) + ") work ORDER BY due_date ASC NULLS LAST,title,id,source LIMIT :limit OFFSET :offset"), params).mappings().all()
+        order_by = (
+            "title ASC, due_date ASC NULLS LAST, id, source" if sort == "title"
+            else "CASE WHEN due_date < CURRENT_DATE THEN 0 WHEN due_date = CURRENT_DATE THEN 1 "
+                 "WHEN due_date IS NULL THEN 3 ELSE 2 END, due_date ASC NULLS LAST, title,id,source"
+        )
+        rows = db.execute(text("SELECT * FROM (" + " UNION ALL ".join(unions) +
+                               ") work ORDER BY " + order_by + " LIMIT :limit OFFSET :offset"), params).mappings().all()
         for row in rows:
             key = row["source"]
             spec = SOURCES[key]
             record_id = str(row["id"])
-            items.append({"id": f"{key}:{record_id}", "source": key, "source_label": spec["label"], "record_id": record_id, "title": row["title"], "status": row["status"],
-                "due_date": row["due_date"], "route": f"/maintenance/{ctx.amo_code}/quality/" + spec["path"].format(id=record_id), "watching": (key, record_id) in watches})
+            status = str(row["status"] or "").upper()
+            terminal = status in {value.strip("'") for value in TERMINAL.split(",")}
+            scope = "WATCHING" if view == "watching" else "SHARED_REVIEW" if view == "approvals" else "HISTORICAL" if terminal else "ASSIGNED"
+            next_action = (
+                "Historical or closed workflow: no pending action" if terminal
+                else "Follow the source record; watching does not assign responsibility" if view == "watching"
+                else "Review and decide in the authoritative source workflow" if view == "approvals"
+                else NEXT_ACTION[key]
+            )
+            items.append({"id": f"{key}:{record_id}", "source": key, "source_label": spec["label"], "record_id": record_id,
+                "title": row["title"], "status": row["status"], "updated_at": row["updated_at"],
+                "due_date": row["due_date"], "route": f"/maintenance/{ctx.amo_code}/quality/" + spec["path"].format(id=record_id),
+                "watching": (key, record_id) in watches, "scope": scope, "next_action": next_action})
     return {"items": items, "total": total, "offset": offset, "limit": 30, "source_errors": errors, "view": view}
 
 
