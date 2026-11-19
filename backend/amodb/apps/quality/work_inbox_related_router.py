@@ -6,6 +6,7 @@ a regulated approval, acknowledgement, training outcome or external identity.
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -86,7 +87,7 @@ SOURCES = {
     },
     "provider-approvals": {
         "label": "External provider account",
-        "permission": "qms.audit.manage",
+        "permission": "qms.external.manage",
         "projection": """SELECT CAST(g.id AS TEXT) id,
               ('Review verified provider representative · ' || s.legal_name || ' · ' || i.email) title,
               'AWAITING_QUALITY_APPROVAL' status,
@@ -179,7 +180,11 @@ def related_work(
                 "title": row["title"],
                 "status": status,
                 "due_date": row["due_date"],
-                "route": f"/maintenance/{ctx.amo_code}/" + spec["route"],
+                "route": (
+                    f"/maintenance/{ctx.amo_code}/quality/external-accounts?view=accounts&grant={quote(str(row['id']), safe='')}"
+                    if row["source"] == "provider-approvals"
+                    else f"/maintenance/{ctx.amo_code}/" + spec["route"]
+                ),
                 "scope": spec["scope"],
                 "next_action": action,
                 "blocked": blocked,
