@@ -98,3 +98,38 @@ def test_governed_due_filters_and_source_owned_next_action(client):
     assert first["route"].startswith("/maintenance/A/quality/risk/")
     assert client.get("/work-inbox/assigned-to-me?due=wrong").status_code == 422
     assert client.get("/work-inbox/assigned-to-me?sort=random").status_code == 422
+
+
+def test_saved_work_filters_are_private_authorised_audited_and_removable(client):
+    preset = {
+        "title": "My audits due today",
+        "view": "assigned-to-me",
+        "q": "engine",
+        "source": "audits",
+        "due": "today",
+        "sort": "title",
+    }
+    created = client.post("/work-inbox/saved-views", json=preset)
+    assert created.status_code == 201, created.text
+    view_id = created.json()["id"]
+    assert created.json()["filters"]["source"] == "audits"
+    listing = client.get("/work-inbox/saved-views")
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["limit"] == 20
+    assert listing.json()["items"] == [{
+        "id": view_id,
+        "title": preset["title"],
+        "filters": {key: value for key, value in preset.items() if key != "title"},
+    }]
+    assert client.post("/work-inbox/saved-views", json={**preset, "title": "my AUDITS due today"}).status_code == 409
+    assert client.post("/work-inbox/saved-views", json={**preset, "source": "unknown"}).status_code == 422
+
+    client.app.dependency_overrides[review.resolve_tenant_context] = lambda: replace(
+        client.ctx, amo_id="tenant-b", user_id="outsider",
+    )
+    assert client.get("/work-inbox/saved-views").json()["items"] == []
+    assert client.delete("/work-inbox/saved-views/" + view_id).status_code == 404
+    client.app.dependency_overrides[review.resolve_tenant_context] = lambda: client.ctx
+    assert client.delete("/work-inbox/saved-views/" + view_id).json() == {"deleted": True}
+    assert client.get("/work-inbox/saved-views").json()["items"] == []
+    assert client.delete("/work-inbox/saved-views/" + view_id).status_code == 404
