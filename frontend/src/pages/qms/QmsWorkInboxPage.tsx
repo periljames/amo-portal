@@ -9,6 +9,7 @@ import "./inbox/qms-work-inbox.css";
 
 const QmsPersonalTasks = lazy(() => import("./inbox/QmsPersonalTasks"));
 const QmsConnectedWork = lazy(() => import("./inbox/QmsConnectedWork"));
+const QmsDailyFocus = lazy(() => import("./inbox/QmsDailyFocus"));
 type WorkItem = { id: string; record_id: string; source: string; source_label: string; title: string; status: string; due_date: string | null; route: string; watching: boolean; next_action?: string; scope?: string; updated_at?: string | null };
 type WorkList = { items: WorkItem[]; total: number; offset: number; limit: number; source_errors: { source: string; message: string }[] };
 type Summary = { assigned_to_me: number; approvals: number; overdue: number; completed: number; source_errors: { source: string; message: string }[] };
@@ -54,6 +55,7 @@ export default function QmsWorkInboxPage() {
   const [params, setParams] = useSearchParams();
   const personal = params.get("mode") === "personal";
   const connected = params.get("mode") === "connected";
+  const focused = params.get("mode") === "focus";
   const q = params.get("q") || "";
   const source = params.get("source") || "";
   const dueFilter = ["today", "next-seven", "undated"].includes(params.get("due") || "") ? params.get("due")! : "all";
@@ -82,7 +84,7 @@ export default function QmsWorkInboxPage() {
   }, [search, q]);
   const data = useQuery({
     queryKey: ["quality-work-inbox", amoCode, view, q, source, dueFilter, sort, offset, revision],
-    enabled: !personal && !connected && !!amoCode,
+    enabled: !personal && !connected && !focused && !!amoCode,
     queryFn: ({ signal }) => apiRequest<WorkList>(
       qmsPath(amoCode, "/work-inbox/" + view) + "?" + new URLSearchParams({ q, source, due: dueFilter, sort, offset: String(offset) }),
       { signal, cacheTtlMs: 0 },
@@ -90,7 +92,7 @@ export default function QmsWorkInboxPage() {
   });
   const summary = useQuery({
     queryKey: ["quality-work-inbox-summary", amoCode, revision],
-    enabled: !personal && !!amoCode,
+    enabled: !personal && !connected && !focused && !!amoCode,
     queryFn: ({ signal }) => apiRequest<Summary>(qmsPath(amoCode, "/work-inbox/summary"), { signal, cacheTtlMs: 0 }),
   });
   async function toggle(item: WorkItem) {
@@ -117,11 +119,13 @@ export default function QmsWorkInboxPage() {
     <main className="qms-inbox" aria-label="My Quality Work">
       <header className="qms-inbox__header"><div><h1>My Quality Work</h1>
         <p>Find Quality assignments, authorised review decisions and personal follow-ups in one place.</p></div>
-        {!personal && !connected && <button type="button" onClick={() => setRevision(previous => previous + 1)}
+        {!personal && !connected && !focused && <button type="button" onClick={() => setRevision(previous => previous + 1)}
           disabled={data.isFetching || summary.isFetching}>Refresh work</button>}
       </header>
       <nav aria-label="Work areas" className="qms-inbox__area-tabs">
-        <button type="button" aria-current={!personal && !connected ? "page" : undefined}
+        <button type="button" aria-current={focused ? "page" : undefined}
+          onClick={() => update({ mode: "focus" })}>Today & next steps</button>
+        <button type="button" aria-current={!personal && !connected && !focused ? "page" : undefined}
           onClick={() => update({ mode: null })}>Governed assignments</button>
         <button type="button" aria-current={personal ? "page" : undefined}
           onClick={() => update({ mode: "personal" })}>Personal to-dos</button>
@@ -130,7 +134,10 @@ export default function QmsWorkInboxPage() {
       </nav>
       {personal ? <Suspense fallback={<p role="status">Loading personal tasks…</p>}>
         <QmsPersonalTasks amoCode={amoCode} />
-      </Suspense> : connected ?
+      </Suspense> : focused ?
+        <Suspense fallback={<p role="status">Loading today's priorities…</p>}>
+          <QmsDailyFocus amoCode={amoCode} />
+        </Suspense> : connected ?
         <Suspense fallback={<p role="status">Loading connected responsibilities…</p>}>
           <QmsConnectedWork amoCode={amoCode} />
         </Suspense> : <>
