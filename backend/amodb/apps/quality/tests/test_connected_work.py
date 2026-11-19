@@ -87,7 +87,7 @@ def test_connected_document_review_never_exposes_others_manuscripts(client, monk
 def test_connected_provider_approval_is_shared_not_individually_assigned(client, monkeypatch):
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
-    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.audit.manage")
+    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.external.manage")
     _table(client, "external_tenant_grants (id text,amo_id text,identity_id text,tenant_provider_id text,status text)")
     _table(client, "external_identities (id text,email text,verified_at timestamp)")
     _table(client, "external_tenant_providers (id text,amo_id text,supplier_id int)")
@@ -119,7 +119,9 @@ def test_connected_provider_approval_is_shared_not_individually_assigned(client,
     assert data["items"][0]["record_id"] == "g1"
     assert "private@example.test" not in str(data)
     assert data["items"][0]["due_date"] is None
-    assert data["items"][0]["route"].endswith("/quality/external-accounts?view=accounts")
+    assert data["items"][0]["route"].endswith("/quality/external-accounts?view=accounts&grant=g1")
+    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.audit.manage")
+    assert client.get("/work-inbox/related?source=provider-approvals").json()["total"] == 0
 
 
 def test_connected_unavailable_source_is_error_not_zero_work(client, monkeypatch):
