@@ -57,6 +57,7 @@ export default function ExternalProviderQualityPage() {
   const [query, setQuery] = useSearchParams();
   const section = ["accounts", "invite", "reviews", "history"].includes(query.get("view") || "") ? query.get("view")! : "accounts";
   const supplierFilter = query.get("supplier");
+  const focusedGrant = query.get("grant");
   const [stateFilter, setStateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const setSection = (view: string) => { const next = new URLSearchParams(query); next.set("view", view); setQuery(next); setEditing(null); setError(""); };
@@ -212,6 +213,13 @@ export default function ExternalProviderQualityPage() {
       setError(cause instanceof Error ? cause.message : "Account operation failed");
     } finally { setBusy(false); }
   }
+  useEffect(() => {
+    if (focusedGrant && section === "accounts" && canReviewAccounts) {
+      void loadDeliveryHistory(focusedGrant);
+    }
+    // Grant deep links select only a permitted tenant account via the server.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedGrant, section, canReviewAccounts, amoCode]);
   useEffect(()=>{
     if(!editing) return;
     const panel=document.getElementById("vendor-privilege-editor");
@@ -240,7 +248,7 @@ export default function ExternalProviderQualityPage() {
       </section>
     </div></div>
   </DepartmentLayout>;
-  const filtered=items.filter(i=>(!supplierFilter || String(i.supplier_id)===supplierFilter) && (!stateFilter || i.grant_state===stateFilter)).filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
+  const filtered=items.filter(i=>(!focusedGrant || i.grant_id===focusedGrant) && (!supplierFilter || String(i.supplier_id)===supplierFilter) && (!stateFilter || i.grant_state===stateFilter)).filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
     .toLowerCase().includes(search.toLowerCase()));
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="vendor-portal vendor-quality-workspace">
     <div className="vendor-shell">
@@ -311,7 +319,7 @@ export default function ExternalProviderQualityPage() {
           <label className="vendor-field"><span>Find representative or provider</span>
             <input type="search" value={search} onChange={(e)=>setSearch(e.target.value)}/></label></div>
         <div className="vendor-account-filters"><label className="vendor-field"><span>Account state</span><select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option value="">All states</option>{["PENDING","ACTIVE","SUSPENDED","REVOKED"].map(v=><option key={v} value={v}>{LABEL(v)}</option>)}</select></label>
-        {supplierFilter && <button type="button" onClick={()=>{const next=new URLSearchParams(query);next.delete("supplier");setQuery(next);}}>Show all providers</button>}
+        {(supplierFilter || focusedGrant) && <button type="button" onClick={()=>{const next=new URLSearchParams(query);next.delete("supplier");next.delete("grant");setQuery(next);}}>Show all providers and accounts</button>}
         {manager && <label className="vendor-field vendor-decision-reason"><span>Reason for the next access decision</span><textarea value={reason} onChange={e=>setReason(e.target.value)} minLength={8} rows={2} placeholder="Record why you are approving, restricting or revoking access." /></label>}</div>
         {loading && <p role="status">Loading provider accounts...</p>}
         <div className="vendor-table-wrap"><table className="vendor-table">
