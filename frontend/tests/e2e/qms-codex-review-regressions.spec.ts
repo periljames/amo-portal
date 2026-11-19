@@ -198,23 +198,87 @@ test("Inbox preserves notification receipt time without treating created_at as a
   await expect(task.locator('[col-id="due"]')).toHaveClass(/is-neutral/);
 });
 
-test("Personal to-dos save reminders, complete and reopen", async ({ page }) => {
-  await prepare(page, route => emptyRegister(route));
-  let tasks: Array<Record<string, unknown>> = [];
-  await page.route("**/tasks/my", route => json(route, tasks));
-  await page.route("**/tasks/personal{,/**}", async route => {
-    const values = route.request().postDataJSON() as Record<string, unknown>;
-    const task = { ...values, id: "personal-1", amo_id: "amo-a", owner_user_id: "quality-user-a", entity_type: "quality_personal", status: values.status || "OPEN", metadata_json: { reminder_at: values.reminder_at }, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-    tasks = [task];
-    return json(route, task);
+test("Quality work shows authorised counts, overdue urgency, source filtering and shared approval semantics", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 1, overdue: 1, completed: 0, source_errors: [],
+    });
+    if (path.endsWith("/work-inbox/assigned-to-me")) {
+      const source = url.searchParams.get("source");
+      const items = source && source !== "audits" ? [] : [{
+        id: "audits:audit-1", record_id: "audit-1", source: "audits",
+        source_label: "Audit", title: "Audit finding follow-up", status: "CAP_OPEN",
+        due_date: "2020-01-01", route: "/maintenance/tenant-a/quality/audits/audit-1/setup",
+        watching: false,
+      }];
+      return json(route, { items, total: items.length, offset: 0, limit: 30, source_errors: [] });
+    }
+    if (path.endsWith("/work-inbox/approvals")) return json(route, {
+      items: [], total: 0, offset: 0, limit: 30, source_errors: [],
+    });
+    return emptyRegister(route);
   });
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  await page.getByText("Personal to-dos", { exact: true }).click();
-  await page.getByRole("button", { name: "New to-do", exact: true }).click();
-  await page.getByLabel("Task", { exact: true }).fill("Review new evidence");
-  await page.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");
-  await page.getByRole("button", { name: "Save task", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My Quality Work" })).toBeVisible();
+  await expect(page.getByText("Audit finding follow-up", { exact: true })).toBeVisible();
+  await expect(page.getByText(/days overdue/)).toBeVisible();
+  const open = page.getByRole("link", { name: "Open workflow" });
+  await expect(open).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/audit-1/setup");
+  await expect(page.locator(".qms-inbox__metric--attention")).toContainText("Overdue");
+  await page.getByLabel("Quality source").selectOption("cars");
+  await expect(page.getByText("Audit finding follow-up")).toHaveCount(0);
+  await expect(page.getByText("No matching work")).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.getByText("Audit finding follow-up", { exact: true })).toBeVisible();
+  await page.locator(".qms-inbox__metric").filter({ hasText: "Approvals" }).click();
+  await expect(page.getByRole("heading", { name: "Management approvals" })).toBeVisible();
+  await expect(page.getByText(/shared management queue/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No pending management decisions" })).toBeVisible();
+});
+
+test("Personal to-dos save reminders, complete, reopen and fit responsive viewports", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (url.pathname.includes("/work-inbox/")) return json(route, {
+      items: [], total: 0, offset: 0, limit: 30, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  let tasks: Array<Record<string, unknown>> = [];
+  await page.route("**/tasks/personal**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET") {
+      const completed = url.searchParams.get("status") === "all";
+      const search = (url.searchParams.get("q") || "").toLowerCase();
+      const matching = tasks.filter(task => (completed || !["DONE", "CANCELLED"].includes(String(task.status)))
+        && String(task.title).toLowerCase().includes(search));
+      const limit = Number(url.searchParams.get("limit") || 25);
+      const offset = Number(url.searchParams.get("offset") || 0);
+      return json(route, { items: matching.slice(offset, offset + limit), total: matching.length, offset, limit });
+    }
+    const values = request.postDataJSON() as Record<string, unknown>;
+    const id = request.method() === "POST" ? "personal-1" : url.pathname.split("/").pop();
+    const previous = tasks.find(task => task.id === id);
+    const task = { ...previous, ...values, id, amo_id: "amo-a", owner_user_id: "quality-user-a",
+      entity_type: "quality_personal", status: values.status || previous?.status || "OPEN",
+      metadata_json: { reminder_at: values.reminder_at },
+      created_at: previous?.created_at || new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
+    tasks = [task];
+    return json(route, task, request.method() === "POST" ? 201 : 200);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Personal to-dos" }).click();
   const personal = page.getByRole("region", { name: "Personal to-do list" });
+  await expect(personal.getByText("Plan your first follow-up")).toBeVisible();
+  await personal.getByRole("button", { name: "New to-do" }).click();
+  await personal.getByLabel("Task", { exact: true }).fill("Review new evidence");
+  await personal.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");
+  await personal.getByRole("button", { name: "Save task" }).click();
   await expect(personal.getByText("Review new evidence", { exact: true })).toBeVisible();
   expect(tasks[0].metadata_json).toMatchObject({ reminder_at: new Date("2026-10-12T09:30").toISOString() });
   await personal.getByRole("button", { name: "Complete", exact: true }).click();
@@ -223,11 +287,13 @@ test("Personal to-dos save reminders, complete and reopen", async ({ page }) => 
   await personal.getByRole("button", { name: "Reopen", exact: true }).click();
   await expect(personal.getByRole("button", { name: "Complete", exact: true })).toBeVisible();
   expect(tasks[0].status).toBe("OPEN");
-  for (const width of [800, 390]) {
+  for (const width of [1920, 834, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    const bounds = await personal.locator(".qms-workspace-grid").boundingBox();
+    const bounds = await personal.boundingBox();
     expect(bounds).not.toBeNull();
-    expect(bounds!.width).toBeLessThanOrEqual(width);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 2);
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(documentWidth).toBeLessThanOrEqual(width + 2);
   }
 });
 
