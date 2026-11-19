@@ -90,6 +90,9 @@ jobs:
           amodb/apps/quality/tests/test_audit_events.py
           amodb/apps/quality/tests/test_register_pagination.py
           amodb/apps/quality/tests/test_task_integrations.py
+          amodb/apps/quality/tests/test_work_inbox.py
+          amodb/apps/tasks/tests/test_task_services.py
+          amodb/apps/tasks/tests/test_task_runner_email_logs.py
           amodb/apps/quality/tests/test_evidence_pack_exports.py
           amodb/apps/quality/tests/test_excellence_contract.py
           amodb/apps/quality/tests/test_assurance_wiring_contract.py
