@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_db, get_read_db, get_write_db
 from amodb.security import SECRET_KEY
+from amodb.apps.notifications import service as notification_service
 
 from . import models
 from .audit_checklist_execution_models import QualityAuditChecklistExecutionGovernance
@@ -181,6 +182,7 @@ class ExternalParticipantCreate(BaseModel):
     permissions: list[str] | None = None
     assurance_level: Literal["EMAIL_LINK", "MFA", "PASSKEY"] = "EMAIL_LINK"
     expires_at: datetime
+    send_invitation_email: bool = False
 
 
 class FindingReleaseCreate(BaseModel):
@@ -266,7 +268,7 @@ def _create_external_participant(
     db: Session = Depends(get_write_db),
 ) -> dict[str, Any]:
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
-    _audit_for_tenant(db, amo_id=ctx.amo_id, audit_id=audit_id)
+    audit = _audit_for_tenant(db, amo_id=ctx.amo_id, audit_id=audit_id)
     now = _utcnow()
     expires_at = payload.expires_at.astimezone(timezone.utc) if payload.expires_at.tzinfo else payload.expires_at.replace(tzinfo=timezone.utc)
     if expires_at <= now:
@@ -340,7 +342,69 @@ def _create_external_participant(
     db.refresh(participant)
 
     access_url = f"/qms/audit-access/{quote(raw_token, safe='')}"
-    return _participant_payload(participant, include_access_url=access_url)
+    result = _participant_payload(participant, include_access_url=access_url)
+    if payload.send_invitation_email:
+        base = os.getenv("PORTAL_FRONTEND_BASE_URL", "").strip().rstrip("/")
+        parsed = urlsplit(base)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            result["email_delivery"] = {
+                "email_status": "NOT_SENT",
+                "email_delivery_status": "BLOCKED",
+                "email_log_id": None,
+                "provider_message_id": None,
+                "sending_mode": None,
+                "detail": "A public HTTPS PORTAL_FRONTEND_BASE_URL is required before sending external audit invitations.",
+            }
+        else:
+            # The raw token stays in the email body and one-time API response,
+            # never in the persisted EmailLog context/audit fields.
+            try:
+                log = notification_service.send_email(
+                    template_key="qms_audit_participant_invite",
+                    recipient=email,
+                    subject=f"Controlled audit access · {audit.audit_ref}",
+                    context={
+                        "recipient_name": payload.display_name.strip(),
+                        "audit_ref": audit.audit_ref,
+                        "audit_title": audit.title,
+                        "participant_role": payload.role.strip(),
+                        "expires_at": expires_at.isoformat(),
+                        "action_url": base + access_url,
+                        "message": "You have been granted purpose-bound access to this audit.",
+                    },
+                    correlation_id=f"audit-access:{grant.id}",
+                    email_class="ESSENTIAL",
+                    amo_id=ctx.amo_id,
+                    db=db,
+                    audit_context={
+                        "purpose": "audit-external-participant-invite",
+                        "audit_id": str(audit_id),
+                        "participant_id": str(participant.id),
+                        "grant_id": str(grant.id),
+                    },
+                )
+                db.commit()
+                status_value = str(getattr(log.status, "value", log.status))
+                delivery = (log.context_json or {}).get("_delivery") or {}
+                result["email_delivery"] = {
+                    "email_status": status_value,
+                    "email_delivery_status": str(log.delivery_status or "UNKNOWN"),
+                    "email_log_id": str(log.id),
+                    "provider_message_id": log.provider_message_id,
+                    "sending_mode": delivery.get("mode"),
+                    "detail": "Provider acceptance is not proof of recipient-server delivery or inbox placement.",
+                }
+            except Exception:
+                db.rollback()
+                result["email_delivery"] = {
+                    "email_status": "UNKNOWN",
+                    "email_delivery_status": "UNKNOWN",
+                    "email_log_id": None,
+                    "provider_message_id": None,
+                    "sending_mode": None,
+                    "detail": "The audit participant was created, but email transport could not be confirmed. Copy the access link now.",
+                }
+    return result
 
 
 @router.post("/audits/{audit_id}/external-participants/{participant_id}/revoke")
