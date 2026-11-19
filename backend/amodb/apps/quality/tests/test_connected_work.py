@@ -77,7 +77,7 @@ def test_connected_document_review_never_exposes_others_manuscripts(client, monk
     assert result["items"][0]["record_id"] == "a"
     assert "Quality Manual" in result["items"][0]["title"]
     assert "Private Manual" not in str(result)
-    assert result["items"][0]["route"].endswith("/quality/documents/library")
+    assert result["items"][0]["route"].endswith("/document-control/compliance?view=reviews")
     monkeypatch.setattr(related, "has_quality_permission", lambda *args: False)
     denied = client.get("/work-inbox/related?source=document-reviews").json()
     assert denied["total"] == 0
