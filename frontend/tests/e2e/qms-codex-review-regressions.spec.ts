@@ -341,7 +341,7 @@ test("Connected work is scoped, next-action based and responsive without exposin
     return emptyRegister(route);
   });
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me?mode=connected", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: "Connected work" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connected work", exact: true })).toBeVisible();
   const area = page.getByRole("region", { name: "Connected Quality work" });
   await expect(area.getByRole("heading", { name: "Connected responsibilities" })).toBeVisible();
   await expect(area.getByText("Assigned to you").first()).toBeVisible();
@@ -564,8 +564,8 @@ test("Quality work saved filters persist per user and apply without changing gov
   const saved = page.getByRole("region", { name: "My saved Quality work views" });
   await expect(saved.getByText("My saved filters")).toBeVisible();
   await page.getByLabel("Quality source").selectOption("audits");
-  await page.getByLabel("Deadline").selectOption("today");
-  await page.getByLabel("Order").selectOption("title");
+  await page.getByLabel("Deadline", { exact: true }).selectOption("today");
+  await page.getByLabel("Order", { exact: true }).selectOption("title");
   await saved.getByLabel("Save current filters as").fill("My audit deadlines");
   await saved.getByRole("button", { name: "Save view" }).click();
   await expect(saved.getByText('Saved "My audit deadlines" for your own account.')).toBeVisible();
@@ -577,8 +577,8 @@ test("Quality work saved filters persist per user and apply without changing gov
   await saved.locator("select").selectOption("saved-view-1");
   await saved.getByRole("button", { name: "Apply filters" }).click();
   await expect(page.getByLabel("Quality source")).toHaveValue("audits");
-  await expect(page.getByLabel("Deadline")).toHaveValue("today");
-  await expect(page.getByLabel("Order")).toHaveValue("title");
+  await expect(page.getByLabel("Deadline", { exact: true })).toHaveValue("today");
+  await expect(page.getByLabel("Order", { exact: true })).toHaveValue("title");
   await saved.getByRole("button", { name: "Remove saved view" }).click();
   await expect(saved.getByText("Saved view removed.")).toBeVisible();
   await expect(saved.getByRole("option", { name: "My audit deadlines" })).toHaveCount(0);
