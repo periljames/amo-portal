@@ -85,6 +85,26 @@ SOURCES = {
         "next_action": "Acknowledge the issued controlled document",
         "scope": "ASSIGNED",
     },
+    "provider-invitations": {
+        "label": "Provider invitation",
+        "permission": "qms.external.manage",
+        "projection": """SELECT CAST(g.id AS TEXT) id,
+              ('Confirm external representative invitation · ' || s.legal_name || ' · ' || i.email) title,
+              'PENDING_VERIFICATION' status,
+              (SELECT DATE(t.expires_at) FROM external_identity_tokens t
+               WHERE t.amo_id=g.amo_id AND t.grant_id=g.id AND t.kind='INVITE'
+                 AND t.used_at IS NULL AND t.revoked_at IS NULL
+               ORDER BY t.expires_at DESC LIMIT 1) due_date
+          FROM external_tenant_grants g
+          JOIN external_identities i ON i.id=g.identity_id
+          JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=g.amo_id
+          JOIN procurement_suppliers s ON s.id=p.supplier_id AND s.amo_id=p.amo_id
+          WHERE g.amo_id=:amo AND UPPER(g.status)='PENDING'
+            AND i.verified_at IS NULL""",
+        "route": "quality/external-accounts?view=accounts",
+        "next_action": "Inspect invitation receipt, verify delivery and resend only when safe",
+        "scope": "SHARED_REVIEW",
+    },
     "provider-approvals": {
         "label": "External provider account",
         "permission": "qms.external.manage",
@@ -182,7 +202,7 @@ def related_work(
                 "due_date": row["due_date"],
                 "route": (
                     f"/maintenance/{ctx.amo_code}/quality/external-accounts?view=accounts&grant={quote(str(row['id']), safe='')}"
-                    if row["source"] == "provider-approvals"
+                    if row["source"] in {"provider-approvals", "provider-invitations"}
                     else f"/maintenance/{ctx.amo_code}/" + spec["route"]
                 ),
                 "scope": spec["scope"],
