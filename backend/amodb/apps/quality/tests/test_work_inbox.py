@@ -51,3 +51,18 @@ def test_approvals_and_watch_records_preserve_tenant_and_permission_scope(client
     client.app.dependency_overrides[review.resolve_tenant_context] = lambda: replace(client.ctx, amo_id="tenant-b", user_id="outsider")
     assert client.post("/work-inbox/watch", json={"source": "reviews", "record_id": "review-a"}).status_code == 404
     assert client.get("/work-inbox/assigned-to-me").json()["total"] == 0
+
+
+def test_inbox_summary_and_source_filter_follow_canonical_permissions(client):
+    body = {**risk_body(), "due_date": (date.today() - timedelta(days=1)).isoformat()}
+    own = client.post("/register-workspace/risk/register", json=body).json()
+    client.post("/register-workspace/risk/register", json={**body, "owner_user_id": "peer", "title": "Another owner's risk"})
+    summary = client.get("/work-inbox/summary")
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["source_errors"] == []
+    assert summary.json()["assigned_to_me"] == 1
+    assert summary.json()["overdue"] == 1
+    assert summary.json()["completed"] == 0
+    assert client.get("/work-inbox/assigned-to-me?source=risks").json()["items"][0]["record_id"] == own["id"]
+    assert client.get("/work-inbox/assigned-to-me?source=audits").json()["total"] == 0
+    assert client.get("/work-inbox/assigned-to-me?source=untrusted").status_code == 422

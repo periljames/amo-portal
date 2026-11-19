@@ -57,14 +57,64 @@ def _source_row(db, ctx, source, record_id):
     return row
 
 
+@router.get("/summary")
+def inbox_summary(ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
+    """Count authorised work without loading all rows or claiming group approvals are individually assigned."""
+    _context(db, ctx)
+    counts = {"assigned_to_me": 0, "approvals": 0, "overdue": 0, "completed": 0}
+    errors = []
+    for key, spec in SOURCES.items():
+        if not has_quality_permission(db, ctx, spec["permission"]):
+            continue
+        try:
+            with db.begin_nested():
+                columns = _shape(db, spec)
+                owners = [name for name in spec["owners"] if name in columns]
+                owner_terms = [f"{name}=:actor" for name in owners]
+                if key == "audits" and "supporting_auditor_user_ids" in columns:
+                    owner_terms.append(
+                        "CAST(supporting_auditor_user_ids AS jsonb) @> jsonb_build_array(CAST(:actor AS text))"
+                        if db.bind.dialect.name == "postgresql"
+                        else "EXISTS (SELECT 1 FROM json_each(supporting_auditor_user_ids) WHERE value=:actor)"
+                    )
+                own = "(" + " OR ".join(owner_terms) + ")" if owner_terms else "1=0"
+                status = "UPPER(CAST(status AS TEXT))"
+                due = next((name for name in spec["due"] if name in columns), None)
+                overdue = f"DATE({due}) < CURRENT_DATE" if due else "1=0"
+                approval = (
+                    f"{status} IN (" + ",".join(f"'{value}'" for value in spec["approval_statuses"]) + ")"
+                    if spec.get("approval_permission") and has_quality_permission(db, ctx, spec["approval_permission"])
+                    else "1=0"
+                )
+                def count_when(condition: str) -> str:
+                    return f"COALESCE(SUM(CASE WHEN {condition} THEN 1 ELSE 0 END), 0)"
+                where = "amo_id=:amo" + (" AND deleted_at IS NULL" if "deleted_at" in columns else "")
+                values = db.execute(text(
+                    "SELECT " +
+                    count_when(f"{own} AND {status} NOT IN ({TERMINAL})") + " AS assigned_to_me, " +
+                    count_when(approval) + " AS approvals, " +
+                    count_when(f"{own} AND {status} NOT IN ({TERMINAL}) AND {overdue}") + " AS overdue, " +
+                    count_when(f"{own} AND {status} IN ({COMPLETE})") + " AS completed " +
+                    f"FROM {spec['table']} WHERE {where}"
+                ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().one()
+                for name in counts:
+                    counts[name] += int(values[name] or 0)
+        except Exception:
+            errors.append({"source": spec["label"], "message": "This source could not be counted."})
+    return {**counts, "source_errors": errors}
+
+
 @router.get("/{view}")
-def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), offset: int = Query(0, ge=0, le=100000),
+def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), source: str = Query("", max_length=40), offset: int = Query(0, ge=0, le=100000),
           ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
     _context(db, ctx)
+    if source and source not in SOURCES:
+        raise HTTPException(422, "Choose a supported Quality source.")
     watches = _watches(db, ctx)
     items, errors, total, unions = [], [], 0, []
     params = {"amo": ctx.amo_id, "actor": ctx.user_id, "q": "%" + q.lower() + "%", "limit": 30, "offset": offset}
     for key, spec in SOURCES.items():
+        if source and key != source: continue
         if not has_quality_permission(db, ctx, spec["permission"]): continue
         if view == "approvals" and (not spec.get("approval_permission") or not has_quality_permission(db, ctx, spec["approval_permission"])): continue
         try:
