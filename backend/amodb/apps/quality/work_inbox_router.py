@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 from .management_review_router import StrictBody, _payload, _public, _save
+from .work_inbox_related_router import router as related_work_router
 from .tenant_security import TenantContext, assert_quality_permission, has_quality_permission, resolve_tenant_context, set_postgres_tenant_context
 
 router = APIRouter(prefix="/work-inbox", tags=["My Quality Work"])
+router.include_router(related_work_router)  # Static /related route must precede /{view}.
 SOURCES = {
     "audits": {"table": "qms_audits", "label": "Audit", "permission": "qms.audit.view", "owners": ["lead_auditor_user_id", "observer_auditor_user_id", "assistant_auditor_user_id", "auditee_user_id"], "due": ["planned_end", "planned_start"], "path": "audits/{id}/setup"},
     "cars": {"table": "quality_cars", "label": "CAR / CAPA", "permission": "qms.car.view", "owners": ["assigned_to_user_id"], "due": ["due_date"], "path": "cars/{id}/overview", "approval_permission": "qms.car.manage", "approval_statuses": ["PENDING_VERIFICATION"]},
