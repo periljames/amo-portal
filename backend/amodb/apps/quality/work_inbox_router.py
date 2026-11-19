@@ -140,7 +140,8 @@ def list_saved_work_views(
         "ORDER BY title, id LIMIT 20"
     ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
     return {"items": [
-        {"id": str(row["id"]), "title": str(row["title"]), "filters": _payload(row)}
+        {"id": str(row["id"]), "title": str(row["title"]),
+         "filters": {name: _payload(row).get(name) for name in ("view", "q", "source", "due", "sort")}}
         for row in rows
     ], "limit": 20}
 
