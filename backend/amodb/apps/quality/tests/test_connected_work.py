@@ -138,3 +138,34 @@ def test_connected_unavailable_source_is_error_not_zero_work(client, monkeypatch
     assert data["total"] == 0
     assert data["source_errors"]
     assert data["source_errors"][0]["source"] == "Document acknowledgement"
+
+
+def test_unverified_external_invites_project_expiry_without_dropping_tenant_scope(client, monkeypatch):
+    monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
+    monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
+    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.external.manage")
+    _table(client, "external_tenant_grants (id text,amo_id text,identity_id text,tenant_provider_id text,status text)")
+    _table(client, "external_identities (id text,email text,verified_at timestamp)")
+    _table(client, "external_tenant_providers (id text,amo_id text,supplier_id int)")
+    _table(client, "procurement_suppliers (id int,amo_id text,legal_name text)")
+    _table(client, "external_identity_tokens (id text,amo_id text,grant_id text,kind text,expires_at timestamp,used_at timestamp,revoked_at timestamp)")
+    client.connection.execute(text("INSERT INTO procurement_suppliers VALUES (1,'tenant-a','Provider A'),(2,'tenant-b','Private Provider')"))
+    client.connection.execute(text("INSERT INTO external_tenant_providers VALUES ('p1','tenant-a',1),('p2','tenant-b',2)"))
+    client.connection.execute(text("""INSERT INTO external_identities VALUES
+         ('i1','unverified@example.test',NULL), ('i2','foreign@example.test',NULL), ('i3','verified@example.test','2026-11-18')"""))
+    client.connection.execute(text("""INSERT INTO external_tenant_grants VALUES
+         ('g1','tenant-a','i1','p1','PENDING'),
+         ('g2','tenant-b','i2','p2','PENDING'),
+         ('g3','tenant-a','i3','p1','PENDING')"""))
+    due = (date.today() - timedelta(days=1)).isoformat()
+    client.connection.execute(text("INSERT INTO external_identity_tokens VALUES ('t1','tenant-a','g1','INVITE',:due,NULL,NULL)"), {"due": due})
+    client.connection.commit()
+    data = client.get("/work-inbox/related?source=provider-invitations").json()
+    assert data["source_errors"] == []
+    assert data["total"] == 1
+    assert data["items"][0]["record_id"] == "g1"
+    assert data["items"][0]["due_date"] == due
+    assert data["items"][0]["scope"] == "SHARED_REVIEW"
+    assert "grant=g1" in data["items"][0]["route"]
+    assert "foreign@example.test" not in str(data)
+    assert client.get("/work-inbox/related?source=provider-invitations&category=overdue").json()["total"] == 1
