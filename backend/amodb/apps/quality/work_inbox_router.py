@@ -134,8 +134,8 @@ def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "c
         try:
             with db.begin_nested():
                 columns = _shape(db, spec)
-                due = next((v for v in spec["due"] if v in columns), None)
-                due_sql = due or "NULL"
+                source_due = next((v for v in spec["due"] if v in columns), None)
+                due_sql = source_due or "NULL"
                 status_sql = "UPPER(CAST(status AS TEXT))"
                 where = "amo_id=:amo"
                 if "deleted_at" in columns: where += " AND deleted_at IS NULL"
@@ -171,8 +171,8 @@ def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "c
                     where += " AND (" + " OR ".join(owner_terms) + ")"
                     where += f" AND {status_sql} IN ({COMPLETE})" if view == "completed" else f" AND {status_sql} NOT IN ({TERMINAL})"
                     if view == "overdue":
-                        if not due: continue
-                        where += f" AND DATE({due}) < CURRENT_DATE"
+                        if not source_due: continue
+                        where += f" AND DATE({source_due}) < CURRENT_DATE"
                 total += db.execute(text(f"SELECT count(*) FROM {spec['table']} WHERE {where}"), source_params).scalar_one()
                 # Merge/paginate inside the database. Large offsets must not
                 # materialize every preceding assignment in application memory.
