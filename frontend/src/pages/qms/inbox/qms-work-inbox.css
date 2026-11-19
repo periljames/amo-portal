@@ -1,0 +1,60 @@
+/* Scoped to the Quality Work Inbox; governed source pages retain their own styles. */
+.qms-inbox{box-sizing:border-box;width:min(1480px,100%);margin:auto;padding:24px 28px 60px;color:var(--text,#1d2939)}
+.qms-inbox button,.qms-inbox input,.qms-inbox select,.qms-inbox textarea{font:inherit}
+.qms-inbox button{cursor:pointer}.qms-inbox button:disabled{opacity:.5;cursor:not-allowed}
+.qms-inbox a{color:inherit}
+.qms-inbox__header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+.qms-inbox__header h1{font-size:clamp(24px,2vw,30px);margin:0}
+.qms-inbox__header p,.qms-inbox__panel-heading p,.qms-personal-tasks__heading p{color:var(--text-secondary,#596577);line-height:1.5;margin:8px 0 0}
+.qms-inbox__header button,.qms-inbox__item-actions button,.qms-inbox__paging button,.qms-inbox__empty button,.qms-personal-tasks button{min-height:40px;border:1px solid var(--border,#cbd5df);border-radius:8px;padding:8px 14px;background:var(--surface,#fff);color:var(--text,#1d2939)}
+.qms-inbox__area-tabs{display:flex;gap:8px;padding:20px 0 10px;border-bottom:1px solid var(--border,#cbd5df)}
+.qms-inbox__area-tabs button{border:0;border-bottom:3px solid transparent;padding:10px 16px;background:transparent;color:var(--text-secondary,#596577);font-weight:600}
+.qms-inbox__area-tabs button[aria-current=page]{border-bottom-color:var(--primary,#155e75);color:var(--text,#1d2939)}
+.qms-inbox__overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}
+.qms-inbox__metric{border:1px solid var(--border,#cbd5df);border-radius:12px;padding:16px 20px;background:var(--surface,#fff);display:flex;flex-direction:column;gap:7px;text-decoration:none}
+.qms-inbox__metric span{font-size:13px;color:var(--text-secondary,#596577)}.qms-inbox__metric strong{font-size:28px;line-height:1.2}
+.qms-inbox__metric--attention{border-left:4px solid #b45309}
+.qms-inbox__panel{margin-top:18px;border:1px solid var(--border,#cbd5df);background:var(--surface,#fff);border-radius:12px;overflow:hidden}
+.qms-inbox__panel-heading{padding:22px 24px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.qms-inbox__panel h2,.qms-personal-tasks h2{margin:0;font-size:20px}
+.qms-inbox__filters{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.qms-inbox__filters label,.qms-personal-tasks__toolbar label,.qms-personal-tasks__editor label{display:grid;gap:5px;font-size:13px;font-weight:600}
+.qms-inbox__filters input,.qms-inbox__filters select,.qms-personal-tasks input:not([type=checkbox]),.qms-personal-tasks textarea,.qms-personal-tasks select{min-height:40px;border:1px solid var(--border,#cbd5df);background:var(--surface,#fff);color:var(--text,#1d2939);border-radius:8px;padding:8px 12px;box-sizing:border-box;max-width:100%}
+.qms-inbox__filters input{width:240px}.qms-inbox__filters select{width:220px}
+.qms-inbox__notice{margin:12px 24px;padding:12px;border:1px solid #b45309;border-radius:8px;background:var(--surface,#fff)}
+.qms-inbox__work-card{padding:18px 24px;border-top:1px solid var(--border,#cbd5df);display:grid;grid-template-columns:minmax(0,1fr) 170px auto;gap:18px;align-items:center}
+.qms-inbox__work-main{min-width:0}.qms-inbox__work-main h3{font-size:15px;margin:8px 0 0;font-weight:650;overflow-wrap:anywhere}
+.qms-inbox__work-main h3 a{text-decoration:none}.qms-inbox__work-main h3 a:hover{text-decoration:underline}
+.qms-inbox__eyebrow{display:flex;flex-wrap:wrap;gap:8px;color:var(--text-secondary,#596577);font-size:12px}
+.qms-inbox__eyebrow span+span{border-left:1px solid var(--border,#cbd5df);padding-left:8px;text-transform:capitalize}
+.qms-inbox__due{display:grid;gap:4px;font-size:13px;color:var(--text-secondary,#596577)}
+.qms-inbox__due strong{font-size:12px;color:var(--text,#1d2939)}.qms-inbox__due--overdue strong{color:#9a3412}
+.qms-inbox__item-actions,.qms-personal-tasks__item-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.qms-inbox__open{display:inline-flex;align-items:center;justify-content:center;min-height:40px;box-sizing:border-box;padding:8px 14px;border:1px solid var(--primary,#155e75);border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.qms-inbox .qms-inbox__open,.qms-inbox .qms-inbox__primary{color:white;background:var(--primary,#155e75);border-color:var(--primary,#155e75)}
+.qms-inbox__empty{text-align:center;padding:50px 20px;border-top:1px solid var(--border,#cbd5df)}
+.qms-inbox__empty h3{margin:0 0 8px;font-size:17px}.qms-inbox__empty p{margin:0 auto 18px;max-width:500px;color:var(--text-secondary,#596577)}
+.qms-inbox__loading{padding:20px}
+.qms-inbox__paging{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 24px;border-top:1px solid var(--border,#cbd5df);font-size:13px;color:var(--text-secondary,#596577)}
+.qms-inbox__paging>div{display:flex;gap:8px}
+.qms-personal-tasks{margin-top:18px;padding:24px;border:1px solid var(--border,#cbd5df);border-radius:12px;background:var(--surface,#fff)}
+.qms-personal-tasks__heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.qms-personal-tasks__quick-add{margin-top:18px;border:1px solid var(--border,#cbd5df);border-radius:10px;padding:16px}
+.qms-personal-tasks__quick-add label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
+.qms-personal-tasks__quick-add>div{display:flex;gap:8px}.qms-personal-tasks__quick-add input{flex:1;min-width:0}
+.qms-personal-tasks__toolbar{display:flex;flex-wrap:wrap;align-items:end;justify-content:flex-end;gap:14px;margin:18px 0}
+.qms-personal-tasks__toolbar .qms-personal-tasks__checkbox{display:flex;flex-direction:row;align-items:center;gap:8px;min-height:40px}
+.qms-personal-tasks__checkbox input{width:16px;height:16px}
+.qms-personal-tasks__editor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0;padding:18px;background:var(--surface-muted,#f5f7fb);border:1px solid var(--border,#cbd5df);border-radius:10px}
+.qms-personal-tasks__editor h3,.qms-personal-tasks__editor label:first-of-type,.qms-personal-tasks__editor label:nth-of-type(2),.qms-personal-tasks__editor-actions{grid-column:1/-1}
+.qms-personal-tasks__editor h3{margin:0}.qms-personal-tasks__editor textarea{min-height:85px;resize:vertical}
+.qms-personal-tasks__editor-actions{display:flex;justify-content:flex-end;gap:8px}
+.qms-personal-tasks__list{display:grid;gap:10px}
+.qms-personal-tasks__item{border:1px solid var(--border,#cbd5df);border-radius:10px;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.qms-personal-tasks__item-info{min-width:0}.qms-personal-tasks__item h3{margin:0 0 8px;font-size:15px;overflow-wrap:anywhere}
+.qms-personal-tasks__item p{margin:0 0 10px;font-size:13px;color:var(--text-secondary,#596577);white-space:pre-wrap;overflow-wrap:anywhere}
+.qms-personal-tasks__item--done h3{text-decoration:line-through;color:var(--text-secondary,#596577)}
+.qms-personal-tasks__metadata{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary,#596577)}
+.qms-inbox :is(button,input,select,textarea,a):focus-visible{outline:3px solid var(--primary,#155e75);outline-offset:2px}
+@media(max-width:1024px){.qms-inbox{padding:18px 20px 44px}.qms-inbox__work-card{grid-template-columns:minmax(0,1fr) 160px}.qms-inbox__item-actions{grid-column:1/-1;justify-content:flex-start}}
+@media(max-width:680px){.qms-inbox{padding:16px 12px 36px}.qms-inbox__header p{font-size:13px}.qms-inbox__header button{padding:8px;font-size:12px}.qms-inbox__overview{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.qms-inbox__metric{padding:12px}.qms-inbox__metric strong{font-size:23px}.qms-inbox__area-tabs button{padding:10px 12px;font-size:13px}.qms-inbox__panel-heading{padding:18px 14px}.qms-inbox__filters{width:100%;display:grid;grid-template-columns:minmax(0,1fr)}.qms-inbox__filters input,.qms-inbox__filters select{width:100%}.qms-inbox__work-card{grid-template-columns:minmax(0,1fr);gap:12px;padding:16px}.qms-inbox__due{display:flex;flex-wrap:wrap;gap:8px}.qms-inbox__item-actions{grid-column:1/-1}.qms-inbox__item-actions>*{flex:1 1 auto;text-align:center}.qms-inbox__paging{padding:14px;flex-wrap:wrap}.qms-personal-tasks{padding:14px}.qms-personal-tasks__heading{flex-wrap:wrap}.qms-personal-tasks__toolbar{justify-content:flex-start}.qms-personal-tasks__toolbar>label:first-child{flex:1 1 100%}.qms-personal-tasks__toolbar input[type=search]{width:100%}.qms-personal-tasks__editor{grid-template-columns:minmax(0,1fr);padding:12px}.qms-personal-tasks__editor>*{grid-column:1/-1!important}.qms-personal-tasks__item{flex-direction:column;align-items:stretch}.qms-personal-tasks__item-actions>button{flex:1}}
