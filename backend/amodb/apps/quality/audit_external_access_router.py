@@ -261,6 +261,73 @@ def list_external_participants(
     return {"items": [_participant_payload(row) for row in rows]}
 
 
+def _deliver_external_participant_invite(
+    db: Session, *, ctx: TenantContext, audit, audit_id: uuid.UUID,
+    participant, grant, payload: ExternalParticipantCreate,
+    email: str, expires_at: datetime, access_url: str,
+) -> dict[str, Any]:
+    """Report transport truth; issuing scoped participant access is separately committed."""
+    base = os.getenv("PORTAL_FRONTEND_BASE_URL", "").strip().rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return {
+            "email_status": "NOT_SENT",
+            "email_delivery_status": "BLOCKED",
+            "email_log_id": None,
+            "provider_message_id": None,
+            "sending_mode": None,
+            "detail": "A public HTTPS PORTAL_FRONTEND_BASE_URL is required before sending external audit invitations.",
+        }
+    # The token is retained only in the in-flight delivery context and one-time
+    # invitation response; the email audit context contains IDs, not access URLs.
+    try:
+        log = notification_service.send_email(
+            template_key="qms_audit_participant_invite",
+            recipient=email,
+            subject=f"Controlled audit access · {audit.audit_ref}",
+            context={
+                "recipient_name": payload.display_name.strip(),
+                "audit_ref": audit.audit_ref,
+                "audit_title": audit.title,
+                "participant_role": payload.role.strip(),
+                "expires_at": expires_at.isoformat(),
+                "action_url": base + access_url,
+                "message": "You have been granted purpose-bound access to this audit.",
+            },
+            correlation_id=f"audit-access:{grant.id}",
+            email_class="ESSENTIAL",
+            amo_id=ctx.amo_id,
+            db=db,
+            audit_context={
+                "purpose": "audit-external-participant-invite",
+                "audit_id": str(audit_id),
+                "participant_id": str(participant.id),
+                "grant_id": str(grant.id),
+            },
+        )
+        db.commit()
+        status_value = str(getattr(log.status, "value", log.status))
+        delivery = (log.context_json or {}).get("_delivery") or {}
+        return {
+            "email_status": status_value,
+            "email_delivery_status": str(log.delivery_status or "UNKNOWN"),
+            "email_log_id": str(log.id),
+            "provider_message_id": log.provider_message_id,
+            "sending_mode": delivery.get("mode"),
+            "detail": "Provider acceptance is not proof of recipient-server delivery or inbox placement.",
+        }
+    except Exception:
+        db.rollback()
+        return {
+            "email_status": "UNKNOWN",
+            "email_delivery_status": "UNKNOWN",
+            "email_log_id": None,
+            "provider_message_id": None,
+            "sending_mode": None,
+            "detail": "The audit participant was created, but email transport could not be confirmed. Copy the access link now.",
+        }
+
+
 def _create_external_participant(
     audit_id: uuid.UUID,
     payload: ExternalParticipantCreate,
@@ -344,66 +411,11 @@ def _create_external_participant(
     access_url = f"/qms/audit-access/{quote(raw_token, safe='')}"
     result = _participant_payload(participant, include_access_url=access_url)
     if payload.send_invitation_email:
-        base = os.getenv("PORTAL_FRONTEND_BASE_URL", "").strip().rstrip("/")
-        parsed = urlsplit(base)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-            result["email_delivery"] = {
-                "email_status": "NOT_SENT",
-                "email_delivery_status": "BLOCKED",
-                "email_log_id": None,
-                "provider_message_id": None,
-                "sending_mode": None,
-                "detail": "A public HTTPS PORTAL_FRONTEND_BASE_URL is required before sending external audit invitations.",
-            }
-        else:
-            # The raw token stays in the email body and one-time API response,
-            # never in the persisted EmailLog context/audit fields.
-            try:
-                log = notification_service.send_email(
-                    template_key="qms_audit_participant_invite",
-                    recipient=email,
-                    subject=f"Controlled audit access · {audit.audit_ref}",
-                    context={
-                        "recipient_name": payload.display_name.strip(),
-                        "audit_ref": audit.audit_ref,
-                        "audit_title": audit.title,
-                        "participant_role": payload.role.strip(),
-                        "expires_at": expires_at.isoformat(),
-                        "action_url": base + access_url,
-                        "message": "You have been granted purpose-bound access to this audit.",
-                    },
-                    correlation_id=f"audit-access:{grant.id}",
-                    email_class="ESSENTIAL",
-                    amo_id=ctx.amo_id,
-                    db=db,
-                    audit_context={
-                        "purpose": "audit-external-participant-invite",
-                        "audit_id": str(audit_id),
-                        "participant_id": str(participant.id),
-                        "grant_id": str(grant.id),
-                    },
-                )
-                db.commit()
-                status_value = str(getattr(log.status, "value", log.status))
-                delivery = (log.context_json or {}).get("_delivery") or {}
-                result["email_delivery"] = {
-                    "email_status": status_value,
-                    "email_delivery_status": str(log.delivery_status or "UNKNOWN"),
-                    "email_log_id": str(log.id),
-                    "provider_message_id": log.provider_message_id,
-                    "sending_mode": delivery.get("mode"),
-                    "detail": "Provider acceptance is not proof of recipient-server delivery or inbox placement.",
-                }
-            except Exception:
-                db.rollback()
-                result["email_delivery"] = {
-                    "email_status": "UNKNOWN",
-                    "email_delivery_status": "UNKNOWN",
-                    "email_log_id": None,
-                    "provider_message_id": None,
-                    "sending_mode": None,
-                    "detail": "The audit participant was created, but email transport could not be confirmed. Copy the access link now.",
-                }
+        result["email_delivery"] = _deliver_external_participant_invite(
+            db, ctx=ctx, audit=audit, audit_id=audit_id, participant=participant,
+            grant=grant, payload=payload, email=email,
+            expires_at=expires_at, access_url=access_url,
+        )
     return result
 
 
