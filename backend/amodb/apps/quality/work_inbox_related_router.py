@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
@@ -87,7 +87,7 @@ SOURCES = {
     },
     "provider-invitations": {
         "label": "Provider invitation",
-        "permission": "qms.external.manage",
+        "permission": "qms.audit.manage",
         "projection": """SELECT CAST(g.id AS TEXT) id,
               ('Confirm external representative invitation · ' || s.legal_name || ' · ' || i.email) title,
               'PENDING_VERIFICATION' status,
@@ -107,7 +107,7 @@ SOURCES = {
     },
     "provider-approvals": {
         "label": "External provider account",
-        "permission": "qms.external.manage",
+        "permission": "qms.audit.manage",
         "projection": """SELECT CAST(g.id AS TEXT) id,
               ('Review verified provider representative · ' || s.legal_name || ' · ' || i.email) title,
               'AWAITING_QUALITY_APPROVAL' status,
@@ -123,6 +123,24 @@ SOURCES = {
         "scope": "SHARED_REVIEW",
     },
 }
+
+
+def _provider_quality_manager(db: Session, ctx: TenantContext) -> bool:
+    """Match the external account decision's Quality Manager/tenant-admin boundary."""
+    if ctx.is_superuser:
+        return False
+    if ctx.admin_authority:
+        return True
+    # Inspect the temporary schema in contract tests without assuming an
+    # unrelated role configuration in a partial legacy database.
+    columns = {col["name"] for col in inspect(db.connection()).get_columns("users")}
+    if "role" not in columns:
+        return False
+    role = db.execute(text(
+        "SELECT UPPER(CAST(role AS TEXT)) FROM users "
+        "WHERE amo_id=:amo AND id=:actor AND is_active=TRUE"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id}).scalar()
+    return role == "QUALITY_MANAGER"
 
 
 @router.get("/related")
@@ -157,6 +175,8 @@ def related_work(
         if source and key != source:
             continue
         if not has_quality_permission(db, ctx, spec["permission"]):
+            continue
+        if key.startswith("provider-") and not _provider_quality_manager(db, ctx):
             continue
         scoped = f"({spec['projection']})"
         try:
