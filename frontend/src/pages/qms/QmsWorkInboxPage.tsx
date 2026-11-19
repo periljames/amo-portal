@@ -177,17 +177,17 @@ export default function QmsWorkInboxPage() {
             <div className="qms-inbox__filters">
               <label>Search work<input type="search" value={search} maxLength={80}
                 placeholder="Search titles" onChange={event => setSearch(event.target.value)} /></label>
-              <label>Quality source<select value={source}
+              <label>Quality source<select aria-label="Quality source" value={source}
                 onChange={event => update({ source: event.target.value, offset: null })}>
                 {sources.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select></label>
-              <label>Deadline<select value={dueFilter} onChange={event => update({ due: event.target.value, offset: null })}>
+              <label>Deadline<select aria-label="Deadline" value={dueFilter} onChange={event => update({ due: event.target.value, offset: null })}>
                 <option value="all">Any deadline</option>
                 <option value="today">Due today</option>
                 <option value="next-seven">Next 7 days</option>
                 <option value="undated">Not dated</option>
               </select></label>
-              <label>Order<select value={sort} onChange={event =>
+              <label>Order<select aria-label="Order" value={sort} onChange={event =>
                 update({ sort: event.target.value === "title" ? "title" : null, offset: null })}>
                 <option value="priority">Urgency first</option>
                 <option value="title">Title A to Z</option>
