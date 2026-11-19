@@ -20,7 +20,7 @@ type FocusItem = {
   due_date: string | null; next_action: string; route: string;
   scope: string; priority: number;
 };
-function dateState(raw: string | null) {
+export function dateState(raw: string | null) {
   if (!raw) return { label: "No due date", rank: 3, overdue: false };
   const key = raw.slice(0, 10);
   // Governed source dates are calendar-only; personal due_at is an instant
