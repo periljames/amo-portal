@@ -84,10 +84,20 @@ def test_connected_document_review_never_exposes_others_manuscripts(client, monk
     assert denied["items"] == []
 
 
+def _assign_quality_role(client, role: str):
+    # Per-test isolated schema: production uses the existing users.role column.
+    columns = {col["name"] for col in __import__("sqlalchemy").inspect(client.connection).get_columns("users")}
+    if "role" not in columns:
+        client.connection.execute(text("ALTER TABLE users ADD COLUMN role TEXT"))
+    client.connection.execute(text("UPDATE users SET role=:role WHERE id='chair'"), {"role": role})
+    client.connection.commit()
+
+
 def test_connected_provider_approval_is_shared_not_individually_assigned(client, monkeypatch):
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
-    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.external.manage")
+    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.audit.manage")
+    _assign_quality_role(client, "QUALITY_MANAGER")
     _table(client, "external_tenant_grants (id text,amo_id text,identity_id text,tenant_provider_id text,status text)")
     _table(client, "external_identities (id text,email text,verified_at timestamp)")
     _table(client, "external_tenant_providers (id text,amo_id text,supplier_id int)")
@@ -120,7 +130,7 @@ def test_connected_provider_approval_is_shared_not_individually_assigned(client,
     assert "private@example.test" not in str(data)
     assert data["items"][0]["due_date"] is None
     assert data["items"][0]["route"].endswith("/quality/external-accounts?view=accounts&grant=g1")
-    monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.audit.manage")
+    _assign_quality_role(client, "QUALITY_OFFICER")
     assert client.get("/work-inbox/related?source=provider-approvals").json()["total"] == 0
 
 
@@ -144,6 +154,7 @@ def test_unverified_external_invites_project_expiry_without_dropping_tenant_scop
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
     monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.external.manage")
+    _assign_quality_role(client, "QUALITY_MANAGER")
     _table(client, "external_tenant_grants (id text,amo_id text,identity_id text,tenant_provider_id text,status text)")
     _table(client, "external_identities (id text,email text,verified_at timestamp)")
     _table(client, "external_tenant_providers (id text,amo_id text,supplier_id int)")
