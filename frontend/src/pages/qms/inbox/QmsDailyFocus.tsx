@@ -23,7 +23,11 @@ type FocusItem = {
 function dateState(raw: string | null) {
   if (!raw) return { label: "No due date", rank: 3, overdue: false };
   const key = raw.slice(0, 10);
-  const when = new Date(key + "T00:00:00");
+  // Governed source dates are calendar-only; personal due_at is an instant
+  // and must use the user's local calendar day to avoid false overdue ranking.
+  const when = /^\d{4}-\d{2}-\d{2}T/.test(raw)
+    ? new Date(raw)
+    : new Date(key + "T00:00:00");
   if (Number.isNaN(when.getTime())) return { label: "Due date not available", rank: 3, overdue: false };
   const today = new Date();
   const days = Math.round((Date.UTC(when.getFullYear(), when.getMonth(), when.getDate()) -
