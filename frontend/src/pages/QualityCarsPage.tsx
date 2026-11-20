@@ -533,9 +533,9 @@ const QualityCarsPage: React.FC = () => {
     setReviewCar(car);
     setReviewForm({
       root_cause_status: "",
-      root_cause_review_note: car.root_cause_review_note ?? "",
+      root_cause_review_note: "",
       capa_status: "",
-      capa_review_note: car.capa_review_note ?? "",
+      capa_review_note: "",
       message: "",
     });
     setReviewAttachmentsLoading(true);
@@ -642,7 +642,7 @@ const QualityCarsPage: React.FC = () => {
       <div className="qms-surface-root qms-car-ops car-register">
       {localError ? <div className="card card--error" role="alert">{localError}</div> : null}
       {directCarId ? (cars[0] ? <CarRecordView car={cars[0]} amoCode={amoSlug} owner={cars[0].responsible_personnel || assigneeLookup.get(cars[0].assigned_to_user_id || "")?.full_name || "Unassigned"}
-        canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
+        assignees={assignees} canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
         onEdit={()=>openEdit(cars[0])} onReview={()=>void openReview(cars[0])} onInvite={()=>void handleCopyInvite(cars[0])} onExport={()=>void handleExport(cars[0])}/> : <section className="case-workspace"><button onClick={clearRouteScope}>Back to corrective actions</button><p role={registerQuery.isError?"alert":"status"}>{registerQuery.isError?"This corrective action could not be loaded.":registerQuery.isPending?"Loading corrective action…":"Corrective action not found."}</p>{registerQuery.isError?<button onClick={()=>void registerQuery.refetch()}>Retry</button>:null}</section>) : <>
       <header className="page-header qms-car-page-heading">
         <div>
