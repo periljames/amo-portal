@@ -6223,8 +6223,9 @@ def update_car(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     car = _get_car_for_amo(db, amo_id=_current_amo_id(current_user), car_id=car_id)
+    set_postgres_tenant_context(db, amo_id=str(car.amo_id), user_id=str(current_user.id))
     _require_car_not_escalated(car)
-    before = {"status": car.status.value, "title": car.title}
+    before = {"status": (car.status.value if hasattr(car.status, "value") else car.status), "title": car.title}
     is_assignee = current_user.id == car.assigned_to_user_id
     _require_car_write_access(db, current_user, car.finding_id, car=car, allow_assignee=is_assignee)
 
@@ -6350,7 +6351,7 @@ def update_car(
         entity_id=str(car.id),
         action="update",
         before=before,
-        after={"status": car.status.value},
+        after={"status": (car.status.value if hasattr(car.status, "value") else car.status)},
         correlation_id=str(uuid.uuid4()),
         metadata=_audit_metadata(request),
         critical=changed_status and car.status in (models.CARStatus.CLOSED, models.CARStatus.CANCELLED),
