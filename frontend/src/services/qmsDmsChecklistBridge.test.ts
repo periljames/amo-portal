@@ -54,7 +54,7 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("bindingConfirmation.id !== binding.id || bindingConfirmation.audit_id !== auditId");
     expect(prepareSource).not.toContain("const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);");
     expect(prepareSource).toContain("const bindings = fullBindingsQuery.data?.items || [];");
-    expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
+    expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId, signal)");
     expect(prepareSource).not.toContain("const cacheChecklistBinding");
     expect(prepareSource).not.toContain("refresh(binding)");
     expect(prepareSource).toContain('["qms", "prepare-checklist-bindings", amoCode, auditId]');
