@@ -4,11 +4,18 @@ import { getCarRcaInternal, reviewCarRcaAction, addCarRcaInternalAction, type Ca
 import "./car-rca.css";
 import CarRcaParetoSource from "./CarRcaParetoSource";
 import { hasQmsRolePermission } from "../../../app/routeGuards";
+import type { CARAttachmentOut, CARAssignee } from "../../../services/qms";
+import { portalErrorMessage } from "../../../services/portalError";
+import { caseDate } from "../../../pages/qualityAudits/carCaseModel";
 
-export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
+export default function CarRcaInternalReview({ amoCode, carId, canReview, attachments = [], assignees = [], onOpenEvidence, openingId }: {
   amoCode: string;
   carId: string;
   canReview: boolean;
+  attachments?: CARAttachmentOut[];
+  assignees?: CARAssignee[];
+  onOpenEvidence?: (id: string, filename: string) => Promise<void>;
+  openingId?: string | null;
 }) {
   const [data, setData] = useState<CarRcaProjection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -16,6 +23,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState("");
   const [newAction, setNewAction] = useState<CarRcaActionCreate>({
     kind: "CORRECTIVE", description: "", cause_node_ids: [],
     evidence_references: [], external_owner_name: null, target_date: null,
@@ -46,6 +54,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
     setLoading(true);
     setData(null);
     setNotes({});
+    setNotice("");
     setError(null);
     void getCarRcaInternal(amoCode, carId)
       .then(result => { if (active) setData(result); })
@@ -66,15 +75,17 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   }, [amoCode, carId]);
 
   const review = async (action: CarRcaAction, state: "ACCEPTED" | "REJECTED" | "VERIFIED") => {
-    if (busy) return;
+    if (busy || creating) return;
     const reason = (notes[action.id] || "").trim();
     if (reason.length < 8) { setError("Enter a Quality decision reason of at least eight characters."); return; }
-    setBusy(action.id); setError(null);
+    setBusy(action.id); setError(null); setNotice("");
     try {
-      await reviewCarRcaAction(amoCode, carId, action.id, state, reason);
+      const confirmed = await reviewCarRcaAction(amoCode, carId, action.id, state, reason);
+      setData(current => current ? {...current, actions: current.actions.map(item => item.id === confirmed.id ? confirmed : item)} : current);
       setNotes(value => ({ ...value, [action.id]: "" }));
+      setNotice(state === "REJECTED" ? "Action returned for rework. The reason is retained in CAR history." : state === "VERIFIED" ? "Implementation verified. The decision is retained in CAR history." : "Proposed action approved. The decision is retained in CAR history.");
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Quality review could not be saved."); }
+    } catch (cause) { setError(portalErrorMessage(cause, "The decision was not confirmed. Your rationale is retained; refresh the action before retrying.")); }
     finally { setBusy(null); }
   };
   // A newly issued CAR may not yet have an RCA document, and older
@@ -92,6 +103,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
   return <section className="case-section car-rca car-rca-internal" aria-label="Structured CAR investigation and Quality action review">
     <h3>Investigation & action review</h3>
     {loading && <p role="status">Loading documented investigation…</p>}
+    {busy && <p role="status">Recording Quality decision…</p>}
+    {notice && <p className="car-rca-confirmation" role="status">{notice}</p>}
     {error && <p role="alert">{error} <button type="button" onClick={() => void load()}>Retry</button></p>}
     {data && <>
       <p>Revision {data.revision} · {data.submitted_revision == null ? "Not submitted" : `Submitted revision ${data.submitted_revision}`}
@@ -139,19 +152,24 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview }: {
         <button type="button" disabled={creating || Boolean(busy) || newAction.description.trim().length < 5 || !newAction.target_date || !newAction.external_owner_name?.trim()}
           onClick={() => void submitInternalAction()}>{creating ? "Recording…" : "Create governed action"}</button>
       </div></details>}
-      {actions.length > 0 ? <div className="car-rca-table-scroll"><table>
+      {actions.length > 0 ? <div className="car-rca-table-scroll"><table className="car-rca-review-list" role="table">
         <caption>Individually governed corrective and preventive actions — {actions.length}</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
         <tbody>{actions.map(action => <tr key={action.id}>
           <td><strong>{action.action_number} · {action.kind}</strong><p>{action.description}</p></td>
-          <td>{action.external_owner_name || action.owner_user_id || "Unassigned"}<p>{action.target_date || "No due date"}</p></td>
-          <td>{action.state.replaceAll("_", " ")}{action.completion_note && <p>{action.completion_note}</p>}</td>
-          <td>{action.evidence_references.length ? <ul>{action.evidence_references.map((source, index) => <li key={index}>{source}</li>)}</ul> : "No evidence referenced"}</td>
-          <td>{action.quality_review_note && <p>Last decision: {action.quality_review_note}</p>}
+          <td data-label="Owner / due">{action.external_owner_name || assignees.find(person => person.id === action.owner_user_id)?.full_name || (action.owner_user_id ? "Assigned staff member" : "Unassigned")}<p>{action.target_date ? caseDate(action.target_date) : "No due date"}</p></td>
+          <td data-label="Status"><span className="car-rca-state" data-state={action.state}>{action.state.replaceAll("_", " ")}</span>{action.completion_note && <p>{action.completion_note}</p>}</td>
+          <td data-label="Evidence">{action.evidence_references.length ? <ul>{action.evidence_references.map((source, index) => {
+            const file = attachments.find(item => source === `CAR-ATTACHMENT:${item.id}`);
+            return <li key={index}>{file && onOpenEvidence ? <button type="button" disabled={openingId === file.id} onClick={() => void onOpenEvidence(file.id, file.filename)}>{openingId === file.id ? "Opening…" : file.filename}</button> : source}</li>;
+          })}</ul> : "No evidence referenced"}</td>
+          <td data-label="Quality decision">{action.quality_review_note && <p>Last decision: {action.quality_review_note}</p>}
+            {!action.quality_review_note && !(canReview && ["PROPOSED","SUBMITTED"].includes(action.state)) && <p className="case-muted">{["PROPOSED","SUBMITTED"].includes(action.state) ? "Awaiting independent Quality review." : "No review note recorded."}</p>}
             {canReview && (action.state === "PROPOSED" || action.state === "SUBMITTED") && <div className="car-rca-analysis">
               <label className="car-rca-field">Independent Quality rationale
-                <textarea rows={2} value={notes[action.id] || ""} disabled={Boolean(busy)}
+                <textarea rows={2} maxLength={8000} value={notes[action.id] || ""} disabled={Boolean(busy)}
                   onChange={e => setNotes(value => ({ ...value, [action.id]: e.target.value }))} /></label>
+              <small>Give a specific reason · at least 8 characters.</small>
               {action.state === "PROPOSED" && <button type="button" disabled={Boolean(busy) || (notes[action.id] || "").trim().length < 8}
                 onClick={() => void review(action, "ACCEPTED")}>Approve proposed action</button>}
               {action.state === "SUBMITTED" && <button type="button" disabled={Boolean(busy) || !action.evidence_references.length || (notes[action.id] || "").trim().length < 8}

@@ -21,6 +21,10 @@ from .planner_strategic_router import router as planner_strategic_router
 from .provider_governance_router import provider_governance_router
 from .analysis_router import router as analysis_router
 from .reports_router import router as reports_router
+from .management_review_router import router as management_review_router
+from .controlled_register_router import router as controlled_register_router
+from .work_inbox_router import router as work_inbox_router
+from .finding_insights_router import router as finding_insights_router
 
 
 def _route_endpoint(route_item):
@@ -92,6 +96,10 @@ def _install_specialist_routes(api_router: APIRouter) -> None:
         provider_governance_router,
         analysis_router,
         reports_router,
+        management_review_router,
+        controlled_register_router,
+        work_inbox_router,
+        finding_insights_router,
     ):
         _insert_before_catchalls(
             api_router,

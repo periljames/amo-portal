@@ -264,7 +264,7 @@ def probe_database(*, force: bool = False) -> bool:
         database_circuit.mark_success()
         return True
     except Exception as exc:
-        database_circuit.mark_failure(exc)
+        database_circuit.mark_failure(exc, probe=True)
         return False
     finally:
         close_session_safely(db)

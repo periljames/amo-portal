@@ -71,7 +71,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "command",
     defaultView: "assigned-to-me",
     validViews: ["assigned-to-me", "approvals", "overdue", "watching", "completed"],
-    componentType: "canonical",
+    componentType: "specialist",
   },
   {
     id: "calendar",
@@ -134,7 +134,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "assurance",
     defaultView: "register",
     validViews: ["register", "risk-matrix", "opportunities", "treatment-plans", "trends"],
-    componentType: "canonical",
+    componentType: "specialist",
     allowRecordDetails: true,
   },
   {
@@ -154,11 +154,11 @@ const MODULES: readonly QmsModuleRoute[] = [
     segment: "system",
     label: "System and Processes",
     navigationLabel: "System & Processes",
-    permission: "qms.dashboard.view",
+    permission: "qms.risk.view",
     section: "control",
     defaultView: "processes",
     validViews: ["processes", "qms-scope", "quality-objectives", "risk-register", "opportunities"],
-    componentType: "canonical",
+    componentType: "specialist",
     allowRecordDetails: true,
   },
   {
@@ -206,7 +206,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "control",
     defaultView: "register",
     validViews: ["register", "due-soon", "overdue", "certificates", "reports", "calibration-history", "out-of-tolerance"],
-    componentType: "canonical",
+    componentType: "specialist",
     allowRecordDetails: true,
   },
   {
@@ -218,7 +218,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     section: "control",
     defaultView: "regulator-findings",
     validViews: ["regulator-findings", "customer-complaints", "customer-feedback", "authority-correspondence", "commitments", "responses"],
-    componentType: "canonical",
+    componentType: "specialist",
     allowRecordDetails: true,
   },
   {
@@ -229,8 +229,8 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.management_review.view",
     section: "reporting",
     defaultView: "dashboard",
-    validViews: ["dashboard", "meetings", "actions", "open-actions", "closed-actions"],
-    componentType: "canonical",
+    validViews: ["dashboard", "meetings", "actions", "open-actions", "closed-actions", "new"],
+    componentType: "specialist",
     allowRecordDetails: true,
   },
   {
@@ -275,7 +275,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     permission: "qms.settings.view",
     section: "administration",
     defaultView: "general",
-    validViews: ["general", "workflows", "numbering", "notifications", "retention"],
+    validViews: ["general", "workflows", "numbering", "notifications", "retention", "audit-log"],
     componentType: "specialist",
   },
   {
@@ -310,8 +310,8 @@ function pathSegments(pathname: string): string[] {
 }
 
 /**
- * Path-safe opaque record identifiers (UUIDs, `ID-…`, `QAR-…`, `ev-demo`, etc.).
- * Digits are not required — backend path params are opaque strings and
+ * Path-safe opaque record identifiers (UUIDs, `ID-â€¦`, `QAR-â€¦`, `ev-demo`, etc.).
+ * Digits are not required â€” backend path params are opaque strings and
  * `generate_user_id()` can yield letter-only blocks after an uppercase prefix.
  *
  * Still blocks:

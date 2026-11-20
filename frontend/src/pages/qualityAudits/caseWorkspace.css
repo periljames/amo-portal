@@ -102,6 +102,22 @@
 .qms-car-control-loop .card__header p { color: var(--qms-muted,var(--text-secondary)); font-size: 13px; }
 .qms-car-control-loop .btn { min-height: 36px; padding: 6px 11px; border-radius: 7px; font-size: 13px; font-weight: 500; box-shadow: none; }
 .qms-car-control-loop input, .qms-car-control-loop select, .qms-car-control-loop textarea { max-width: 100%; font-size: 14px; border-radius: 7px; }
+.qms-car-control-loop .car-stage-table :is(th,td){white-space:normal;overflow-wrap:anywhere}
+@media(max-width:1000px){
+  .qms-car-control-loop .car-stage-table,.qms-car-control-loop .car-stage-table tbody{display:block;min-width:0;width:100%}
+  .qms-car-control-loop .car-stage-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .qms-car-control-loop .car-stage-table tbody{display:grid;gap:12px}
+  .qms-car-control-loop .car-stage-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--qms-line,var(--border-color));border-radius:8px;padding:10px}
+  .qms-car-control-loop .car-stage-table td{display:block;min-width:0;border:0;padding:6px}
+  .qms-car-control-loop .car-stage-table td:is(:first-child,:nth-child(2),:nth-child(5),:nth-child(6),:last-child){grid-column:1 / -1}
+  .qms-car-control-loop .car-stage-table td::before{display:block;font-size:12px;color:var(--text-secondary,#64748b);margin-bottom:5px}
+  .qms-car-control-loop .car-stage-table td:nth-child(2)::before{content:"Owner"}
+  .qms-car-control-loop .car-stage-table td:nth-child(3)::before{content:"Original due"}
+  .qms-car-control-loop .car-stage-table td:nth-child(4)::before{content:"Current due"}
+  .qms-car-control-loop .car-stage-table td:nth-child(5)::before{content:"Status"}
+  .qms-car-control-loop .car-stage-table td:nth-child(6)::before{content:"Evidence / note"}
+  .qms-car-control-loop .car-stage-table td:last-child{text-align:right}
+}
 @media(max-width: 760px) {
   .qms-car-control-loop .btn { min-height: 44px; }
   .qms-car-control-loop .page-header { flex-direction: column; }
@@ -126,3 +142,7 @@
   .car-register .audit-panel .table td:nth-child(7)::before { content: 'Responsible'; display: block; font-size: 11px; color: var(--qms-muted,var(--text-secondary)); }
   .car-register .car-row-actions > button { min-height: 44px; min-width: 44px; }
 }
+
+.qms-car-control-loop .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px 24px; margin-block:12px; }
+.qms-car-control-loop .stats-grid > div { display:grid; gap:4px; min-width:0; overflow-wrap:anywhere; }
+.qms-car-control-loop .stats-grid .muted { font-size:12px; color:var(--qms-muted,var(--text-secondary)); }

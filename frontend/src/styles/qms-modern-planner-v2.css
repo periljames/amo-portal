@@ -93,7 +93,8 @@
 }
 .qms-planner-toolbar__controls { justify-content: flex-end; gap: .35rem; min-width: 0; }
 .qms-planner-title { display: grid; gap: .08rem; min-width: 0; }
-.qms-planner-title strong {
+.qms-planner-title :is(strong,h1) {
+  margin: 0;
   overflow: hidden;
   color: var(--text-primary, #0f172a);
   font-size: clamp(1rem, 1.2vw, 1.25rem);

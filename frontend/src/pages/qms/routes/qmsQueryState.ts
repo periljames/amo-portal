@@ -6,6 +6,7 @@ export type QmsRegisterFilters = {
   q: string; stage: FindingLifecycleView; timing: "" | "overdue" | "due_soon";
   auditId: string; level: string; status: "" | "open" | "closed";
   period?: number; view: QmsView; page: number; pageSize: 25 | 50 | 100;
+  severity: string; process: string; processUnmapped: boolean;
 };
 export function parseQmsPeriod(value: string | null): number | undefined {
   const year = Number(value);
@@ -27,6 +28,8 @@ export function parseQmsRegisterFilters(query: URLSearchParams): QmsRegisterFilt
     level: ["LEVEL_1", "LEVEL_2", "LEVEL_3", "LEVEL_4"].includes(rawLevel) ? rawLevel : "",
     status: status === "open" || status === "closed" ? status : "",
     period: parseQmsPeriod(query.get("period")), view: parseQmsView(query.get("view")),
+    severity: ["MINOR", "MAJOR", "CRITICAL"].includes(query.get("severity") || "") ? query.get("severity")! : "",
+    process: (query.get("process") || "").slice(0, 160), processUnmapped: query.get("processUnmapped") === "1",
     page: Number.isSafeInteger(page) && page > 0 ? page : 1,
     pageSize: size === 50 || size === 100 ? size : 25,
   };

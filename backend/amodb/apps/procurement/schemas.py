@@ -48,7 +48,7 @@ class ProcurementReferenceData(BaseModel):
 
 
 class SupplierCreate(BaseModel):
-    supplier_code: str = Field(..., min_length=2, max_length=64)
+    supplier_code: Optional[str] = Field(default=None, max_length=64)
     legal_name: str = Field(..., min_length=2, max_length=255)
     trading_name: Optional[str] = None
     supplier_type: str = "DISTRIBUTOR"

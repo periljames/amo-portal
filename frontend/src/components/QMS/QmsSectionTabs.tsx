@@ -1,7 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useRef } from "react";
-import { classifyQmsPath, qmsBasePath, qmsModulePath } from "../../pages/qms/routes/qmsRouteRegistry";
+import { classifyQmsPath, qmsModulePath } from "../../pages/qms/routes/qmsRouteRegistry";
 import { qmsViewLabel } from "../../pages/qms/qmsWorkspaceCopy";
+import "./qms-section-tabs.css";
 
 export default function QmsSectionTabs({ amoCode }: { amoCode: string }) {
   const { pathname } = useLocation();
@@ -23,9 +24,9 @@ export default function QmsSectionTabs({ amoCode }: { amoCode: string }) {
     revealActive();
     return () => observer.disconnect();
   }, [pathname]);
-  const { module } = classifyQmsPath(pathname);
+  const { module, relativePath } = classifyQmsPath(pathname);
   if (!module || module.validViews.length < 2) return null;
-  const view = pathname.replace(`${qmsBasePath(amoCode)}/${module.segment}`, "").split("/").filter(Boolean)[0] || module.defaultView;
+  const view = relativePath?.split("/")[1] || module.defaultView;
   if (!module.validViews.includes(view)) return null;
   const reportLabels: Record<string, string> = { "executive-dashboard": "Executive summary", "car-performance": "CAR performance", "training-compliance": "Training validity" };
   return <nav ref={tabs} className="qms-section-tabs" aria-label={`${module.navigationLabel} views`}>

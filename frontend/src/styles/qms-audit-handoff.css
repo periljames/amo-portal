@@ -1,37 +1,7 @@
-.qms-audit-handoff-launcher {
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 12px;
-  border: 1px solid var(--border-color, #d6d9de);
-  border-radius: 8px;
-  background: var(--surface-primary, #fff);
-  padding: 8px 12px;
-  box-shadow: none;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.qms-audit-handoff-panel {
-  position: fixed;
-  top: 72px;
-  left: 18px;
-  bottom: 18px;
-  z-index: 69;
-  width: min(460px, calc(100vw - 36px));
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border-color, #d6d9de);
-  border-radius: 14px;
-  background: var(--surface-primary, #fff);
-  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.22);
-  overflow: hidden;
-}
-
+.qms-audit-handoff-inline{margin-block:12px;border:1px solid var(--border-color,#d6d9de);border-radius:10px;background:var(--surface-primary,#fff)}
+.qms-audit-handoff-inline>summary{padding:12px;cursor:pointer;font-weight:700}
+.qms-audit-handoff-panel{min-width:0}
+.qms-audit-handoff-body fieldset{display:grid;gap:12px;min-width:0;margin:0;padding:0;border:0}
 .qms-audit-handoff-panel > header {
   display: flex;
   align-items: flex-start;
@@ -135,12 +105,5 @@
 .qms-audit-handoff-success a { font-weight: 700; }
 
 @media (max-width: 720px) {
-  .qms-audit-handoff-launcher { margin-bottom: 10px; }
-  .qms-audit-handoff-panel {
-    top: 58px;
-    left: 8px;
-    bottom: 8px;
-    width: calc(100vw - 16px);
-  }
   .qms-audit-handoff-grid { grid-template-columns: 1fr; }
 }

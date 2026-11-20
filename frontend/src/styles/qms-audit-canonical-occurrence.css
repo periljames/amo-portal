@@ -2,10 +2,8 @@
   display: none !important;
 }
 
-/* Occurrence stages own navigation — hide AA context chrome that bleeds through. */
-html.quality-audit-canonical-occurrence .quality-context-bar-host {
-  display: none !important;
-}
+/* Keep the app directory available inside every audit stage. */
+html.quality-audit-canonical-occurrence .quality-context-bar-host { z-index: 60; }
 
 html.quality-audit-canonical-occurrence .qms-canonical-occurrence-route-shell {
   display: none !important;
@@ -22,6 +20,7 @@ html.quality-audit-canonical-occurrence :is(
 }
 
 html.quality-audit-canonical-occurrence .qms-audit-session-rail {
+  top: var(--qms-context-height, 48px);
   background: var(--qms-page, var(--surface-secondary, transparent));
   backdrop-filter: none;
   -webkit-backdrop-filter: none;

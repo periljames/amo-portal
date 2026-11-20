@@ -22,6 +22,9 @@ export type QmsAuditRegisterPageParams = {
   auditId?: string;
   findingId?: string;
   onlyWithCars?: boolean;
+  severity?: string;
+  process?: string;
+  processUnmapped?: boolean;
   workflowStage?: "observation" | "needs_review" | "with_auditee" | "implementation" | "effectiveness" | "closed";
   carTiming?: "overdue" | "due_soon";
   dueSoonDays?: number;
@@ -102,6 +105,9 @@ export function qmsGetAuditRegisterPage(params: QmsAuditRegisterPageParams = {})
   setIfPresent(query, "owner", params.owner);
   setIfPresent(query, "car", params.car);
   if (params.onlyWithCars) query.set("only_with_cars", "true");
+  setIfPresent(query, "severity", params.severity);
+  setIfPresent(query, "process", params.process);
+  if (params.processUnmapped) query.set("process_unmapped", "true");
   if (params.dueSoonDays != null) query.set("due_soon_days", String(params.dueSoonDays));
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));

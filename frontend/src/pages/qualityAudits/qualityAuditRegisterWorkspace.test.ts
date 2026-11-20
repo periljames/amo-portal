@@ -31,7 +31,8 @@ describe("findings and corrective-action workspace", () => {
   });
 
   it("does not float effectiveness controls over register or programme pages", () => {
-    expect(enhancements).toContain("isEffectivenessResponseRoute");
+    expect(enhancements).not.toContain("qms-effectiveness-response-launcher");
+    expect(enhancements).toContain("effectiveness-follow-up");
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/audits/register", "")).toBe(false);
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/findings/abc", "")).toBe(false);
     expect(isEffectivenessResponseRoute("/maintenance/test/quality/cars/abc", "")).toBe(false);

@@ -68,6 +68,11 @@ def transition_car(
         # investigation, even when the caller supplies an evidence reference.
         from .car_control_loop_models import QualityCARControlProfile
         from .car_rca_models import QualityCarRcaDocument
+        from .tenant_security import set_postgres_tenant_context
+
+        # Legacy endpoints do not have the tenant-prefixed dependency. Without
+        # context, PostgreSQL RLS hides the control profile and weakens this gate.
+        set_postgres_tenant_context(db, amo_id=amo_id, user_id=actor_user_id)
 
         profile = db.query(QualityCARControlProfile).filter(
             QualityCARControlProfile.amo_id == amo_id,
@@ -94,7 +99,7 @@ def transition_car(
         if car.finding_id:
             ensure_finding_training_gate_satisfied(db, amo_id=amo_id, finding_id=str(car.finding_id))
 
-    car.status = target
+    car.status = CARStatus(target)
     if evidence_ref:
         car.evidence_ref = evidence_ref
     db.add(car)

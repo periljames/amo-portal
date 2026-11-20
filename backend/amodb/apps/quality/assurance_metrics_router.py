@@ -344,7 +344,7 @@ def _full_metrics(db: Session, ctx: TenantContext, *, view: str = "global") -> t
         db,
         ctx,
         source="calibration",
-        table="qms_calibration_records",
+        table="qms_equipment",
         due_candidates=("next_due_date", "due_date", "valid_until"),
         warnings=warnings, view=view,
     )
@@ -384,12 +384,17 @@ def _full_metrics(db: Session, ctx: TenantContext, *, view: str = "global") -> t
 
     regulator_columns = _projection_columns(db, "qms_regulator_findings")
     regulator_open = _status_open_condition(regulator_columns)
+    regulator_conditions = [regulator_open] if regulator_open else []
+    if "payload" in regulator_columns:
+        origin_value = "payload->>'finding_origin'" if db.bind.dialect.name == "postgresql" else "json_extract(payload, '$.finding_origin')"
+        # Legacy rows in this dedicated register predate external-origin capture.
+        regulator_conditions.append(f"COALESCE(NULLIF({origin_value},''),'REGULATORY_AUTHORITY')='REGULATORY_AUTHORITY'")
     metrics["open_regulator_findings"] = _count(
         db,
         ctx,
         source="regulator_findings",
         table="qms_regulator_findings",
-        conditions=[regulator_open] if regulator_open else [],
+        conditions=regulator_conditions,
         warnings=warnings, view=view,
     )
 

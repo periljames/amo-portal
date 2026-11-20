@@ -45,6 +45,7 @@ import { useToast } from "../../../components/feedback/ToastProvider";
 import InlineError from "../../../components/shared/InlineError";
 import Button from "../../../components/UI/Button";
 import { apiRequest, qmsPath } from "../../../services/apiClient";
+import { hasQmsRolePermission } from "../../../app/routeGuards";
 import { qmsRunAuditSchedule } from "../../../services/qms";
 import {
   listAuditProgrammeSchedulingQueue,
@@ -168,7 +169,7 @@ const HOUR_HEIGHT = PLANNER_HOUR_HEIGHT;
 const DEFAULT_TENANT_TIMEZONE = "UTC";
 const CLOCK_REFRESH_MS = 30_000;
 
-function quickCreateOptions(capabilities: PlannerCapabilities): QuickCreateOption[] {
+function quickCreateOptions(capabilities: PlannerCapabilities, canManageReviews: boolean): QuickCreateOption[] {
   return [
     {
       kind: "audit",
@@ -197,8 +198,8 @@ function quickCreateOptions(capabilities: PlannerCapabilities): QuickCreateOptio
     {
       kind: "review",
       label: "Management review",
-      enabled: false,
-      unavailableReason: "Management review has no planner create handoff yet. Open Management Review from Quality navigation.",
+      enabled: canManageReviews,
+      unavailableReason: canManageReviews ? undefined : "Management Review manage permission is required.",
     },
   ];
 }
@@ -925,7 +926,8 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
   const [runBusy, setRunBusy] = useState(false);
   const [calendarSyncOpen, setCalendarSyncOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const createOptions = useMemo(() => quickCreateOptions(capabilities), [capabilities]);
+  const canManageReviews = hasQmsRolePermission("qms.management_review.manage");
+  const createOptions = useMemo(() => quickCreateOptions(capabilities, canManageReviews), [capabilities, canManageReviews]);
   const loadRequestRef = useRef(0);
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
@@ -1340,6 +1342,13 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
 
   const continueQuickCreate = () => {
     if (!quickCreate) return;
+    if (quickCreate.kind === "review") {
+      const params = new URLSearchParams({ date: quickCreate.date });
+      if (quickCreate.title.trim()) params.set("title", quickCreate.title.trim());
+      setQuickCreate(null);
+      navigate(`/maintenance/${encodeURIComponent(amoCode)}/quality/management-review/new?${params}`);
+      return;
+    }
     if (quickCreate.kind === "car") {
       const params = new URLSearchParams();
       if (quickCreate.date) params.set("due_date", quickCreate.date);
@@ -1446,7 +1455,7 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
         <header className="qms-modern-planner__toolbar">
           <div className="qms-planner-toolbar__leading">
             <button type="button" className="qms-planner-icon-button qms-planner-icon-button--menu" onClick={() => setPreferences((current) => ({ ...current, leftRailOpen: !current.leftRailOpen }))} aria-label={preferences.leftRailOpen ? "Hide planner sidebar" : "Show planner sidebar"} title={preferences.leftRailOpen ? "Hide planner sidebar" : "Show planner sidebar"}>{preferences.leftRailOpen ? <PanelLeftClose size={18} /> : <Menu size={18} />}</button>
-            <div className="qms-planner-title"><strong>{title}</strong>{view === "day" ? <span>{tenantTimeZoneLabel}</span> : null}</div>
+            <div className="qms-planner-title"><h1 aria-label={`Quality Calendar: ${title}`}>{title}</h1>{view === "day" ? <span>{tenantTimeZoneLabel}</span> : null}</div>
             <button type="button" className="qms-planner-toolbar__search" onClick={() => setCommandOpen(true)}><Search size={16} /><span className="qms-planner-toolbar__search-placeholder">Search calendar or press / for commands</span><kbd>⌘K</kbd></button>
           </div>
           <div className="qms-planner-toolbar__controls">
@@ -1661,7 +1670,7 @@ export default function QmsPlannerPageV2({ embedded = false }: QmsPlannerPageV2P
               <>
                 <section className="qms-planner-welcome"><div className="qms-planner-welcome__icon"><CalendarClock size={22} /></div><div><strong>Plan, act, and follow through</strong><p>Schedule programme audits here. CAR and training open their existing create surfaces with the selected date. Management review is not creatable from the planner yet.</p></div></section>
                 <section className="qms-planner-panel-section"><h3>Attention now</h3><div className="qms-planner-attention-grid"><button type="button" onClick={() => setFocus("overdue")}><strong>{overdueCount}</strong><span>Overdue</span></button><button type="button" onClick={() => setFocus("today")}><strong>{todayCount}</strong><span>Today</span></button><button type="button" onClick={() => setFocus("week")}><strong>{upcomingCount}</strong><span>Next 7 days</span></button><button type="button" onClick={() => setFocus("unassigned")}><strong>{unassignedCount}</strong><span>Unassigned</span></button></div></section>
-                <section className="qms-planner-panel-section"><h3>Quick actions</h3><div className="qms-planner-action-list"><button type="button" disabled={!capabilities.can_create_audit} title={capabilities.can_create_audit ? undefined : "Scheduling audits requires audit manage access."} onClick={() => openQuickCreate(selectedDate, "09:00", "audit")}><Circle size={15} /><span>Schedule an audit</span><ChevronRight size={14} /></button><button type="button" disabled={!capabilities.can_create_audit} title={capabilities.can_create_audit ? undefined : "CAR creation requires Quality schedule authority."} onClick={() => openQuickCreate(selectedDate, "09:00", "car")}><Circle size={15} /><span>Plan a CAR follow-up</span><ChevronRight size={14} /></button><button type="button" disabled={!capabilities.can_manage_training} title={capabilities.can_manage_training ? undefined : "Training scheduling requires training manage access."} onClick={() => openQuickCreate(selectedDate, "09:00", "training")}><Circle size={15} /><span>Plan training</span><ChevronRight size={14} /></button><button type="button" disabled title="Management review has no planner create handoff yet."><Circle size={15} /><span>Schedule management review</span><ChevronRight size={14} /></button></div></section>
+                <section className="qms-planner-panel-section"><h3>Quick actions</h3><div className="qms-planner-action-list"><button type="button" disabled={!capabilities.can_create_audit} title={capabilities.can_create_audit ? undefined : "Scheduling audits requires audit manage access."} onClick={() => openQuickCreate(selectedDate, "09:00", "audit")}><Circle size={15} /><span>Schedule an audit</span><ChevronRight size={14} /></button><button type="button" disabled={!capabilities.can_create_audit} title={capabilities.can_create_audit ? undefined : "CAR creation requires Quality schedule authority."} onClick={() => openQuickCreate(selectedDate, "09:00", "car")}><Circle size={15} /><span>Plan a CAR follow-up</span><ChevronRight size={14} /></button><button type="button" disabled={!capabilities.can_manage_training} title={capabilities.can_manage_training ? undefined : "Training scheduling requires training manage access."} onClick={() => openQuickCreate(selectedDate, "09:00", "training")}><Circle size={15} /><span>Plan training</span><ChevronRight size={14} /></button><button type="button" disabled={!canManageReviews} title={canManageReviews ? undefined : "Management Review manage permission is required."} onClick={() => openQuickCreate(selectedDate, "09:00", "review")}><Circle size={15} /><span>Schedule management review</span><ChevronRight size={14} /></button></div></section>
                 <section className="qms-planner-panel-section"><h3>Useful shortcuts</h3><div className="qms-planner-shortcut-summary"><span>Command menu <kbd>⌘ K</kbd></span><span>Quick audit draft <kbd>C</kbd></span><span>Toggle sidebar <kbd>B</kbd></span><span>All shortcuts <button type="button" onClick={() => setShortcutsOpen(true)}>?</button></span></div></section>
                 <section className="qms-planner-panel-section"><h3>Source health</h3><p className={sourceErrors?.length ? "is-danger" : "is-success"}>{sourceErrors?.length ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}{sourceErrors?.length ? `${sourceErrors.length} source failures need attention.` : "All returned planner sources are healthy."}</p></section>
               </>

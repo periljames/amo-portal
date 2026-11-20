@@ -1,79 +1,44 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CalendarPlus, CheckCircle2, PanelRightClose, PanelRightOpen, ShieldAlert } from "lucide-react";
+import { CalendarPlus, CheckCircle2, ShieldAlert } from "lucide-react";
 
 import {
   createAuditHandoff,
   getPlannerHandoffOptions,
-  listMissionHandoffSources,
-  listSignalHandoffSources,
-  type AuditHandoffSource,
 } from "../../services/qmsAuditHandoff";
 import "../../styles/qms-audit-handoff.css";
+import { hasQmsRolePermission } from "../../app/routeGuards";
 
-type Props = { amoCode?: string };
-
-type Workspace = "missions" | "intelligence" | null;
-
-function workspaceFromLocation(pathname: string, search: string): Workspace {
-  const query = new URLSearchParams(search).get("workspace")?.toLowerCase();
-  if (query === "missions" || query === "intelligence") return query;
-  if (/\/quality\/missions(?:\/|$)/i.test(pathname)) return "missions";
-  if (/\/quality\/intelligence(?:\/|$)/i.test(pathname)) return "intelligence";
-  return null;
-}
+type Props = { amoCode: string; sourceType: "MISSION" | "SIGNAL"; sourceId: string; sourceLabel: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Audit handoff could not be created.";
 }
 
-const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
-  const location = useLocation();
-  const workspace = workspaceFromLocation(location.pathname, location.search);
-  const pathnameAmo = location.pathname.match(/^\/maintenance\/([^/]+)\//i)?.[1];
-  const resolvedAmo = amoCode || (pathnameAmo ? decodeURIComponent(pathnameAmo) : "");
+const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode: resolvedAmo, sourceType, sourceId, sourceLabel }) => {
+  const canSchedule = hasQmsRolePermission("qms.audit.manage");
   const [open, setOpen] = useState(false);
-  const [sourceId, setSourceId] = useState("");
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(`Targeted audit - ${sourceLabel}`);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("09:00");
   const [locationText, setLocationText] = useState("");
   const [scope, setScope] = useState("");
   const [criteria, setCriteria] = useState("");
   const [leadAuditor, setLeadAuditor] = useState("");
-  const [rationale, setRationale] = useState("Source-backed targeted assurance requirement.");
+  const [rationale, setRationale] = useState("");
   const [success, setSuccess] = useState<{ id: string; title: string; next_due_date: string } | null>(null);
   const [error, setError] = useState("");
 
-  const sourceQuery = useQuery({
-    queryKey: ["qms-audit-handoff-sources", resolvedAmo, workspace],
-    queryFn: ({ signal }) => workspace === "missions" ? listMissionHandoffSources(resolvedAmo, signal) : listSignalHandoffSources(resolvedAmo, signal),
-    enabled: Boolean(open && resolvedAmo && workspace),
-  });
   const optionsQuery = useQuery({
     queryKey: ["qms-audit-handoff-options", resolvedAmo],
     queryFn: ({ signal }) => getPlannerHandoffOptions(resolvedAmo, signal),
-    enabled: Boolean(open && resolvedAmo && workspace),
+    enabled: Boolean(open && resolvedAmo && canSchedule),
   });
-
-  const sources = sourceQuery.data || [];
-  const selected = useMemo<AuditHandoffSource | undefined>(() => sources.find((row) => row.id === sourceId), [sources, sourceId]);
-
-  /* These effects initialize editable handoff fields when authoritative query data arrives. */
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    if (!sourceId && sources.length) setSourceId(sources[0].id);
-  }, [sourceId, sources]);
-  useEffect(() => {
-    if (selected && !title) setTitle(`Targeted audit · ${selected.label}`);
-  }, [selected, title]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const createMutation = useMutation({
     mutationFn: () => {
-      if (!workspace || !sourceId) return Promise.reject(new Error("Select a governed source."));
-      return createAuditHandoff(resolvedAmo, workspace === "missions" ? "MISSION" : "SIGNAL", sourceId, {
+      if (!canSchedule || !sourceId) return Promise.reject(new Error("Select a governed source."));
+      return createAuditHandoff(resolvedAmo, sourceType, sourceId, {
         rationale,
         schedule: {
           title,
@@ -97,21 +62,19 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
     onError: (cause) => setError(errorMessage(cause)),
   });
 
-  if (!workspace || !resolvedAmo) return null;
+  if (!canSchedule || !resolvedAmo) return null;
   const ready = Boolean(sourceId && title.trim().length >= 3 && date && rationale.trim().length >= 8);
 
-  return <>
-    <button className="qms-audit-handoff-launcher" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="qms-audit-handoff-panel">
-      {open ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />} Create audit handoff
-    </button>
-    {open ? <aside id="qms-audit-handoff-panel" className="qms-audit-handoff-panel" aria-label="Create governed audit handoff">
-      <header><div><span>{workspace === "missions" ? "Mission" : "Intelligence"} → Planner</span><strong>Targeted audit handoff</strong></div><button type="button" onClick={() => setOpen(false)} aria-label="Close audit handoff"><PanelRightClose size={18} /></button></header>
+  return <details className="qms-audit-handoff-inline" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>Schedule a targeted audit for this {sourceType === "MISSION" ? "change" : "signal"}</summary>
+    {open ? <section className="qms-audit-handoff-panel" aria-label="Schedule source-linked audit">
+      <header><div><strong>{sourceLabel}</strong><span>Creates an audit in the existing Planner</span></div></header>
       <div className="qms-audit-handoff-body">
-        <p>The source remains authoritative in {workspace === "missions" ? "Missions" : "Intelligence"}. This action creates a guarded one-time Planner schedule and retains immutable source lineage.</p>
+        <p>The source remains authoritative in {sourceType === "MISSION" ? "Missions" : "Intelligence"}. This action creates a guarded one-time Planner schedule and retains immutable source lineage.</p>
         {error ? <div className="qms-audit-handoff-error" role="alert"><ShieldAlert size={16} /> {error}</div> : null}
         {success ? <div className="qms-audit-handoff-success"><CheckCircle2 size={17} /><div><strong>Planner schedule created</strong><span>{success.title} · {success.next_due_date}</span><a href={`/maintenance/${encodeURIComponent(resolvedAmo)}/quality/calendar/week`}>Open Planner</a></div></div> : null}
-        <label>Governed source<select value={sourceId} onChange={(event) => { setSourceId(event.target.value); setTitle(""); setSuccess(null); }}><option value="">Select source</option>{sources.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
-        {selected?.detail ? <small>{selected.detail}</small> : null}
+        {optionsQuery.error ? <p role="alert">{errorMessage(optionsQuery.error)}</p> : null}
+        <fieldset disabled={createMutation.isPending || Boolean(success)}>
         <label>Audit title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <div className="qms-audit-handoff-grid"><label>Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Start time<input type="time" value={time} onChange={(event) => setTime(event.target.value)} /></label></div>
         <label>Lead auditor<select value={leadAuditor} onChange={(event) => setLeadAuditor(event.target.value)}><option value="">Unassigned</option>{optionsQuery.data?.people.map((person) => <option key={person.id} value={person.id}>{person.full_name}{person.role ? ` · ${person.role}` : ""}</option>)}</select></label>
@@ -120,9 +83,10 @@ const QualityAuditHandoffHost: React.FC<Props> = ({ amoCode = "" }) => {
         <label>Criteria<textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} /></label>
         <label>Handoff rationale<textarea value={rationale} onChange={(event) => setRationale(event.target.value)} /></label>
         <button type="button" className="qms-audit-handoff-submit" onClick={() => createMutation.mutate()} disabled={!ready || createMutation.isPending}><CalendarPlus size={16} /> {createMutation.isPending ? "Creating guarded schedule…" : "Create Planner audit"}</button>
+        </fieldset>
       </div>
-    </aside> : null}
-  </>;
+    </section> : null}
+  </details>;
 };
 
 export default QualityAuditHandoffHost;

@@ -65,7 +65,6 @@ import {
   attentionLabel,
   buildAuditProgrammeLinkIndex,
   clampWorkspacePage,
-  formatAuditDate,
   lifecycleLabel,
   parseWorkspacePage,
   parseWorkspacePageSize,
@@ -442,10 +441,9 @@ const QualityAuditsWorkspacePage: React.FC = () => {
             .startsWith("surveillance ·")
             ? "Surveillance"
             : "Scheduled audit",
-          scheduledLabel:
-            `${formatAuditDate(audit.planned_start)} ${audit.planned_start_time?.slice(0, 5) || ""} – ${formatAuditDate(audit.planned_end)} ${audit.planned_end_time?.slice(0, 5) || ""}`
-              .replaceAll("  ", " ")
-              .trim(),
+          scheduledLabel: [...new Set([audit.planned_start, audit.planned_end].filter(Boolean).map(value => value!.slice(0, 10)))].map(value =>
+            new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase()
+          ).join("\n") || "Not scheduled",
           stageLabel: lifecycleLabel(audit.status, audit),
           attentionText: attentionLabel(audit) ?? "",
           nextActionLabel: action.label,
@@ -490,6 +488,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
       {
         headerName: "Scheduled",
         field: "scheduledLabel",
+        cellClass: "qa-audits-grid__scheduled",
         wrapText: true,
         colId: "scheduled",
         minWidth: 150,

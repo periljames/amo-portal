@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import Depends, Query
+from fastapi import Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text, String, and_, cast, func, or_
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from .enums import QMSDomain
 from .router import _decorate_car_register_items, _current_amo_id, router
 from .tenant_security import TenantContext, assert_quality_permission, set_postgres_tenant_context
 from .assurance_sources import responsibility
+from .finding_insights_router import process_mapping_condition
 from .schemas import CAROut, QMSAuditOut, QMSAuditRegisterRowOut, QMSFindingOut
 
 
@@ -76,6 +77,9 @@ def get_audit_register_paged(
     audit_id: Optional[UUID] = None,
     finding_id: Optional[UUID] = None,
     only_with_cars: bool = False,
+    severity: Literal["MINOR", "MAJOR", "CRITICAL"] | None = None,
+    process: str | None = Query(default=None, max_length=160),
+    process_unmapped: bool = False,
     workflow_stage: Optional[FindingWorkflowStage] = None,
     car_timing: Optional[CarTiming] = None,
     due_soon_days: int = Query(default=30, ge=0, le=90),
@@ -118,6 +122,15 @@ def get_audit_register_paged(
         query = query.filter(Finding.closed_at.is_not(None))
     if level:
         query = query.filter(cast(Finding.level, String) == level)
+    if severity:
+        query = query.filter(cast(Finding.severity, String) == severity)
+    process = _normalise_search(process)
+    if process and process_unmapped:
+        raise HTTPException(422, "Choose a recorded process or unmapped findings, not both.")
+    if process:
+        query = query.filter(text(process_mapping_condition("qms_audit_findings", matching=True))).params(quality_process=process)
+    elif process_unmapped:
+        query = query.filter(text("NOT " + process_mapping_condition("qms_audit_findings")))
     if period is not None:
         query = query.filter(Finding.created_at >= date(period, 1, 1), Finding.created_at < date(period + 1, 1, 1))
     if domain is not None:

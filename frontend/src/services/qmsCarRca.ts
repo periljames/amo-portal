@@ -127,6 +127,8 @@ async function publicRcaRequest<T>(token: string, path: string, method: "GET" | 
       await new Promise(resolve=>window.setTimeout(resolve,400));
       return publicRcaRequest<T>(token,path,method,body,false);
     }
+    if(error instanceof DOMException && error.name==="AbortError") throw new Error("The connection timed out. Your draft is retained; reconnect and retry.");
+    if(error instanceof TypeError) throw new Error("The server could not be reached. Your draft is retained; reconnect and retry.");
     throw error;
   } finally { window.clearTimeout(timeout); }
 }

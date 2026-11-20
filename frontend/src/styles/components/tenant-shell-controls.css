@@ -238,3 +238,36 @@
   .tenant-shell__appearance { grid-template-columns: minmax(0, 1fr); }
   .tenant-shell__accent-picker { grid-column: auto; }
 }
+
+/* Tenant wordmarks keep their full proportions instead of becoming circular icons. */
+.tenant-shell .tenant-shell__compact-brand:has(.brand-mark__logo) {
+  width: 144px;
+  height: 36px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #d8dce2;
+  border-radius: 6px;
+}
+.tenant-shell__compact-brand .brand-mark:has(.brand-mark__logo) {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.tenant-shell__compact-brand .brand-mark__logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+@media (max-width: 540px) {
+  .tenant-shell .tenant-shell__compact-brand:has(.brand-mark__logo) {
+    display: inline-grid;
+    width: 100px;
+    height: 32px;
+    padding: 3px 5px;
+  }
+  .tenant-shell__topbar-start:has(.brand-mark__logo) .tenant-shell__context { display: none; }
+}

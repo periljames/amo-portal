@@ -131,6 +131,8 @@ def create_app(root: Path, api_target="http://127.0.0.1:8080", ops_target="http:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "no-cache"
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Content-Language"] = "en"
         return response
 
     app = Starlette(routes=[Route("/{path:path}", handle, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])], lifespan=lifespan)

@@ -63,3 +63,5 @@ The full live acceptance specification deliberately still fails if it observes
 server errors or cannot prove final closure. It must not be reported as passing
 until the database connectivity problem is resolved and the remaining real
 review steps succeed.
+
+Continuation: [30 October live workflow and usability verification](CAR_WORKFLOW_VERIFICATION_2026-10-30.md) records the resumed review stages and governed closure.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Iterable, Optional
+from .supplier_identifiers import new_supplier_code
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_
@@ -243,11 +244,12 @@ def create_supplier(
     payload: schemas.SupplierCreate,
     actor_user_id: Optional[str],
 ) -> models.ProcurementSupplier:
+    supplier_code = new_supplier_code()
     duplicate = (
         db.query(models.ProcurementSupplier.id)
         .filter(
             models.ProcurementSupplier.amo_id == amo_id,
-            func.upper(models.ProcurementSupplier.supplier_code) == payload.supplier_code.strip().upper(),
+            func.upper(models.ProcurementSupplier.supplier_code) == supplier_code,
         )
         .first()
     )
@@ -268,14 +270,14 @@ def create_supplier(
             db.query(finance_models.Vendor)
             .filter(
                 finance_models.Vendor.amo_id == amo_id,
-                func.upper(finance_models.Vendor.code) == payload.supplier_code.strip().upper(),
+                func.upper(finance_models.Vendor.code) == supplier_code,
             )
             .first()
         )
         if not vendor:
             vendor = finance_models.Vendor(
                 amo_id=amo_id,
-                code=payload.supplier_code.strip().upper(),
+                code=supplier_code,
                 name=payload.legal_name.strip(),
                 email=payload.email,
                 phone=payload.phone,
@@ -288,7 +290,7 @@ def create_supplier(
 
     supplier = models.ProcurementSupplier(
         amo_id=amo_id,
-        supplier_code=payload.supplier_code.strip().upper(),
+        supplier_code=supplier_code,
         legal_name=payload.legal_name.strip(),
         trading_name=payload.trading_name,
         supplier_type=payload.supplier_type.strip().upper(),

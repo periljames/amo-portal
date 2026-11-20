@@ -176,6 +176,8 @@ export function plannerCategory(row: Record<string, unknown>): PlannerCategory {
   const eventType = text(row, "event_type", "eventType").toLowerCase();
   const title = text(row, "title", "course_name").toLowerCase();
   const entityType = text(row, "entity_type", "entityType").toLowerCase();
+  // Explicit review ownership takes precedence over words in the meeting title.
+  if (module === "management-review" || entityType.startsWith("management_review")) return "reviews";
   const haystack = `${module} ${eventType} ${title} ${entityType}`;
   if (module === "audits" || eventType.includes("audit") || entityType.includes("audit") || haystack.includes("audit")) return "audits";
   if (module === "cars" || eventType.includes("car") || eventType.includes("capa") || eventType.includes("corrective") || haystack.includes("capa")) return "cars";

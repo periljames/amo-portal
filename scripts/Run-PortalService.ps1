@@ -62,10 +62,23 @@ try {
    & robocopy.exe (Join-Path $workspaceRoot 'frontend/dist') $releaseRoot /E /COPY:DAT /R:1 /W:1 /MT:8 /NFL /NDL /NJH /NJS /NP | Out-Null
    if($LASTEXITCODE -gt 7){ throw 'Could not copy the built frontend release.' }
    # Old tabs may still request immutable chunks from the previous release.
-   if($previousRelease -and (Test-Path -LiteralPath (Join-Path $previousRelease.FullName 'assets'))) {
-    # Carry forward only missing immutable files; do not overwrite this release.
-    & robocopy.exe (Join-Path $previousRelease.FullName 'assets') (Join-Path $releaseRoot 'assets') /E /XC /XN /XO /COPY:DAT /R:1 /W:1 /MT:8 /NFL /NDL /NJH /NJS /NP | Out-Null
-    if($LASTEXITCODE -gt 7){ throw 'Could not retain the previous frontend assets.' }
+   if($previousRelease) {
+    # Retain only the previous build's own chunks. Copying its whole assets
+    # directory recursively accumulated every historical build on each restart.
+    $manifestPath = Join-Path $previousRelease.FullName '.vite/manifest.json'
+    if(Test-Path -LiteralPath $manifestPath) {
+     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+     $previousAssets = @(foreach($entry in $manifest.PSObject.Properties.Value){ $entry.file; $entry.css; $entry.assets }) | Where-Object { $_ -and $_ -match '^assets[/\\]' } | Sort-Object -Unique
+     foreach($relativeAsset in $previousAssets) {
+      $sourceAsset = [IO.Path]::GetFullPath((Join-Path $previousRelease.FullName $relativeAsset))
+      $targetAsset = [IO.Path]::GetFullPath((Join-Path $releaseRoot $relativeAsset))
+      if(-not $sourceAsset.StartsWith($previousRelease.FullName + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or -not $targetAsset.StartsWith($releaseRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)){ throw 'Invalid release asset path.' }
+      if((Test-Path -LiteralPath $sourceAsset -PathType Leaf) -and -not (Test-Path -LiteralPath $targetAsset)) {
+       New-Item -ItemType Directory -Path (Split-Path $targetAsset -Parent) -Force | Out-Null
+       Copy-Item -LiteralPath $sourceAsset -Destination $targetAsset
+      }
+     }
+    } else { Write-Warning 'Previous build manifest is unavailable; old tabs may need to reload.' }
    }
    @{pid=$PID; startedTicks=(Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks; workspace=$workspaceRoot; service=$Service; release=$releaseRoot} | ConvertTo-Json | Set-Content -LiteralPath $ownerFile -Encoding utf8
    Write-Host "Serving verified release: $releaseRoot" -ForegroundColor Cyan
