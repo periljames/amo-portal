@@ -172,7 +172,8 @@ jobs:
         run: python -m amodb.apps.quality.tests.postgres_car_control_loop_probe
 
   frontend-contract:
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2 cannot install browser dependencies on ubuntu-26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
