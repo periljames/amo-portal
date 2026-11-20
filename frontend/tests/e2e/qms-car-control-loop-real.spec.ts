@@ -521,7 +521,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     const accepted = await reviewThroughUi(internalPage,data,"ACCEPTED",
       "RCA accepted after rework identified the management-control and evidence-ownership root cause.",
-      "CAPA accepted as a plan; implementation, evidence and effectiveness still require independent verification.");
+      "CAPA accepted as a plan; implementation, evidence and effectiveness milestones still require independent verification.");
     expect(accepted.status).toBe(200);
     await internalPage.goto(controlPath);
     const lifecycle = internalPage.getByRole("heading", { name: "Staged CAR lifecycle" }).locator("xpath=ancestor::section[1]");
