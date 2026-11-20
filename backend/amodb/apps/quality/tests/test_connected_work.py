@@ -16,7 +16,7 @@ def _table(client, sql):
     client.connection.execute(text("CREATE " + prefix + "TABLE " + sql))
 
 
-def test_connected_training_steps_are_owned_bounded_and_correctly_blocked(client, monkeypatch):
+def test_connected_training_steps_are_owned_bounded_and_actionable(client, monkeypatch):
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
     monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.training.view")
@@ -26,24 +26,27 @@ def test_connected_training_steps_are_owned_bounded_and_correctly_blocked(client
     client.connection.execute(text("""
         INSERT INTO training_workflow_instances VALUES
         ('w1','tenant-a','Document training','IN_PROGRESS',:due),
-        ('w2','tenant-b','Different tenant training','IN_PROGRESS',:due)"""), {"due":due})
+        ('w2','tenant-b','Different tenant training','IN_PROGRESS',:due),
+        ('w3','tenant-a','Single-step training','IN_PROGRESS',:due)"""), {"due":due})
     client.connection.execute(text("""
         INSERT INTO training_workflow_steps VALUES
         ('s1','tenant-a','w1','chair','Complete competence check','READY'),
         ('s2','tenant-a','w1','chair','Supervisor sign-off','PENDING'),
         ('s3','tenant-a','w1','peer','Peer work','READY'),
-        ('s4','tenant-b','w2','chair','Foreign tenant step','READY')"""))
+        ('s4','tenant-b','w2','chair','Foreign tenant step','READY'),
+        ('s5','tenant-a','w3','chair','Only step','PENDING')"""))
     client.connection.commit()
     response = client.get("/work-inbox/related?source=training-steps")
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["source_errors"] == []
-    assert result["total"] == 2
-    assert {v["record_id"] for v in result["items"]} == {"s1", "s2"}
-    assert [row["blocked"] for row in result["items"] if row["record_id"] == "s2"] == [True]
+    assert result["total"] == 3
+    assert {v["record_id"] for v in result["items"]} == {"s1", "s2", "s5"}
+    assert all(not row["blocked"] for row in result["items"])
+    assert all(row["next_action"] == "Continue your assigned training workflow" for row in result["items"])
     assert all(row["scope"] == "ASSIGNED" for row in result["items"])
-    assert client.get("/work-inbox/related?source=training-steps&category=overdue").json()["total"] == 2
-    assert client.get("/work-inbox/related?source=training-steps&offset=1&limit=1").json()["total"] == 2
+    assert client.get("/work-inbox/related?source=training-steps&category=overdue").json()["total"] == 3
+    assert client.get("/work-inbox/related?source=training-steps&offset=1&limit=1").json()["total"] == 3
     assert len(client.get("/work-inbox/related?source=training-steps&offset=1&limit=1").json()["items"]) == 1
     assert client.get("/work-inbox/related?source=training-steps&q=supervisor").json()["total"] == 1
     assert client.get("/work-inbox/related?source=untrusted").status_code == 422
@@ -57,17 +60,22 @@ def test_connected_document_review_never_exposes_others_manuscripts(client, monk
     monkeypatch.setattr(related, "assert_quality_permission", lambda *args: None)
     monkeypatch.setattr(related, "set_postgres_tenant_context", lambda *args, **kwargs: None)
     monkeypatch.setattr(related, "has_quality_permission", lambda db, ctx, p: p == "qms.document.view")
+    _table(client, "manual_tenants (id text,amo_id text)")
     _table(client, "manuals (id text,tenant_id text,title text,code text)")
     _table(client, "document_review_plans (id text,tenant_id text,manual_id text,owner_user_id text,due_at date,status text)")
     client.connection.execute(text("""
-        INSERT INTO manuals VALUES ('m1','tenant-a','Quality Manual','QM-01'),('m2','tenant-b','Private Manual','QM-B')
+        INSERT INTO manual_tenants VALUES ('dms-a','tenant-a'),('dms-b','tenant-b')
+    """))
+    client.connection.execute(text("""
+        INSERT INTO manuals VALUES ('m1','dms-a','Quality Manual','QM-01'),('m2','dms-b','Private Manual','QM-B')
     """))
     client.connection.execute(text("""
         INSERT INTO document_review_plans VALUES
           ('a','tenant-a','m1','chair','2020-01-01','SCHEDULED'),
           ('b','tenant-a','m1','peer','2020-01-01','SCHEDULED'),
           ('c','tenant-b','m2','chair','2020-01-01','SCHEDULED'),
-          ('d','tenant-a','m1','chair','2020-01-01','COMPLETED')
+          ('d','tenant-a','m1','chair','2020-01-01','COMPLETED'),
+          ('e','tenant-a','m2','chair','2020-01-01','SCHEDULED')
     """))
     client.connection.commit()
     response = client.get("/work-inbox/related?source=document-reviews")
@@ -130,6 +138,27 @@ def test_connected_provider_approval_is_shared_not_individually_assigned(client,
     assert "private@example.test" not in str(data)
     assert data["items"][0]["due_date"] is None
     assert data["items"][0]["route"].endswith("/quality/external-accounts?view=accounts&grant=g1")
+
+    # On PostgreSQL an untyped NULL turns into text at the derived-table
+    # boundary, breaking both comparisons with CURRENT_DATE and a DATE UNION.
+    _table(client, "training_remedial_actions (id text,amo_id text,owner_user_id text,required_activity text,status text,due_date date)")
+    client.connection.execute(text("""
+        INSERT INTO training_remedial_actions VALUES
+          ('ra','tenant-a','chair','Submit training evidence','PENDING','2020-01-01')
+    """))
+    client.connection.commit()
+    monkeypatch.setattr(related, "has_quality_permission",
+                        lambda db, ctx, p: p in {"qms.audit.manage", "qms.training.view"})
+    filtered = client.get("/work-inbox/related?source=provider-approvals&category=upcoming")
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["items"][0]["due_date"] is None
+    combined = client.get("/work-inbox/related")
+    assert combined.status_code == 200, combined.text
+    assert combined.json()["total"] == 2
+    assert {item["source"] for item in combined.json()["items"]} == {
+        "provider-approvals", "training-remedial",
+    }
     _assign_quality_role(client, "QUALITY_OFFICER")
     assert client.get("/work-inbox/related?source=provider-approvals").json()["total"] == 0
 

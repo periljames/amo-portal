@@ -61,7 +61,8 @@ SOURCES = {
               CAST(r.status AS TEXT) status,
               DATE(r.due_at) due_date
           FROM document_review_plans r
-          JOIN manuals m ON m.id=r.manual_id AND m.tenant_id=r.tenant_id
+          JOIN manuals m ON m.id=r.manual_id
+          JOIN manual_tenants mt ON mt.id=m.tenant_id AND mt.amo_id=r.tenant_id
           WHERE r.tenant_id=:amo AND r.owner_user_id=:actor
             AND UPPER(r.status) NOT IN ('DONE','COMPLETE','COMPLETED','CLOSED','CANCELLED','REJECTED')""",
         "route": "document-control/compliance?view=reviews",
@@ -111,7 +112,7 @@ SOURCES = {
         "projection": """SELECT CAST(g.id AS TEXT) id,
               ('Review verified provider representative · ' || s.legal_name || ' · ' || i.email) title,
               'AWAITING_QUALITY_APPROVAL' status,
-              NULL due_date
+              CAST(NULL AS DATE) due_date
           FROM external_tenant_grants g
           JOIN external_identities i ON i.id=g.identity_id
           JOIN external_tenant_providers p ON p.id=g.tenant_provider_id AND p.amo_id=g.amo_id
@@ -207,11 +208,8 @@ def related_work(
         for row in rows:
             spec = SOURCES[row["source"]]
             status = str(row["status"] or "").upper()
-            blocked = row["source"] == "training-steps" and status in {"PENDING", "QUEUED"}
-            action = (
-                "Await activation of an earlier training step"
-                if blocked else spec["next_action"]
-            )
+            # Training's authoritative completion service accepts assigned PENDING
+            # steps directly; no preceding-step activation transition exists.
             items.append({
                 "id": row["source"] + ":" + str(row["id"]),
                 "record_id": str(row["id"]),
@@ -226,8 +224,8 @@ def related_work(
                     else f"/maintenance/{ctx.amo_code}/" + spec["route"]
                 ),
                 "scope": spec["scope"],
-                "next_action": action,
-                "blocked": blocked,
+                "next_action": spec["next_action"],
+                "blocked": False,
             })
     return {
         "items": items, "total": total, "limit": limit, "offset": offset,
