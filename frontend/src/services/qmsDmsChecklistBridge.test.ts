@@ -30,7 +30,8 @@ describe("QMS and DMS checklist integration contract", () => {
     expect(prepareSource).toContain("Suggested from a similar audit");
     expect(prepareSource).toContain("Upload to DMS");
     expect(serviceSource).toContain("/checklist-library/upload");
-    expect(intakeSource).toContain("Confirm metadata");
+    expect(intakeSource).toContain("Inspect & map");
+    expect(intakeSource).toContain('step === "METADATA"');
     expect(intakeSource).toContain("Parent controlled document");
     expect(intakeSource).toContain('value: "WORK_INSTRUCTION"');
     expect(intakeSource).toContain('value: "RECORD"');
@@ -49,7 +50,9 @@ describe("QMS and DMS checklist integration contract", () => {
 
   it("uses the immutable checklist-binding endpoint as Prepare authority", () => {
     expect(prepareSource).toContain("const confirmChecklistBinding");
-    expect(prepareSource).toContain("const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);");
+    expect(prepareSource).toContain("const bindingConfirmation = await getChecklistBinding(amoCode, auditId, binding.id);");
+    expect(prepareSource).toContain("bindingConfirmation.id !== binding.id || bindingConfirmation.audit_id !== auditId");
+    expect(prepareSource).not.toContain("const bindingsConfirmation = await listChecklistBindings(amoCode, auditId);");
     expect(prepareSource).toContain("const bindings = fullBindingsQuery.data?.items || [];");
     expect(prepareSource).toContain("getAuditPreparationContext(amoCode, auditId)");
     expect(prepareSource).not.toContain("const cacheChecklistBinding");
