@@ -46,6 +46,9 @@ export async function listEmailLogs(params: {
   recipient?: string;
   start?: string;
   end?: string;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
 }): Promise<EmailLog[]> {
   const token = getToken();
   const query = toQuery({
@@ -54,8 +57,11 @@ export async function listEmailLogs(params: {
     recipient: params.recipient,
     start: params.start,
     end: params.end,
+    limit: params.limit,
+    offset: params.offset,
   });
   const resp = await fetch(`${API_BASE}/email-logs${query}`, {
+    signal: params.signal,
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (!resp.ok) {
