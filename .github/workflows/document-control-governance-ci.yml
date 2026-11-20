@@ -301,7 +301,7 @@ jobs:
   authenticated-browser:
     name: Production-build authenticated DMS operating-model, role and 2000-page acceptance
     needs: [backend-postgres, frontend]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:
