@@ -463,6 +463,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         minWidth: 220,
         flex: 1.5,
         wrapText: true,
+        autoHeight: true,
         cellRenderer: AuditIdentityCell,
         comparator: (_a, _b, nodeA, nodeB) =>
           (nodeA?.data?.audit_ref || "").localeCompare(
@@ -746,7 +747,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
         <div className="qa-audits-list__grid-shell" style={{ "--audit-row-count": Math.max(1, rowData.length) } as React.CSSProperties}>
           <RecordTable rows={rowData} columns={columnDefs} label="Audits" loading={auditsQuery.isLoading} onRowClick={(data, event) => onRowClicked({ data, event: event.nativeEvent })} />
         </div>
-        <Pagination label="Audits" page={safePage} pageSize={pageSize} total={auditsQuery.data?.total} visibleCount={rowData.length} busy={auditsQuery.isFetching} pageSizes={WORKSPACE_PAGE_SIZES} onPageChange={(value)=>patchParams({page:String(value)})} onPageSizeChange={(value)=>patchParams({pageSize:String(value),page:null})} />
+        <Pagination label="Audits" page={safePage} pageSize={pageSize} total={auditsQuery.data?.total ?? 0} visibleCount={rowData.length} busy={auditsQuery.isFetching} pageSizes={WORKSPACE_PAGE_SIZES} onPageChange={(value)=>patchParams({page:String(value)})} onPageSizeChange={(value)=>patchParams({pageSize:String(value),page:null})} />
       </section>
       {launchMode && launchAuditsQuery.isLoading ? <p><InlineLoading label={"Loading existing audits..."}/></p> : null}
       {launchMode && launchAuditsQuery.isError ? <p role="alert">Existing audits could not be loaded. <button onClick={() => void launchAuditsQuery.refetch()}>Retry</button></p> : null}

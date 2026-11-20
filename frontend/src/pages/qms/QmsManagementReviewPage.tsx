@@ -51,7 +51,14 @@ export default function QmsManagementReviewPage() {
     if (linkedAction.data?.payload.review_id) navigate(`${root}/${linkedAction.data.payload.review_id}/overview?action=${linkedAction.data.id}#action-${linkedAction.data.id}`, { replace: true });
   }, [linkedAction.data, root, navigate]);
   useEffect(() => { if (detailId && location.hash.startsWith("#action-")) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" }); }, [detailId, location.hash, revision]);
-  useEffect(() => { setOffset(0); setQuery(""); setMessage(""); }, [location.pathname]);
+  useEffect(() => {
+    const reset = window.setTimeout(() => {
+      setOffset(0);
+      setQuery("");
+      setMessage("");
+    }, 0);
+    return () => window.clearTimeout(reset);
+  }, [location.pathname]);
   const members = useQuery({ queryKey: ["management-review-members", amoCode], queryFn: () => reviewRequest<{ items: ReviewMember[] }>(amoCode, "/members"), staleTime: 60_000 });
   const list = useQuery({ queryKey: ["management-reviews", amoCode, view, query, offset, revision], enabled: !detailId && !creating,
     queryFn: () => reviewRequest<ReviewList>(amoCode, `?${new URLSearchParams({ view, q: query, offset: String(offset) })}`) });

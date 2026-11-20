@@ -77,6 +77,32 @@ def _template_variables(context: dict[str, Any]) -> dict[str, str | int]:
 
 
 def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) -> tuple[str, str]:
+    if template_key.startswith("external-provider-"):
+        # Standalone account invitation/recovery content; never fall back to a
+        # password-reset hosted template with unrelated variable contracts.
+        message = str(context.get("message") or "").strip()
+        if not message:
+            raise ValueError("An external provider message cannot be sent without its one-time instruction.")
+        action_url = str(context.get("action_url") or "").strip()
+        action = (
+            f"<p><a href='{html.escape(action_url, quote=True)}'>Open the external provider sign-in</a></p>"
+            if action_url.startswith("https://") else ""
+        )
+        html_body = (
+            "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#172033'>"
+            f"<h2>{html.escape(subject)}</h2>"
+            f"<p>{html.escape(message)}</p>{action}"
+            "<p>If you did not expect an AMO Portal account invitation or verification, "
+            "contact the Quality team using a known channel. Do not share the one-time code.</p>"
+            "</body></html>"
+        )
+        text_body = (
+            subject + "\n\n" + message + "\n\n"
+            + (action_url + "\n\n" if action_url.startswith("https://") else "")
+            + "If this was unexpected, contact your Quality team. Never share your one-time code."
+        )
+        return html_body, text_body
+
     if template_key == "qms_audit_notice_memo":
         recipient = str(context.get("recipient_name") or "Audit recipient").strip()
         role = str(context.get("recipient_role") or "AUDIT_RECIPIENT").replace("_", " ").strip().title()

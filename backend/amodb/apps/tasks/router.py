@@ -3,7 +3,7 @@ from __future__ import annotations
 from amodb.apps.resilience.offline_commands import offline_create
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,6 +30,32 @@ def list_my_tasks(
     current_user: account_models.User = Depends(get_current_active_user),
 ):
     return services.list_tasks_for_user(db, amo_id=current_user.amo_id, owner_user_id=current_user.id)
+
+
+@router.get("/tasks/personal", response_model=schemas.PersonalTaskPage)
+def list_personal_tasks(
+    status: Literal["open", "completed", "all"] = Query("open"),
+    q: str = Query("", max_length=80),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100000),
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    """Personal-only, owner-scoped, bounded read path; governed QMS records are not mutable here."""
+    query = db.query(models.Task).filter(
+        models.Task.amo_id == current_user.amo_id,
+        models.Task.owner_user_id == current_user.id,
+        models.Task.entity_type == "quality_personal",
+    )
+    if status == "open":
+        query = query.filter(models.Task.status.in_([models.TaskStatus.OPEN, models.TaskStatus.IN_PROGRESS]))
+    elif status == "completed":
+        query = query.filter(models.Task.status.in_([models.TaskStatus.DONE, models.TaskStatus.CANCELLED]))
+    if q.strip():
+        query = query.filter(models.Task.title.ilike("%" + q.strip() + "%"))
+    total = query.count()
+    rows = query.order_by(models.Task.due_at.asc().nullslast(), models.Task.id.asc()).offset(offset).limit(limit).all()
+    return {"items": rows, "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("/tasks/personal", response_model=schemas.TaskRead, status_code=201)

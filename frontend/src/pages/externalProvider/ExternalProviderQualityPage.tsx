@@ -23,12 +23,41 @@ const ROLES = ["PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTA
   "COMMERCIAL_REPRESENTATIVE", "DOCUMENT_SUBMITTER", "READ_ONLY", "CUSTOM"];
 const CAPS = ["profile.read", "profile.propose", "document.read", "document.submit", "capa.respond",
   "task.read", "task.respond", "contract.read", "contract.acknowledge", "members.read", "members.manage", "sessions.manage"];
+type DeliveryReceipt = {
+  email_status: string;
+  email_delivery_status: string;
+  email_log_id: string | null;
+  provider_message_id: string | null;
+  sending_mode: string | null;
+  provider_accepted: boolean;
+};
+type DeliveryAttempt = DeliveryReceipt & {
+  attempted_at: string;
+  recipient: string;
+  effective_recipient: string | null;
+  template_key: string;
+  events: Array<{ event: string; at: string }>;
+};
+type DeliveryHistory = {
+  grant_id: string; grant_status: string; recipient: string; verified: boolean;
+  attempts: DeliveryAttempt[]; note: string;
+};
+const deliveryLabel = (status: string) => {
+  const value = status.toUpperCase();
+  if (value === "ACCEPTED") return "Accepted by Resend — recipient delivery not confirmed";
+  if (value === "DELIVERED") return "Accepted by recipient's mail server — inbox placement not confirmed";
+  if (value === "BLOCKED") return "Sending blocked by the configured provider or policy";
+  if (value === "FAILED") return "Email send failed";
+  if (value === "BOUNCED" || value === "COMPLAINED" || value === "SUPPRESSED") return "Email not deliverable";
+  return LABEL(value);
+};
 const LABEL = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g,letter=>letter.toUpperCase());
 export default function ExternalProviderQualityPage() {
   const { amoCode = "" } = useParams();
   const [query, setQuery] = useSearchParams();
   const section = ["accounts", "invite", "reviews", "history"].includes(query.get("view") || "") ? query.get("view")! : "accounts";
   const supplierFilter = query.get("supplier");
+  const focusedGrant = query.get("grant");
   const [stateFilter, setStateFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const setSection = (view: string) => { const next = new URLSearchParams(query); next.set("view", view); setQuery(next); setEditing(null); setError(""); };
@@ -54,6 +83,11 @@ export default function ExternalProviderQualityPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [historyGrant, setHistoryGrant] = useState<string | null>(null);
+  const [deliveryHistory, setDeliveryHistory] = useState<DeliveryHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const historySequence = useRef(0);
   const [editing, setEditing] = useState<Grant | null>(null);
   const [newRole, setNewRole] = useState("READ_ONLY");
   const [capabilities, setCapabilities] = useState<string[]>([]);
@@ -105,24 +139,87 @@ export default function ExternalProviderQualityPage() {
     return()=>controller.abort();
   },[base,editing?.grant_id,manager,scopeKind,scopeSearch,scopeOffset]);
 
+  async function loadDeliveryHistory(grantId: string) {
+    const sequence = ++historySequence.current;
+    setHistoryGrant(grantId);
+    setHistoryError("");
+    setHistoryLoading(true);
+    try {
+      const result = await apiRequest<DeliveryHistory>(
+        base + "/grants/" + encodeURIComponent(grantId) + "/delivery-history",
+        { cacheTtlMs: 0 },
+      );
+      if (sequence === historySequence.current) setDeliveryHistory(result);
+    } catch (cause) {
+      if (sequence === historySequence.current) {
+        setHistoryError(cause instanceof Error ? cause.message : "Delivery history is not available.");
+        setDeliveryHistory(null);
+      }
+    } finally {
+      if (sequence === historySequence.current) setHistoryLoading(false);
+    }
+  }
+
   async function act(path: string, body: object, success: string, method = "POST") {
     if (busy) return;
-    if ("reason" in body && (typeof body.reason !== "string" || body.reason.trim().length < 8)) { setError("Enter a specific decision reason of at least 8 characters before changing access."); return; }
-    setBusy(true);setError("");setMessage("");
+    if ("reason" in body && (typeof body.reason !== "string" || body.reason.trim().length < 8)) {
+      setError("Enter a specific decision reason of at least 8 characters before changing access.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMessage("");
     try {
-      const result = await apiRequest<{delivery_status?:string}>(base + path, {
+      const result = await apiRequest<{
+        id?: string;
+        delivery_status?: string;
+        delivery?: DeliveryReceipt;
+      }>(base + path, {
         method, headers: {"Content-Type":"application/json"}, body:JSON.stringify(body),
       });
-      setMessage(result.delivery_status && result.delivery_status !== "SENT"
-        ? `Account record saved. Email delivery status: ${result.delivery_status}. Configure the notification provider or resend the invitation.`
-        : success);
+      if (result.delivery) {
+        const receipt = result.delivery;
+        const accepted = receipt.provider_accepted;
+        const sandbox = receipt.sending_mode === "SANDBOX";
+        if (!accepted) {
+          setError("Account record saved, but invitation email was not accepted. " +
+            deliveryLabel(receipt.email_delivery_status) +
+            (receipt.email_log_id ? " · Mail log: " + receipt.email_log_id : "") +
+            ". Review delivery history and mail configuration before resending.");
+        } else {
+          setMessage(sandbox
+            ? "Invitation recorded. Resend accepted the sandbox message, but the intended recipient was NOT emailed."
+            : "Invitation recorded. Resend accepted the email; recipient delivery is not yet confirmed.");
+        }
+        const grantId = result.id || (path.match(/\/grants\/([^/]+)/)?.[1] ?? null);
+        if (grantId) void loadDeliveryHistory(grantId);
+      } else if (result.delivery_status && result.delivery_status !== "SENT") {
+        setError("Account record saved. Email delivery status: " + result.delivery_status +
+          ". Review the mail configuration before resending.");
+      } else {
+        setMessage(success);
+      }
       setEditing(null);
       setReason("");
+      // The invite record was committed even if the mail send failed;
+      // resetting prevents accidental duplicate-grant submission.
       if (path === "/invitations") { setName(""); setEmail(""); setSupplier(""); }
-      try { await refresh(); } catch { setError("The change was saved, but the register could not refresh. Use Refresh before repeating the action."); }
-    } catch(e) { setError(e instanceof Error ? e.message : "Account operation failed"); }
-    finally {setBusy(false);}
+      try {
+        await refresh();
+      } catch {
+        setError("The change was saved, but the register could not refresh. Use Refresh before repeating the action.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Account operation failed");
+    } finally { setBusy(false); }
   }
+  useEffect(() => {
+    if (focusedGrant && section === "accounts" && canReviewAccounts) {
+      void loadDeliveryHistory(focusedGrant);
+    }
+    // Grant deep links select only a permitted tenant account via the server.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedGrant, section, canReviewAccounts, amoCode]);
   useEffect(()=>{
     if(!editing) return;
     const panel=document.getElementById("vendor-privilege-editor");
@@ -151,7 +248,7 @@ export default function ExternalProviderQualityPage() {
       </section>
     </div></div>
   </DepartmentLayout>;
-  const filtered=items.filter(i=>(!supplierFilter || String(i.supplier_id)===supplierFilter) && (!stateFilter || i.grant_state===stateFilter)).filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
+  const filtered=items.filter(i=>(!focusedGrant || i.grant_id===focusedGrant) && (!supplierFilter || String(i.supplier_id)===supplierFilter) && (!stateFilter || i.grant_state===stateFilter)).filter((i) => `${i.legal_name} ${i.email} ${i.supplier_code}`
     .toLowerCase().includes(search.toLowerCase()));
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><main className="vendor-portal vendor-quality-workspace">
     <div className="vendor-shell">
@@ -222,7 +319,7 @@ export default function ExternalProviderQualityPage() {
           <label className="vendor-field"><span>Find representative or provider</span>
             <input type="search" value={search} onChange={(e)=>setSearch(e.target.value)}/></label></div>
         <div className="vendor-account-filters"><label className="vendor-field"><span>Account state</span><select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option value="">All states</option>{["PENDING","ACTIVE","SUSPENDED","REVOKED"].map(v=><option key={v} value={v}>{LABEL(v)}</option>)}</select></label>
-        {supplierFilter && <button type="button" onClick={()=>{const next=new URLSearchParams(query);next.delete("supplier");setQuery(next);}}>Show all providers</button>}
+        {(supplierFilter || focusedGrant) && <button type="button" onClick={()=>{const next=new URLSearchParams(query);next.delete("supplier");next.delete("grant");setQuery(next);}}>Show all providers and accounts</button>}
         {manager && <label className="vendor-field vendor-decision-reason"><span>Reason for the next access decision</span><textarea value={reason} onChange={e=>setReason(e.target.value)} minLength={8} rows={2} placeholder="Record why you are approving, restricting or revoking access." /></label>}</div>
         {loading && <p role="status">Loading provider accounts...</p>}
         <div className="vendor-table-wrap"><table className="vendor-table">
@@ -233,7 +330,13 @@ export default function ExternalProviderQualityPage() {
             <td><strong>{item.display_name}</strong><small>{item.email}</small></td>
             <td>{LABEL(item.role_code)}</td><td>{item.verified_at?"Verified":"Pending"}</td>
             <td>{item.grant_state}</td><td>{item.portal_state}{item.restrict_new_work?" · restricted":""}</td>
-            <td>{manager ? <details className="vendor-account-controls"><summary>Manage account</summary><div className="vendor-actions">
+            <td><div className="vendor-account-delivery">
+              <button type="button" className="vendor-delivery-trigger"
+                onClick={() => void loadDeliveryHistory(item.grant_id)}
+                aria-label={`Inspect invitation delivery for ${item.display_name}`}>
+                Email delivery
+              </button>
+              {manager ? <details className="vendor-account-controls"><summary>Manage account</summary><div className="vendor-actions">
               {manager && <>
                 {!item.verified_at && item.grant_state==="PENDING" &&
                   <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/resend-invitation`,{},"One-time invitation reissued.")}>Resend invitation</button>}
@@ -258,11 +361,60 @@ export default function ExternalProviderQualityPage() {
                 <button disabled={busy} onClick={()=>void act(`/grants/${item.grant_id}/reverify`,{state:"PENDING",reason:reason.trim()},"One-time verification code issued and sessions revoked.")}>Reverify</button>
                 <button disabled={busy} onClick={()=>void act(`/identities/${item.identity_id}/unlock`,{state:"ACTIVE",reason:reason.trim()},"Login lockout cleared.")}>Unlock login</button>
               </>}
-            </div></details> : <span>Read only</span>}</td>
+            </div></details> : null}</div></td>
           </tr>)}</tbody>
         </table></div>
         {!loading && !filtered.length && <div className="vendor-empty-state"><h3>No matching vendor accounts</h3><p>Register the organization in External Providers, then invite a representative. Organization approval and portal access remain separate decisions.</p>{manager && <button type="button" className="vendor-primary" onClick={()=>setSection("invite")}>Invite a representative</button>}</div>}
         <p className="vendor-table-caption">{filtered.length} of {items.length} representative accounts. Open a provider name for qualification, agreements and oversight.</p>
+      </section>}
+      {historyGrant && section === "accounts" && <section className="vendor-card vendor-delivery-history" aria-label="Provider invitation delivery history">
+        <div className="vendor-toolbar">
+          <div><h2>Invitation delivery history</h2>
+            <p>Invitation creation, provider acceptance and recipient delivery are separate events.</p>
+          </div>
+          <div className="vendor-actions">
+            <button type="button" disabled={historyLoading} onClick={() => void loadDeliveryHistory(historyGrant)}>
+              {historyLoading ? "Checking…" : "Refresh delivery status"}
+            </button>
+            <button type="button" onClick={() => {
+              historySequence.current++;
+              setHistoryGrant(null);
+              setDeliveryHistory(null);
+              setHistoryError("");
+              setHistoryLoading(false);
+            }}>Close</button>
+          </div>
+        </div>
+        {historyLoading && <p role="status">Loading provider delivery receipts…</p>}
+        {historyError && <p role="alert" className="vendor-error">{historyError}</p>}
+        {deliveryHistory && <>
+          <p><strong>Intended recipient:</strong> {deliveryHistory.recipient} ·
+            <strong> Account:</strong> {deliveryHistory.grant_status} ·
+            <strong> Email verified:</strong> {deliveryHistory.verified ? "Yes" : "Not yet"}</p>
+          <p className="vendor-delivery-note">{deliveryHistory.note}</p>
+          {deliveryHistory.attempts.length ? <ol className="vendor-delivery-attempts">
+            {deliveryHistory.attempts.map(attempt => <li key={attempt.email_log_id || attempt.attempted_at}>
+              <div className="vendor-delivery-attempt-head">
+                <strong>{deliveryLabel(attempt.email_delivery_status)}</strong>
+                <time dateTime={attempt.attempted_at}>{new Date(attempt.attempted_at).toLocaleString()}</time>
+              </div>
+              <p>Template: {attempt.template_key} · Log: {attempt.email_log_id || "Unavailable"}</p>
+              {attempt.provider_message_id && <p>Resend message: {attempt.provider_message_id}</p>}
+              {attempt.sending_mode === "SANDBOX" && <p className="vendor-delivery-warning">
+                Sandbox routing was active. The intended recipient was not the actual delivery destination.
+              </p>}
+              {attempt.effective_recipient && <p>Effective destination: {attempt.effective_recipient}</p>}
+              {!!attempt.events.length && <ul aria-label="Provider events">
+                {attempt.events.map((event, index) => <li key={index}>
+                  {LABEL(event.event)} · <time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>
+                </li>)}
+              </ul>}
+            </li>)}
+          </ol> : <p role="status">No correlated email receipts have been recorded for this grant.
+            Legacy invitations may predate delivery-correlation tracking.</p>}
+          {manager && <p><Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/mail-identity/overview`}>
+            Check Quality mail identity</Link></p>}
+        </>}
       </section>}
       {manager && editing && <section id="vendor-privilege-editor" tabIndex={-1} className="vendor-card">
         <h2>Review assigned privilege boundaries · {editing.email}</h2>

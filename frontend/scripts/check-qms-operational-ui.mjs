@@ -37,6 +37,8 @@ const backendAssurancePermissions = read("../backend/amodb/apps/quality/assuranc
 const backendTenantSecurity = read("../backend/amodb/apps/quality/tenant_security.py");
 const semanticRegressions = read("tests/e2e/qms-operational-semantic-regressions.spec.ts");
 const codexRegressions = read("tests/e2e/qms-codex-review-regressions.spec.ts");
+const personalWork = read("src/pages/qms/inbox/QmsPersonalTasks.tsx");
+const workInbox = read("src/pages/qms/QmsWorkInboxPage.tsx");
 
 for (const [name, css] of [
   ["Missions", missions],
@@ -178,9 +180,17 @@ for (const testContract of [
 }
 
 for (const reviewRegression of [
-  "Inbox preserves notification receipt time without treating created_at as a deadline",
+  "Governed inbox keeps notifications separate and undated source records neutral",
+  "Quality work shows authorised counts, overdue urgency, source filtering and shared approval semantics",
+  "Personal to-dos save reminders, complete, reopen and fit responsive viewports",
 ]) {
   assertIncludes(codexRegressions, reviewRegression, `Codex review regression coverage is missing: ${reviewRegression}`);
 }
+
+assertIncludes(workInbox, "/work-inbox/summary", "Work Inbox must retain source-scoped overview counts");
+assertIncludes(workInbox, "duePresentation(item)", "Work Inbox must retain explicit deadline urgency");
+assertIncludes(workInbox, "Open workflow", "Governed work must link to its source workflow");
+assertIncludes(personalWork, '"/tasks/personal?"', "Personal tasks must remain on the owner-scoped paginated endpoint");
+assertIncludes(personalWork, "Completing a personal task never closes a governed Quality record.", "Personal completion must remain distinct from QMS closure");
 
 console.log("QMS operational UI contract passed: readability, governed People authorization cases, split preparation/approval authority, backend-aligned permissions, authoritative refresh, source provenance, Assurance lifecycle/effectiveness gates and responsive reachability are preserved.");
