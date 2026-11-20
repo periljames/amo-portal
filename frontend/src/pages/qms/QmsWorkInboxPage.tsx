@@ -62,6 +62,7 @@ export default function QmsWorkInboxPage() {
   const source = params.get("source") || "";
   const dueFilter = ["today", "next-seven", "undated"].includes(params.get("due") || "") ? params.get("due")! : "all";
   const sort = params.get("sort") === "title" ? "title" : "priority";
+  const compact = params.get("layout") === "table";
   const offset = Math.max(0, Number(params.get("offset")) || 0);
   const [search, setSearch] = useState(q);
   const [revision, setRevision] = useState(0);
@@ -174,6 +175,10 @@ export default function QmsWorkInboxPage() {
               <p>{view === "approvals" ? "Permission-authorised decisions. This may be a shared management queue rather than an individual assignment." :
                 view === "watching" ? "Following never changes ownership or review authority." :
                 "Open the authoritative source record to perform governed actions."}</p></div>
+            <div className="qms-inbox__layout-toggle" role="group" aria-label="Work display density">
+              <button type="button" aria-pressed={!compact} onClick={() => update({ layout: null })}>Comfortable cards</button>
+              <button type="button" aria-pressed={compact} onClick={() => update({ layout: "table" })}>Compact table</button>
+            </div>
             <div className="qms-inbox__filters">
               <label>Search work<input type="search" value={search} maxLength={80}
                 placeholder="Search titles" onChange={event => setSearch(event.target.value)} /></label>
@@ -203,7 +208,29 @@ export default function QmsWorkInboxPage() {
             <ul>{data.data.source_errors.map(row => <li key={row.source}>{row.source}: {row.message}</li>)}</ul>
           </div>}
           {data.isPending && <p role="status" className="qms-inbox__loading">Loading Quality assignments…</p>}
-          {!!data.data?.items.length && <div className="qms-inbox__work-list" aria-label="Quality work items">
+          {!!data.data?.items.length && compact && <div className="qms-inbox__table-scroll">
+            <table className="qms-inbox__compact-table">
+              <caption>Quality work — {titles[view] || "Assignments"}, {data.data.items.length} records on this page</caption>
+              <thead><tr><th scope="col">Work</th><th scope="col">Source and scope</th><th scope="col">Status</th><th scope="col">Deadline</th><th scope="col">Actions</th></tr></thead>
+              <tbody>{data.data.items.map(item => {
+                const due = duePresentation(item);
+                return <tr key={item.id}>
+                  <th scope="row"><Link to={item.route}>{item.title || "Untitled source record"}</Link>
+                    {item.next_action && <span className="qms-inbox__table-next">Next: {item.next_action}</span>}</th>
+                  <td>{item.source_label}<span className="qms-inbox__table-detail">
+                    {item.scope === "SHARED_REVIEW" ? "Shared decision queue" : item.scope === "WATCHING" ? "Following" : "Assigned to me"}</span></td>
+                  <td>{item.status.replaceAll("_", " ").toLowerCase()}</td>
+                  <td className={due.overdue ? "qms-inbox__table-overdue" : ""}>{due.date}
+                    {due.timing && <span className="qms-inbox__table-detail">{due.timing}</span>}</td>
+                  <td><div className="qms-inbox__compact-actions"><Link to={item.route}>Open workflow</Link>
+                    <button type="button" disabled={!!busy} onClick={() => void toggle(item)}
+                      aria-label={(item.watching ? "Stop watching " : "Watch ") + (item.title || "record")}>
+                      {busy === item.id ? "Saving…" : item.watching ? "Unwatch" : "Watch"}</button></div></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>}
+          {!!data.data?.items.length && <div className={"qms-inbox__work-list" + (compact ? " qms-inbox__dense-mobile-cards" : "")} aria-label="Quality work items">
             {data.data.items.map(item => {
               const due = duePresentation(item);
               return <article className="qms-inbox__work-card" key={item.id}>
