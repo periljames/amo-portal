@@ -90,9 +90,9 @@ function formatValue(value: unknown): string {
   const raw = String(value);
   if (/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(raw)) {
     const parsed = parseDateValue(raw);
-    if (parsed) return DATE_ONLY_PATTERN.test(raw) ? parsed.toLocaleDateString() : parsed.toLocaleString();
+    if (parsed) return DATE_ONLY_PATTERN.test(raw) ? parsed.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase() : parsed.toLocaleString();
   }
-  return raw.length > 130 ? `${raw.slice(0, 127)}…` : raw;
+  return raw;
 }
 
 function rowId(row: QmsRow): string | null {
