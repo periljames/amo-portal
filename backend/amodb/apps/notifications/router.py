@@ -27,6 +27,8 @@ def list_email_logs(
     recipient: Optional[str] = None,
     start: Optional[datetime] = Query(None),
     end: Optional[datetime] = Query(None),
+    limit: int = Query(51, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=1_000_000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_admin_profile_or_roles("QUALITY_MANAGER")),
 ):
@@ -41,4 +43,6 @@ def list_email_logs(
         qs = qs.filter(models.EmailLog.created_at >= start)
     if end:
         qs = qs.filter(models.EmailLog.created_at <= end)
-    return qs.order_by(models.EmailLog.created_at.desc()).all()
+    # Bound the admin ledger without weakening its tenant/role controls.
+    # Stable ordering makes pagination deterministic when timestamps tie.
+    return qs.order_by(models.EmailLog.created_at.desc(), models.EmailLog.id.desc()).offset(offset).limit(limit).all()
