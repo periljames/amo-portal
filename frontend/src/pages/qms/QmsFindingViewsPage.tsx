@@ -35,7 +35,12 @@ function FindingInsightContent({ amoCode, view }: { amoCode: string; view: strin
     queryFn: ({ signal }) => apiRequest<Insights>(`${qmsPath(amoCode, "/findings/insights")}?${new URLSearchParams({ view, year: String(year) })}`, { signal, cacheTtlMs: 0 }) });
   const audits = useQuery({ queryKey: ["finding-source-audits", amoCode, q, offset], enabled: creating && hasQmsRolePermission("qms.audit.view"),
     queryFn: () => qmsListAudits({ domain: "AMO", q, limit: 25, offset, sort: "planned_start", direction: "desc" }, { amoCode }) });
-  const update = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== "offset") next.delete("offset"); setParams(next, { replace: true }); };
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    if (key !== "offset") next.delete("offset");
+    setParams(next, { replace: true });
+  };
   const register = (filters: Record<string, string>) => `${qmsModulePath(amoCode, "findings", "register")}?${new URLSearchParams({ period: String(year), ...filters })}`;
   if (!hasQmsRolePermission("qms.finding.view")) return <Navigate to={qmsBasePath(amoCode)} replace />;
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><section className="qms-review" aria-label="Finding analysis and capture">

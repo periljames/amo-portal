@@ -10,10 +10,11 @@ import hmac
 import json
 import os
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
+from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from amodb.security import get_current_active_user, get_password_hash, verify_pa
 from amodb.apps.accounts import models as accounts
 from amodb.apps.accounts.tenant_authority import is_tenant_admin
 from amodb.apps.notifications import service as notifications
+from amodb.apps.notifications import models as notification_models
 from . import service
 from . import external_auth_core as core
 from .external_passkey_router import router as provider_passkey_router
@@ -145,24 +147,64 @@ def _merge_manager_scopes(proposed, existing):
             merged[key]=existing[key]
     return merged
 
-def _send(db,amo,email,code,kind):
-    # Invitation issuance commits before delivery; restore SET LOCAL tenant
-    # context in the new transaction so notification preferences and log RLS
-    # continue to resolve against the right AMO.
-    core.context(db,amo)
-    # Token travels only in the email body, not a URL, log, API response or telemetry.
-    # The existing essential account-message template is reused.
-    msg=f"AMO Portal external account {kind} code: {code}. Enter this code in the vendor portal. The code expires and can be used once."
-    outcome=notifications.send_email(
-        template_key="password-reset", recipient=email,
-        subject=f"AMO Portal external provider {kind}",
-        context={"message":msg,"action_url":None},
-        audit_context={"purpose":"external-provider-account", "event":kind},
-        correlation_id=f"external-account:{core.new_id()}",
-        critical=False,email_class="ESSENTIAL",
-        recipient_user_id=None,amo_id=amo,db=db,
+def _vendor_action_url(db, amo: str) -> str | None:
+    """Public HTTPS sign-in only; never put a one-time credential in the URL."""
+    base = os.getenv("PORTAL_FRONTEND_BASE_URL", "").strip().rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return None
+    tenant = db.get(accounts.AMO, amo)
+    slug = str(getattr(tenant, "login_slug", None) or getattr(tenant, "amo_code", None) or "").strip()
+    if not slug:
+        return None
+    return base + "/vendor/login?amo=" + quote(slug, safe="")
+
+
+def _email_receipt(log) -> dict:
+    """Return a safe, auditable receipt without exposing credentials or payloads."""
+    status = str(getattr(log.status, "value", log.status))
+    state = str(getattr(log, "delivery_status", None) or "UNKNOWN")
+    internal_delivery = (getattr(log, "context_json", None) or {}).get("_delivery") or {}
+    return {
+        "email_status": status,
+        "email_delivery_status": state,
+        "email_log_id": str(log.id) if getattr(log, "id", None) else None,
+        "provider_message_id": getattr(log, "provider_message_id", None),
+        "sending_mode": internal_delivery.get("mode"),
+        "provider_accepted": status == "SENT" and state in {"ACCEPTED", "DELIVERED"},
+    }
+
+
+def _send(db, amo, email, code, kind, *, grant_id: str | None = None):
+    # The access grant is committed independently of email. Preserve a secure,
+    # per-attempt receipt for triage and recovery without saving the raw token.
+    core.context(db, amo)
+    templates = {
+        "invitation": "external-provider-invitation",
+        "reverification": "external-provider-reverification",
+        "password recovery": "external-provider-password-recovery",
+    }
+    msg = (
+        f"AMO Portal external provider {kind} code: {code}. "
+        "Enter this code in the vendor portal. It expires and may be used only once."
     )
-    return str(getattr(outcome.status,"value",outcome.status))
+    correlation = (
+        f"extmail:{grant_id}:{'I' if kind == 'invitation' else 'R'}:{secrets.token_hex(4)}"
+        if grant_id else f"extmail:{core.new_id()}"
+    )
+    outcome = notifications.send_email(
+        template_key=templates.get(kind, "external-provider-account"),
+        recipient=email,
+        subject=f"AMO Portal external provider {kind}",
+        context={"message": msg, "action_url": _vendor_action_url(db, amo)},
+        audit_context={"purpose": "external-provider-account", "event": kind, "grant_id": grant_id},
+        correlation_id=correlation,
+        critical=False, email_class="ESSENTIAL",
+        recipient_user_id=None, amo_id=amo, db=db,
+    )
+    return _email_receipt(outcome)
+
+
 
 def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=None,
             cap_limit=None,caller_scope=None,internal=True):
@@ -240,9 +282,9 @@ def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=No
     core.event(db,amo=amo,identity=identity_id,grant=grant,action="INVITED",
                actor_user=inviter if internal else None,actor_identity=None if internal else inviter)
     db.commit()
-    delivery=_send(db,amo,email,raw,"invitation")
+    delivery=_send(db,amo,email,raw,"invitation",grant_id=grant)
     db.commit()
-    return {"id":grant,"status":"PENDING","delivery_status":delivery,
+    return {"id":grant,"status":"PENDING","delivery_status":delivery["email_status"],"delivery":delivery,
             "organization_id":org_id,"supplier_id":supplier_id}
 
 @quality_router.post("/invitations",status_code=201)
@@ -745,6 +787,67 @@ def quality_revoke_sessions(amo_code:str,grant_id:str,payload:Decision,
     db.commit()
     return {"sessions_revoked":result.rowcount}
 
+@quality_router.get("/grants/{grant_id}/delivery-history")
+def invitation_delivery_history(
+    amo_code: str, grant_id: str,
+    limit: int = Query(default=10, ge=1, le=25),
+    db: Session = Depends(get_db),
+    user: accounts.User = Depends(get_current_active_user),
+):
+    """Tenant-authorised, redacted Resend receipts for a known external grant."""
+    amo = _authorized_quality(db, amo_code, user)
+    grant = core.one("""SELECT g.id,g.status,i.email,i.verified_at
+        FROM external_tenant_grants g
+        JOIN external_identities i ON i.id=g.identity_id
+        WHERE g.amo_id=:amo AND g.id=:grant""", db, amo=amo, grant=grant_id)
+    if grant is None:
+        raise HTTPException(404, "Invitation grant not found")
+    records = (
+        db.query(notification_models.EmailLog)
+        .filter(
+            notification_models.EmailLog.amo_id == amo,
+            notification_models.EmailLog.correlation_id.like(f"extmail:{grant_id}:%"),
+        )
+        .order_by(notification_models.EmailLog.created_at.desc(), notification_models.EmailLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    ids = [item.id for item in records]
+    events = (
+        db.query(notification_models.EmailDeliveryEvent)
+        .filter(notification_models.EmailDeliveryEvent.email_log_id.in_(ids))
+        .order_by(notification_models.EmailDeliveryEvent.occurred_at.desc())
+        .limit(100)
+        .all()
+    ) if ids else []
+    grouped: dict[str, list[dict]] = {}
+    for event in events:
+        grouped.setdefault(str(event.email_log_id), []).append({
+            "event": str(event.event_type), "at": event.occurred_at.isoformat(),
+        })
+    attempts = []
+    for record in records:
+        receipt = _email_receipt(record)
+        delivery = (record.context_json or {}).get("_delivery") or {}
+        attempts.append({
+            **receipt,
+            "attempted_at": record.created_at.isoformat(),
+            "recipient": record.recipient,
+            "effective_recipient": delivery.get("effective_recipient"),
+            "template_key": record.template_key,
+            "events": grouped.get(str(record.id), []),
+        })
+    return {
+        "grant_id": grant_id,
+        "grant_status": grant["status"],
+        "recipient": grant["email"],
+        "verified": bool(grant["verified_at"]),
+        "attempts": attempts,
+        "history_limit": limit,
+        "note": "Provider acceptance is not recipient-server delivery or inbox placement.",
+    }
+
+
 @quality_router.post("/grants/{grant_id}/resend-invitation")
 def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
                       user:accounts.User=Depends(get_current_active_user)):
@@ -760,6 +863,17 @@ def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
         LIMIT 1""",db,amo=amo,grant=grant_id)
     if accepted:
         raise HTTPException(409,"Invitation already accepted; use controlled account decisions")
+    latest_accepted = (
+        db.query(notification_models.EmailLog)
+        .filter(
+            notification_models.EmailLog.amo_id == amo,
+            notification_models.EmailLog.correlation_id.like(f"extmail:{grant_id}:I:%"),
+            notification_models.EmailLog.status == notification_models.EmailStatus.SENT,
+            notification_models.EmailLog.created_at >= datetime.now(timezone.utc) - timedelta(seconds=60),
+        ).first()
+    )
+    if latest_accepted:
+        raise HTTPException(409, "An invitation was just accepted by the email provider. Check delivery status before resending.")
     core.run("""UPDATE external_identity_tokens SET revoked_at=:at
       WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL AND revoked_at IS NULL""",
       db,at=core.now(),amo=amo,grant=grant_id)
@@ -768,9 +882,9 @@ def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
     core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,
                action="INVITATION_RESENT",actor_user=str(user.id))
     db.commit()
-    delivery=_send(db,amo,grant["email"],raw,"invitation")
+    delivery=_send(db,amo,grant["email"],raw,"invitation",grant_id=grant_id)
     db.commit()
-    return {"status":"PENDING","delivery_status":delivery}
+    return {"status":"PENDING","delivery_status":delivery["email_status"],"delivery":delivery}
 
 @quality_router.post("/grants/{grant_id}/reverify")
 def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depends(get_db),
@@ -787,8 +901,8 @@ def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
     raw=core.token(db,tenant_id=amo,grant_id=grant_id,identity_id=grant["identity_id"],kind="VERIFY",hours=24)
     core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,action="REVERIFICATION_REQUIRED",
                actor_user=str(user.id),details={"reason":payload.reason})
-    db.commit();delivery=_send(db,amo,grant["email"],raw,"reverification");db.commit()
-    return {"status":"REVERIFICATION_REQUIRED","delivery_status":delivery}
+    db.commit();delivery=_send(db,amo,grant["email"],raw,"reverification",grant_id=grant_id);db.commit()
+    return {"status":"REVERIFICATION_REQUIRED","delivery_status":delivery["email_status"],"delivery":delivery}
 
 @router.post("/verification/confirm")
 def verify_again(payload:AccountAction,request:Request,db:Session=Depends(get_db)):

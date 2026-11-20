@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -62,3 +62,10 @@ class TaskRead(BaseModel):
     metadata_json: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+
+
+class PersonalTaskPage(BaseModel):
+    items: List[TaskRead]
+    total: int
+    offset: int
+    limit: int

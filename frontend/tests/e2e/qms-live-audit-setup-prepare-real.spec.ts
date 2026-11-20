@@ -163,13 +163,18 @@ test("real Setup and Prepare browsers persist governed occurrence, meetings, not
     await prepare.getByLabel("Organisation", { exact: true }).fill("Real Browser Auditee Organisation");
     await prepare.getByLabel("Access expires", { exact: true }).fill(futureLocalDateTime(24));
     await prepare.getByLabel("View fieldwork progress", { exact: true }).check();
+    // This acceptance journey validates controlled guest exchange, not real
+    // mail delivery to a synthetic example.com address.
+    await prepare.getByLabel("Send a controlled invitation email to this participant").uncheck();
 
     const inviteResponsePromise = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/external-participants") && response.status() === 201);
     await prepare.getByRole("button", { name: "Create invitation" }).click();
     const inviteResponse = await inviteResponsePromise;
-    const invited = await inviteResponse.json() as { access_url?: string };
+    expect(inviteResponse.request().postDataJSON()).toMatchObject({ send_invitation_email: false });
+    const invited = await inviteResponse.json() as { access_url?: string; email_delivery?: unknown };
     expect(invited.access_url).toBeTruthy();
-    await expect(prepare.locator(".qms-occurrence-stage__message").last()).toContainText("Participant access created. Copy the invitation link shown below.", { timeout: 30_000 });
+    expect(invited.email_delivery).toBeUndefined();
+    await expect(prepare.locator(".qms-occurrence-stage__message").last()).toContainText("Participant access created. No email was requested", { timeout: 30_000 });
 
     const guestPage = await guestContext.newPage();
     watchServerFailures(guestPage, guestFailures);

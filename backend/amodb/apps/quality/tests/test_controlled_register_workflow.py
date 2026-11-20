@@ -91,7 +91,7 @@ def test_open_tolerance_event_blocks_return_to_service_even_with_evidence(client
 
 def test_external_closeout_evidence_and_full_csv_formula_safety(client):
     root = "/register-workspace/external-interface/customer-complaints"
-    body = {"title": "=External case", "status": "CLOSED", "owner_user_id": "chair", "fields": {"external_reference": "CASE-1", "party": "Customer", "received_on": "2026-11-18"}}
+    body = {"title": "=External case", "status": "CLOSED", "owner_user_id": "chair", "fields": {"external_reference": "CASE-1", "party": "Customer", "received_on": "2026-11-18", "category": "SERVICE", "impact": "Reported service disruption requiring controlled closure."}}
     assert client.post(root, json=body).status_code == 422
     body["fields"]["completion_evidence"] = "Agreed response and resolution retained with case"
     response = client.post(root, json=body)

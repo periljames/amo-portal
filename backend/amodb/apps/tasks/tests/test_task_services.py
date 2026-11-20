@@ -193,3 +193,34 @@ def test_runner_idempotency(db_session):
 
     summary_second = task_services.run_task_runner(db_session, now=now + timedelta(hours=1), reminder_window_hours=6)
     assert summary_second["reminders"] == 0
+
+
+def test_personal_task_page_is_bounded_owner_only_and_filters_status(db_session):
+    from amodb.apps.tasks.router import list_personal_tasks
+
+    amo = _create_amo(db_session)
+    owner = _create_user(db_session, amo.id)
+    first = create_personal_task(task_schemas.PersonalTaskCreate(title="First personal follow-up"), db_session, owner)
+    second = create_personal_task(task_schemas.PersonalTaskCreate(title="Second personal follow-up"), db_session, owner)
+    create_personal_task(task_schemas.PersonalTaskCreate(title="Third personal follow-up"), db_session, owner)
+    task_services.create_task(
+        db_session, amo_id=amo.id, owner_user_id=owner.id,
+        title="Governed task", entity_type="qms_finding", entity_id="finding-1",
+    )
+    db_session.commit()
+
+    open_page = list_personal_tasks(status="open", q="", limit=2, offset=0, db=db_session, current_user=owner)
+    assert open_page["total"] == 3
+    assert len(open_page["items"]) == 2
+    next_page = list_personal_tasks(status="open", q="", limit=2, offset=2, db=db_session, current_user=owner)
+    assert next_page["total"] == 3
+    assert len(next_page["items"]) == 1
+    assert {task.id for task in open_page["items"]}.isdisjoint({task.id for task in next_page["items"]})
+    assert list_personal_tasks(status="open", q="Second", limit=25, offset=0, db=db_session, current_user=owner)["items"][0].id == second.id
+    task_services.update_task_status(db_session, task=first, status=task_models.TaskStatus.DONE, actor_user_id=owner.id)
+    db_session.commit()
+    assert list_personal_tasks(status="completed", q="", limit=25, offset=0, db=db_session, current_user=owner)["total"] == 1
+    assert list_personal_tasks(status="open", q="", limit=25, offset=0, db=db_session, current_user=owner)["total"] == 2
+    assert list_personal_tasks(status="all", q="", limit=25, offset=0, db=db_session, current_user=owner)["total"] == 3
+    another_actor = SimpleNamespace(amo_id=amo.id, id="another-user")
+    assert list_personal_tasks(status="all", q="", limit=25, offset=0, db=db_session, current_user=another_actor)["total"] == 0

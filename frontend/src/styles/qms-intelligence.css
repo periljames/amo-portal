@@ -58,6 +58,12 @@
   letter-spacing: -.02em;
 }
 
+/* Preserve Intelligence's intentional 28px+ hero despite the shared Quality type scale. */
+.tenant-shell[data-workspace-module="quality"] .qms-intelligence__hero h1 {
+  font-size: clamp(28px, 2.25vw, 34px);
+}
+
+
 .qms-intelligence__hero p {
   max-width: 930px;
   margin: 0;

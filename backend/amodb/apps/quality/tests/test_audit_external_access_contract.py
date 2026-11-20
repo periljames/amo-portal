@@ -231,3 +231,90 @@ def test_car_handoff_requires_response_permission_and_open_car():
     car.status = "OPEN"
     car.closed_at = datetime.now(timezone.utc)
     assert collaboration_router._car_response_url(car, {"car:respond"}) is None
+
+
+def _email_payload():
+    return ExternalParticipantCreate(
+        email="auditee@example.test", display_name="External Auditee",
+        participant_type="AUDITEE_GUEST", role="AUDITEE",
+        expires_at=_future(), send_invitation_email=True,
+    )
+
+
+def _deliver_test(*, db, payload=None):
+    return access_router._deliver_external_participant_invite(
+        db, ctx=SimpleNamespace(amo_id="tenant-a"),
+        audit=SimpleNamespace(audit_ref="AUD/TEST/01", title="Controlled readiness audit"),
+        audit_id=__import__("uuid").uuid4(),
+        participant=SimpleNamespace(id="participant-1"),
+        grant=SimpleNamespace(id="grant-1"),
+        payload=payload or _email_payload(),
+        email="auditee@example.test", expires_at=_future(),
+        access_url="/qms/audit-access/one-time-secret",
+    )
+
+
+def test_audit_external_invitation_email_is_explicit_and_defaults_off():
+    payload = ExternalParticipantCreate(
+        email="auditee@example.test", display_name="External Auditee",
+        participant_type="AUDITEE_GUEST", role="AUDITEE", expires_at=_future(),
+    )
+    assert payload.send_invitation_email is False
+    assert _email_payload().send_invitation_email is True
+
+
+def test_audit_external_invitation_requires_https_without_sending(monkeypatch):
+    monkeypatch.setenv("PORTAL_FRONTEND_BASE_URL", "http://localhost:4173")
+    monkeypatch.setattr(
+        access_router.notification_service, "send_email",
+        lambda **kw: pytest.fail("Private or insecure audit link must not be emailed"),
+    )
+    db = SimpleNamespace()
+    receipt = _deliver_test(db=db)
+    assert receipt["email_delivery_status"] == "BLOCKED"
+    assert receipt["email_log_id"] is None
+
+
+def test_audit_external_email_is_essential_redacted_and_truthful(monkeypatch):
+    monkeypatch.setenv("PORTAL_FRONTEND_BASE_URL", "https://portal.example.test")
+    sent = []
+    monkeypatch.setattr(access_router.notification_service, "send_email", lambda **kwargs: (
+        sent.append(kwargs) or SimpleNamespace(
+            id="mail-log-a", status="SENT", delivery_status="ACCEPTED",
+            provider_message_id="resend-a",
+            context_json={"_delivery": {"mode": "SANDBOX"}},
+        )
+    ))
+    commits = []
+    db = SimpleNamespace(commit=lambda: commits.append(True), rollback=lambda: pytest.fail("Unexpected rollback"))
+    receipt = _deliver_test(db=db)
+    assert commits == [True]
+    assert receipt["email_delivery_status"] == "ACCEPTED"
+    assert receipt["sending_mode"] == "SANDBOX"
+    assert receipt["provider_message_id"] == "resend-a"
+    request = sent[0]
+    assert request["template_key"] == "qms_audit_participant_invite"
+    assert request["recipient"] == "auditee@example.test"
+    assert request["email_class"] == "ESSENTIAL"
+    assert request["amo_id"] == "tenant-a"
+    assert request["context"]["action_url"].startswith("https://portal.example.test/qms/audit-access/")
+    assert "one-time-secret" not in str(request["audit_context"])
+    assert "one-time-secret" not in request["correlation_id"]
+    assert "one-time-secret" not in str(receipt)
+
+
+def test_audit_external_email_failure_keeps_access_creation_result(monkeypatch):
+    monkeypatch.setenv("PORTAL_FRONTEND_BASE_URL", "https://portal.example.test")
+    monkeypatch.setattr(
+        access_router.notification_service, "send_email",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("Provider down")),
+    )
+    counts = {"commits": 0, "rollbacks": 0}
+    db = SimpleNamespace(
+        commit=lambda: counts.__setitem__("commits", counts["commits"] + 1),
+        rollback=lambda: counts.__setitem__("rollbacks", counts["rollbacks"] + 1),
+    )
+    receipt = _deliver_test(db=db)
+    assert receipt["email_delivery_status"] == "UNKNOWN"
+    assert receipt["provider_message_id"] is None
+    assert counts == {"commits": 0, "rollbacks": 1}

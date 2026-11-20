@@ -1,6 +1,7 @@
 """My Quality work is a projection of authoritative assignments, not unread mail."""
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -10,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db, get_write_db
 from .management_review_router import StrictBody, _payload, _public, _save
+from .work_inbox_related_router import router as related_work_router
 from .tenant_security import TenantContext, assert_quality_permission, has_quality_permission, resolve_tenant_context, set_postgres_tenant_context
 
 router = APIRouter(prefix="/work-inbox", tags=["My Quality Work"])
+router.include_router(related_work_router)  # Static /related route must precede /{view}.
 SOURCES = {
     "audits": {"table": "qms_audits", "label": "Audit", "permission": "qms.audit.view", "owners": ["lead_auditor_user_id", "observer_auditor_user_id", "assistant_auditor_user_id", "auditee_user_id"], "due": ["planned_end", "planned_start"], "path": "audits/{id}/setup"},
     "cars": {"table": "quality_cars", "label": "CAR / CAPA", "permission": "qms.car.view", "owners": ["assigned_to_user_id"], "due": ["due_date"], "path": "cars/{id}/overview", "approval_permission": "qms.car.manage", "approval_statuses": ["PENDING_VERIFICATION"]},
@@ -25,6 +28,17 @@ SOURCES = {
 TERMINAL = "'CLOSED','COMPLETED','COMPLETE','DONE','ARCHIVED','CANCELLED','REJECTED','RESOLVED','RETIRED'"
 COMPLETE = "'CLOSED','COMPLETED','COMPLETE','DONE','ARCHIVED','RESOLVED'"
 WATCH_TABLE = "qms_task_assignments"
+# These are navigation instructions, not authority to change the source record.
+NEXT_ACTION = {
+    "audits": "Open audit preparation or fieldwork and check outstanding requirements",
+    "cars": "Review the CAR/RCA and respond using its governed control loop",
+    "review-actions": "Supply completion evidence or review the pending verification",
+    "reviews": "Review the management review decision and linked action evidence",
+    "risks": "Update risk treatment or review the current assessment",
+    "treatments": "Record the treatment's progress and completion evidence",
+    "commitments": "Review the external obligation and record its response",
+}
+
 
 
 class WatchBody(StrictBody):
@@ -57,25 +71,179 @@ def _source_row(db, ctx, source, record_id):
     return row
 
 
+@router.get("/summary")
+def inbox_summary(ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
+    """Count authorised work without loading all rows or claiming group approvals are individually assigned."""
+    _context(db, ctx)
+    counts = {"assigned_to_me": 0, "approvals": 0, "overdue": 0, "completed": 0}
+    errors = []
+    for key, spec in SOURCES.items():
+        if not has_quality_permission(db, ctx, spec["permission"]):
+            continue
+        try:
+            with db.begin_nested():
+                columns = _shape(db, spec)
+                owners = [name for name in spec["owners"] if name in columns]
+                owner_terms = [f"{name}=:actor" for name in owners]
+                if key == "audits" and "supporting_auditor_user_ids" in columns:
+                    owner_terms.append(
+                        "CAST(supporting_auditor_user_ids AS jsonb) @> jsonb_build_array(CAST(:actor AS text))"
+                        if db.bind.dialect.name == "postgresql"
+                        else "EXISTS (SELECT 1 FROM json_each(supporting_auditor_user_ids) WHERE value=:actor)"
+                    )
+                own = "(" + " OR ".join(owner_terms) + ")" if owner_terms else "1=0"
+                status = "UPPER(CAST(status AS TEXT))"
+                due = next((name for name in spec["due"] if name in columns), None)
+                overdue = f"DATE({due}) < CURRENT_DATE" if due else "1=0"
+                approval = (
+                    f"{status} IN (" + ",".join(f"'{value}'" for value in spec["approval_statuses"]) + ")"
+                    if spec.get("approval_permission") and has_quality_permission(db, ctx, spec["approval_permission"])
+                    else "1=0"
+                )
+                def count_when(condition: str) -> str:
+                    return f"COALESCE(SUM(CASE WHEN {condition} THEN 1 ELSE 0 END), 0)"
+                where = "amo_id=:amo" + (" AND deleted_at IS NULL" if "deleted_at" in columns else "")
+                values = db.execute(text(
+                    "SELECT " +
+                    count_when(f"{own} AND {status} NOT IN ({TERMINAL})") + " AS assigned_to_me, " +
+                    count_when(approval) + " AS approvals, " +
+                    count_when(f"{own} AND {status} NOT IN ({TERMINAL}) AND {overdue}") + " AS overdue, " +
+                    count_when(f"{own} AND {status} IN ({COMPLETE})") + " AS completed " +
+                    f"FROM {spec['table']} WHERE {where}"
+                ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().one()
+                for name in counts:
+                    counts[name] += int(values[name] or 0)
+        except Exception:
+            errors.append({"source": spec["label"], "message": "This source could not be counted."})
+    return {**counts, "source_errors": errors}
+
+
+class SavedWorkViewBody(StrictBody):
+    """User-owned filter preset; never stores authority or grants workflow access."""
+    title: str = Field(min_length=2, max_length=80)
+    view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"] = "assigned-to-me"
+    q: str = Field(default="", max_length=80)
+    source: str = Field(default="", max_length=40)
+    due: Literal["all", "today", "next-seven", "undated"] = "all"
+    sort: Literal["priority", "title"] = "priority"
+
+
+@router.get("/saved-views")
+def list_saved_work_views(
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_read_db),
+):
+    _context(db, ctx)
+    rows = db.execute(text(
+        "SELECT * FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL "
+        "ORDER BY title, id LIMIT 20"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
+    return {"items": [
+        {"id": str(row["id"]), "title": str(row["title"]),
+         "filters": {name: _payload(row).get(name) for name in ("view", "q", "source", "due", "sort")}}
+        for row in rows
+    ], "limit": 20}
+
+
+@router.post("/saved-views", status_code=201)
+def create_saved_work_view(
+    body: SavedWorkViewBody,
+    request: Request,
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    _context(db, ctx)
+    title = body.title.strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=422, detail="Name the view using at least two characters.")
+    if body.source and body.source not in SOURCES:
+        raise HTTPException(status_code=422, detail="Choose a supported Quality source.")
+    # Serialize create decisions per owner; two browser tabs must not bypass
+    # duplicate-name or maximum-view checks.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {
+            "key": f"quality-saved-views:{ctx.amo_id}:{ctx.user_id}",
+        })
+    existing = db.execute(text(
+        "SELECT id FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL LIMIT 20"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id}).mappings().all()
+    if len(existing) >= 20:
+        raise HTTPException(status_code=409, detail="The 20 saved-view limit has been reached; remove an unused view.")
+    duplicate = db.execute(text(
+        "SELECT id FROM qms_task_assignments WHERE amo_id=:amo AND owner_user_id=:actor "
+        "AND source_type='QMS_SAVED_VIEW' AND status='ACTIVE' AND deleted_at IS NULL "
+        "AND LOWER(title)=LOWER(:title) LIMIT 1"
+    ), {"amo": ctx.amo_id, "actor": ctx.user_id, "title": title}).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="You already have a saved view with this name.")
+    filters = body.model_dump(exclude={"title"})
+    created = _save(
+        db, WATCH_TABLE, ctx,
+        {"title": title, "owner_user_id": ctx.user_id, "source_type": "QMS_SAVED_VIEW",
+         "status": "ACTIVE", "payload": filters},
+        event="SAVED_VIEW_CREATED", request=request, module="inbox",
+    )
+    db.commit()
+    return {"id": str(created["id"]), "title": title, "filters": filters}
+
+
+@router.delete("/saved-views/{saved_id}")
+def delete_saved_work_view(
+    saved_id: str,
+    request: Request,
+    ctx: TenantContext = Depends(resolve_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    _context(db, ctx)
+    row = db.execute(text(
+        "SELECT * FROM qms_task_assignments WHERE id=:id AND amo_id=:amo "
+        "AND owner_user_id=:actor AND source_type='QMS_SAVED_VIEW' "
+        "AND status='ACTIVE' AND deleted_at IS NULL"
+    ), {"id": saved_id, "amo": ctx.amo_id, "actor": ctx.user_id}).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Saved work view was not found.")
+    _save(
+        db, WATCH_TABLE, ctx, {"status": "INACTIVE", "payload": _payload(row)},
+        existing=_public(row), event="SAVED_VIEW_REMOVED", request=request, module="inbox",
+    )
+    db.commit()
+    return {"deleted": True}
+
+
 @router.get("/{view}")
-def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), offset: int = Query(0, ge=0, le=100000),
+def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "completed"], q: str = Query("", max_length=80), source: str = Query("", max_length=40), due: Literal["all", "today", "next-seven", "undated"] = Query("all"), sort: Literal["priority", "title"] = Query("priority"), offset: int = Query(0, ge=0, le=100000),
           ctx: TenantContext = Depends(resolve_tenant_context), db: Session = Depends(get_read_db)):
     _context(db, ctx)
+    if source and source not in SOURCES:
+        raise HTTPException(422, "Choose a supported Quality source.")
     watches = _watches(db, ctx)
     items, errors, total, unions = [], [], 0, []
-    params = {"amo": ctx.amo_id, "actor": ctx.user_id, "q": "%" + q.lower() + "%", "limit": 30, "offset": offset}
+    params = {"amo": ctx.amo_id, "actor": ctx.user_id, "q": "%" + q.lower() + "%", "limit": 30, "offset": offset, "until": date.today() + timedelta(days=7)}
     for key, spec in SOURCES.items():
+        if source and key != source: continue
         if not has_quality_permission(db, ctx, spec["permission"]): continue
         if view == "approvals" and (not spec.get("approval_permission") or not has_quality_permission(db, ctx, spec["approval_permission"])): continue
         try:
             with db.begin_nested():
                 columns = _shape(db, spec)
-                due = next((v for v in spec["due"] if v in columns), None)
-                due_sql = due or "NULL"
+                source_due = next((v for v in spec["due"] if v in columns), None)
+                due_sql = source_due or "NULL"
                 status_sql = "UPPER(CAST(status AS TEXT))"
                 where = "amo_id=:amo"
                 if "deleted_at" in columns: where += " AND deleted_at IS NULL"
                 if q: where += " AND lower(COALESCE(title,'')) LIKE :q"
+                if due != "all":
+                    if due == "undated":
+                        where += f" AND {due_sql} IS NULL"
+                    elif due_sql == "NULL":
+                        continue
+                    elif due == "today":
+                        where += f" AND DATE({due_sql}) = CURRENT_DATE"
+                    elif due == "next-seven":
+                        where += f" AND DATE({due_sql}) BETWEEN CURRENT_DATE AND :until"
+
                 source_params = dict(params)
                 if view == "watching":
                     ids = [record_id for source, record_id in watches if source == key]
@@ -97,23 +265,41 @@ def inbox(view: Literal["assigned-to-me", "approvals", "overdue", "watching", "c
                     where += " AND (" + " OR ".join(owner_terms) + ")"
                     where += f" AND {status_sql} IN ({COMPLETE})" if view == "completed" else f" AND {status_sql} NOT IN ({TERMINAL})"
                     if view == "overdue":
-                        if not due: continue
-                        where += f" AND DATE({due}) < CURRENT_DATE"
+                        if not source_due: continue
+                        where += f" AND DATE({source_due}) < CURRENT_DATE"
                 total += db.execute(text(f"SELECT count(*) FROM {spec['table']} WHERE {where}"), source_params).scalar_one()
                 # Merge/paginate inside the database. Large offsets must not
                 # materialize every preceding assignment in application memory.
-                unions.append(f"SELECT CAST(id AS TEXT) AS id,title,CAST(status AS TEXT) AS status,DATE({due_sql}) AS due_date,'{key}' AS source FROM {spec['table']} WHERE {where}")
+                updated_sql = "updated_at" if "updated_at" in columns else "NULL"
+                unions.append(f"SELECT CAST(id AS TEXT) AS id,title,CAST(status AS TEXT) AS status,DATE({due_sql}) AS due_date,CAST({updated_sql} AS TEXT) AS updated_at,'{key}' AS source FROM {spec['table']} WHERE {where}")
                 params.update(source_params)
         except Exception:
             errors.append({"source": spec["label"], "message": "This assignment source could not be loaded. Refresh or open its register."})
     if unions:
-        rows = db.execute(text("SELECT * FROM (" + " UNION ALL ".join(unions) + ") work ORDER BY due_date ASC NULLS LAST,title,id,source LIMIT :limit OFFSET :offset"), params).mappings().all()
+        order_by = (
+            "title ASC, due_date ASC NULLS LAST, id, source" if sort == "title"
+            else "CASE WHEN due_date < CURRENT_DATE THEN 0 WHEN due_date = CURRENT_DATE THEN 1 "
+                 "WHEN due_date IS NULL THEN 3 ELSE 2 END, due_date ASC NULLS LAST, title,id,source"
+        )
+        rows = db.execute(text("SELECT * FROM (" + " UNION ALL ".join(unions) +
+                               ") work ORDER BY " + order_by + " LIMIT :limit OFFSET :offset"), params).mappings().all()
         for row in rows:
             key = row["source"]
             spec = SOURCES[key]
             record_id = str(row["id"])
-            items.append({"id": f"{key}:{record_id}", "source": key, "source_label": spec["label"], "record_id": record_id, "title": row["title"], "status": row["status"],
-                "due_date": row["due_date"], "route": f"/maintenance/{ctx.amo_code}/quality/" + spec["path"].format(id=record_id), "watching": (key, record_id) in watches})
+            status = str(row["status"] or "").upper()
+            terminal = status in {value.strip("'") for value in TERMINAL.split(",")}
+            scope = "WATCHING" if view == "watching" else "SHARED_REVIEW" if view == "approvals" else "HISTORICAL" if terminal else "ASSIGNED"
+            next_action = (
+                "Historical or closed workflow: no pending action" if terminal
+                else "Follow the source record; watching does not assign responsibility" if view == "watching"
+                else "Review and decide in the authoritative source workflow" if view == "approvals"
+                else NEXT_ACTION[key]
+            )
+            items.append({"id": f"{key}:{record_id}", "source": key, "source_label": spec["label"], "record_id": record_id,
+                "title": row["title"], "status": row["status"], "updated_at": row["updated_at"],
+                "due_date": row["due_date"], "route": f"/maintenance/{ctx.amo_code}/quality/" + spec["path"].format(id=record_id),
+                "watching": (key, record_id) in watches, "scope": scope, "next_action": next_action})
     return {"items": items, "total": total, "offset": offset, "limit": 30, "source_errors": errors, "view": view}
 
 

@@ -28,6 +28,14 @@ export type ExternalAuditParticipant = {
   revoked_at: string | null;
   active_grant: boolean;
   access_url?: string | null;
+  email_delivery?: {
+    email_status: string;
+    email_delivery_status: string;
+    email_log_id: string | null;
+    provider_message_id: string | null;
+    sending_mode: string | null;
+    detail: string;
+  } | null;
 };
 
 export type ExternalParticipantCreate = {
@@ -39,6 +47,7 @@ export type ExternalParticipantCreate = {
   permissions?: string[];
   assurance_level: ExternalAuditAssuranceLevel;
   expires_at: string;
+  send_invitation_email?: boolean;
 };
 
 export type AuditFindingReleaseState = {

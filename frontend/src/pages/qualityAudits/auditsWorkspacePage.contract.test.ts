@@ -6,6 +6,10 @@ const workspace = readFileSync(
   fileURLToPath(new URL("./QualityAuditsWorkspacePage.tsx", import.meta.url)),
   "utf8",
 );
+const pagination = readFileSync(
+  fileURLToPath(new URL("../../components/shared/Pagination.tsx", import.meta.url)),
+  "utf8",
+);
 const listCss = readFileSync(
   fileURLToPath(new URL("./quality-audits-list-workspace.css", import.meta.url)),
   "utf8",
@@ -22,7 +26,12 @@ describe("audits workspace list page", () => {
 
   it("renders a clean pager total without corrupt placeholders", () => {
     expect(workspace).toContain("auditsQuery.data?.total ?? 0");
-    expect(workspace).toContain("results · Page");
+    expect(workspace).toContain('label="Audits"');
+    expect(workspace).toContain("visibleCount={rowData.length}");
+    expect(pagination).toContain('record-pagination__summary');
+    expect(pagination).toContain('record-pagination__position');
+    expect(pagination).toContain("total.toLocaleString()");
+    expect(pagination).toContain("Page {page}");
     expect(workspace).not.toMatch(/\u0085/);
     expect(workspace).not.toContain("Â·");
     expect(workspace).not.toContain("â€");

@@ -166,55 +166,299 @@ test("People uses authorization cases and does not duplicate audit assignment wo
   await expect(page.getByRole("dialog", { name: "Nominate person for Quality authorization" })).toBeVisible();
 });
 
-test("Inbox preserves notification receipt time without treating created_at as a deadline", async ({ page }) => {
+test("Governed inbox keeps notifications separate and undated source records neutral", async ({ page }) => {
   await prepare(page, async (route, url) => {
-    if (url.pathname.endsWith("/quality/inbox/assigned-to-me")) {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{ id: "risks:risk-1", record_id: "risk-1", source: "risks", source_label: "Risk assessment",
+        title: "Risk control follow-up", status: "OPEN", due_date: null,
+        route: "/maintenance/tenant-a/quality/risk/register?record=risk-1", watching: false }],
+      total: 1, limit: 30, offset: 0, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  const work = page.getByRole("article").filter({ hasText: "Risk control follow-up" });
+  await expect(work).toContainText("No deadline");
+  await expect(work).not.toContainText("overdue");
+  await expect(work).not.toContainText("notification");
+  await expect(page.getByRole("link", { name: "Open workflow" })).toHaveAttribute("href", "/maintenance/tenant-a/quality/risk/register?record=risk-1");
+});
+
+test("Quality work shows authorised counts, overdue urgency, source filtering and shared approval semantics", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 1, overdue: 1, completed: 0, source_errors: [],
+    });
+    if (path.endsWith("/work-inbox/assigned-to-me")) {
+      const source = url.searchParams.get("source");
+      const items = source && source !== "audits" ? [] : [{
+        id: "audits:audit-1", record_id: "audit-1", source: "audits",
+        source_label: "Audit", title: "Audit finding follow-up", status: "CAP_OPEN",
+        due_date: "2020-01-01", route: "/maintenance/tenant-a/quality/audits/audit-1/setup",
+        watching: false,
+      }];
+      return json(route, { items, total: items.length, offset: 0, limit: 30, source_errors: [] });
+    }
+    if (path.endsWith("/work-inbox/approvals")) return json(route, {
+      items: [], total: 0, offset: 0, limit: 30, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "My Quality Work" })).toBeVisible();
+  await expect(page.getByText("Audit finding follow-up", { exact: true })).toBeVisible();
+  await expect(page.getByText(/days overdue/)).toBeVisible();
+  const open = page.getByRole("link", { name: "Open workflow" });
+  await expect(open).toHaveAttribute("href", "/maintenance/tenant-a/quality/audits/audit-1/setup");
+  await expect(page.locator(".qms-inbox__metric--attention")).toContainText("Overdue");
+  await page.getByLabel("Quality source").selectOption("cars");
+  await expect(page.getByText("Audit finding follow-up")).toHaveCount(0);
+  await expect(page.getByText("No matching work")).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.getByText("Audit finding follow-up", { exact: true })).toBeVisible();
+  await page.locator(".qms-inbox__metric").filter({ hasText: "Approvals" }).click();
+  await expect(page.getByRole("heading", { name: "Management approvals" })).toBeVisible();
+  await expect(page.getByText(/shared management queue/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No pending management decisions" })).toBeVisible();
+});
+
+test("Watched cancelled, rejected and retired work retains its deadline without false urgency", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 1, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/watching")) {
+      const statuses = ["CANCELLED", "REJECTED", "RETIRED", "CLOSED", "OPEN"];
       return json(route, {
-        module: "inbox",
-        view: "assigned-to-me",
-        table: "quality_inbox",
-        items: [{
-          id: "notification-1",
-          message: "Quality notice received from the assurance source",
-          severity: "INFO",
-          created_at: "2026-08-10T08:30:00Z",
-          read_at: null,
-        }],
-        columns: ["message", "severity", "created_at", "read_at"],
-        limit: 30,
-        offset: 0,
-        next_offset: null,
-        has_more: false,
+        items: statuses.map((status, index) => ({
+          id: "reviews:review-" + index, record_id: "review-" + index,
+          source: "reviews", source_label: "Management review",
+          title: "Watched " + status.toLowerCase() + " review", status,
+          due_date: "2020-01-01",
+          route: "/maintenance/tenant-a/quality/management-review/review-" + index + "/overview",
+          watching: true,
+        })),
+        total: statuses.length, limit: 30, offset: 0, source_errors: [],
       });
     }
     return emptyRegister(route);
   });
-
-  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  const task = page.locator(".qms-register-workspace .ag-center-cols-container .ag-row").first();
-  await expect(task).toContainText("Quality notice received from the assurance source");
-  await expect(task.locator('[col-id="received"]')).not.toHaveText("—");
-  await expect(task).not.toContainText("No due date returned");
-  await expect(task.locator('[col-id="due"]')).toHaveClass(/is-neutral/);
+  await page.goto("/maintenance/tenant-a/quality/inbox/watching", { waitUntil: "domcontentloaded" });
+  for (const status of ["cancelled", "rejected", "retired", "closed"]) {
+    const work = page.getByRole("article").filter({ hasText: "Watched " + status + " review" });
+    await expect(work).toBeVisible();
+    await expect(work.locator(".qms-inbox__due")).not.toContainText("overdue");
+    await expect(work.locator(".qms-inbox__due")).not.toContainText("Due in");
+    await expect(work.locator(".qms-inbox__due")).toContainText("2020");
+  }
+  const active = page.getByRole("article").filter({ hasText: "Watched open review" });
+  await expect(active.locator(".qms-inbox__due")).toContainText(/days overdue/);
 });
 
-test("Personal to-dos save reminders, complete and reopen", async ({ page }) => {
-  await prepare(page, route => emptyRegister(route));
+test("Today focus ranks overdue personal and governed work without changing source authority", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, overdue: 1, approvals: 1, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{
+        id: "risks:risk-1", record_id: "risk-1", source: "risks", source_label: "Risk assessment",
+        title: "Review open hazard", status: "OPEN", due_date: "2020-01-01",
+        next_action: "Review risk treatment in source", scope: "ASSIGNED",
+        route: "/maintenance/tenant-a/quality/risk/register?record=risk-1", watching: false,
+      }],
+      total: 1, limit: 30, offset: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/related")) return json(route, {
+      items: [{ id: "provider-invitations:grant-1", record_id: "grant-1",
+        source: "provider-invitations", source_label: "Provider invitation",
+        title: "Confirm representative invite", status: "PENDING_VERIFICATION", due_date: null,
+        next_action: "Review mail receipt and verification", scope: "SHARED_REVIEW",
+        route: "/maintenance/tenant-a/quality/external-accounts?view=accounts&grant=grant-1",
+      }],
+      total: 1, limit: 30, offset: 0,
+      source_errors: [{ source: "Document acknowledgement", message: "Unavailable source" }],
+    });
+    return emptyRegister(route);
+  });
+  await page.route("**/tasks/personal**", route => json(route, {
+    items: [{
+      id: "personal-1", title: "High urgency personal follow-up", description: "",
+      due_at: "2020-01-01T10:00:00Z", status: "OPEN", priority: 1,
+      entity_type: "quality_personal", metadata_json: {},
+    }],
+    total: 1, offset: 0, limit: 30,
+  }));
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Today & next steps" }).click();
+  const focus = page.getByRole("region", { name: "Today and next steps" });
+  await expect(focus.getByRole("heading", { name: "Today & next steps" })).toBeVisible();
+  await expect(focus.getByText("High urgency personal follow-up")).toBeVisible();
+  await expect(focus.getByText("Review open hazard")).toBeVisible();
+  await expect(focus.getByText("Confirm representative invite")).toBeVisible();
+  await expect(focus.getByRole("alert")).toContainText("Document acknowledgement");
+  const first = focus.locator(".qms-inbox__work-card").first();
+  await expect(first).toContainText("High urgency personal follow-up");
+  await expect(focus.getByRole("link", { name: "Open workflow" })).toHaveCount(2);
+  await expect(focus.getByRole("button", { name: "Complete" })).toHaveCount(0);
+  for (const width of [1920, 834, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 2);
+  }
+});
+
+test("Connected work is scoped, next-action based and responsive without exposing mutation shortcuts", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/related")) {
+      const source = url.searchParams.get("source") || "";
+      const category = url.searchParams.get("category") || "all";
+      const items = [
+        { id: "training-steps:s1", record_id: "s1", source: "training-steps",
+          source_label: "Training workflow", title: "Document training · Sign off",
+          status: "PENDING", due_date: "2020-01-01", route: "/maintenance/tenant-a/training/competence",
+          scope: "ASSIGNED", next_action: "Await activation of an earlier training step", blocked: true },
+        { id: "document-acknowledgements:d1", record_id: "d1", source: "document-acknowledgements",
+          source_label: "Document acknowledgement", title: "Acknowledge controlled distribution · Quality manual",
+          status: "PENDING", due_date: "2020-01-01",
+          route: "/maintenance/tenant-a/document-control/distribution",
+          scope: "ASSIGNED", next_action: "Acknowledge the issued controlled document", blocked: false },
+        { id: "provider-approvals:p1", record_id: "p1", source: "provider-approvals",
+          source_label: "External provider account", title: "Review verified provider representative",
+          status: "AWAITING_QUALITY_APPROVAL", due_date: null,
+          route: "/maintenance/tenant-a/quality/external-accounts?view=accounts",
+          scope: "SHARED_REVIEW", next_action: "Quality Manager to review the verified account grant", blocked: false },
+      ].filter(item => (!source || item.source === source) &&
+        (category !== "overdue" || item.due_date !== null));
+      return json(route, { items, total: items.length, limit: 30, offset: 0, source_errors: [] });
+    }
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me?mode=connected", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("button", { name: "Connected work", exact: true })).toBeVisible();
+  const area = page.getByRole("region", { name: "Connected Quality work" });
+  await expect(area.getByRole("heading", { name: "Connected responsibilities" })).toBeVisible();
+  await expect(area.getByText("Assigned to you").first()).toBeVisible();
+  await expect(area.getByText("Shared decision queue")).toBeVisible();
+  await expect(area.getByText("Await activation of an earlier training step")).toBeVisible();
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveCount(3);
+  await expect(area.getByRole("button", { name: "Complete" })).toHaveCount(0);
+  await area.getByLabel("Connected source").selectOption("document-acknowledgements");
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveCount(1);
+  await expect(area.getByRole("link", { name: "Open source workspace" })).toHaveAttribute(
+    "href", "/maintenance/tenant-a/document-control/distribution",
+  );
+  for (const width of [1920, 834, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const docWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(docWidth).toBeLessThanOrEqual(width + 2);
+  }
+});
+
+test("Vendor invitations distinguish Resend acceptance, sandbox and real delivery receipts", async ({ page }) => {
+  const account = {
+    grant_id: "grant-1", provider_id: "provider-1", supplier_id: 1, version: 1,
+    legal_name: "Test Provider", supplier_code: "TP-001",
+    email: "representative@example.test", display_name: "Test Representative",
+    identity_id: "identity-1", role_code: "READ_ONLY", capabilities_json: [],
+    object_scope_json: {}, grant_state: "PENDING", portal_state: "PENDING",
+    identity_state: "INVITED", verified_at: null, restrict_new_work: false,
+  };
+  let mailed = false;
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/quality/external-accounts/events")) return json(route, { items: [] });
+    if (path.endsWith("/quality/external-accounts")) return json(route, { items: mailed ? [account] : [account] });
+    if (path.includes("/quality/external-accounts/grants/grant-1/delivery-history"))
+      return json(route, {
+        grant_id: "grant-1", grant_status: "PENDING", verified: false,
+        recipient: account.email, note: "Provider acceptance is not recipient-server delivery or inbox placement.",
+        attempts: [{
+          email_status: "SENT", email_delivery_status: "ACCEPTED",
+          email_log_id: "log-1", provider_message_id: "email-resend-1",
+          sending_mode: "SANDBOX", provider_accepted: true,
+          attempted_at: "2026-11-19T08:30:00Z", recipient: account.email,
+          effective_recipient: "sandbox@example.test", template_key: "external-provider-invitation",
+          events: [{ event: "email.sent", at: "2026-11-19T08:30:00Z" }],
+        }],
+      });
+    if (path.endsWith("/quality/external-accounts/suppliers")) return json(route, {
+      items: [{ id: 1, supplier_code: "TP-001", legal_name: "Test Provider",
+        status: "ACTIVE", is_active: true, external_import_pending_activation: false }],
+      has_more: false,
+    });
+    if (path.endsWith("/quality/external-accounts/invitations") && route.request().method() === "POST") {
+      mailed = true;
+      return json(route, {
+        id: "grant-1", status: "PENDING", delivery_status: "SENT",
+        delivery: {
+          email_status: "SENT", email_delivery_status: "ACCEPTED", email_log_id: "log-1",
+          provider_message_id: "email-resend-1", sending_mode: "SANDBOX", provider_accepted: true,
+        },
+      }, 201);
+    }
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/external-accounts?view=accounts", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Inspect invitation delivery for Test Representative" }).click();
+  const panel = page.getByRole("region", { name: "Provider invitation delivery history" });
+  await expect(panel.getByText("Accepted by Resend — recipient delivery not confirmed")).toBeVisible();
+  await expect(panel.getByText(/Sandbox routing was active/)).toBeVisible();
+  await expect(panel.getByText("email-resend-1")).toBeVisible();
+  await expect(panel.getByText("sandbox@example.test")).toBeVisible();
+  await expect(panel).not.toContainText("one-time-secret");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(392);
+});
+
+test("Personal to-dos save reminders, complete, reopen and fit responsive viewports", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (url.pathname.includes("/work-inbox/")) return json(route, {
+      items: [], total: 0, offset: 0, limit: 30, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
   let tasks: Array<Record<string, unknown>> = [];
-  await page.route("**/tasks/my", route => json(route, tasks));
-  await page.route("**/tasks/personal{,/**}", async route => {
-    const values = route.request().postDataJSON() as Record<string, unknown>;
-    const task = { ...values, id: "personal-1", amo_id: "amo-a", owner_user_id: "quality-user-a", entity_type: "quality_personal", status: values.status || "OPEN", metadata_json: { reminder_at: values.reminder_at }, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  await page.route("**/tasks/personal**", async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET") {
+      const completed = url.searchParams.get("status") === "all";
+      const search = (url.searchParams.get("q") || "").toLowerCase();
+      const matching = tasks.filter(task => (completed || !["DONE", "CANCELLED"].includes(String(task.status)))
+        && String(task.title).toLowerCase().includes(search));
+      const limit = Number(url.searchParams.get("limit") || 25);
+      const offset = Number(url.searchParams.get("offset") || 0);
+      return json(route, { items: matching.slice(offset, offset + limit), total: matching.length, offset, limit });
+    }
+    const values = request.postDataJSON() as Record<string, unknown>;
+    const id = request.method() === "POST" ? "personal-1" : url.pathname.split("/").pop();
+    const previous = tasks.find(task => task.id === id);
+    const task = { ...previous, ...values, id, amo_id: "amo-a", owner_user_id: "quality-user-a",
+      entity_type: "quality_personal", status: values.status || previous?.status || "OPEN",
+      metadata_json: { reminder_at: values.reminder_at },
+      created_at: previous?.created_at || new Date().toISOString(), updated_at: new Date().toISOString(),
+    };
     tasks = [task];
-    return json(route, task);
+    return json(route, task, request.method() === "POST" ? 201 : 200);
   });
   await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
-  await page.getByText("Personal to-dos", { exact: true }).click();
-  await page.getByRole("button", { name: "New to-do", exact: true }).click();
-  await page.getByLabel("Task", { exact: true }).fill("Review new evidence");
-  await page.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");
-  await page.getByRole("button", { name: "Save task", exact: true }).click();
+  await page.getByRole("button", { name: "Personal to-dos" }).click();
   const personal = page.getByRole("region", { name: "Personal to-do list" });
+  await expect(personal.getByText("Plan your first follow-up")).toBeVisible();
+  await personal.getByRole("button", { name: "New to-do" }).click();
+  await personal.getByLabel("Task", { exact: true }).fill("Review new evidence");
+  await personal.getByLabel("Email reminder", { exact: true }).fill("2026-10-12T09:30");
+  await personal.getByRole("button", { name: "Save task" }).click();
   await expect(personal.getByText("Review new evidence", { exact: true })).toBeVisible();
   expect(tasks[0].metadata_json).toMatchObject({ reminder_at: new Date("2026-10-12T09:30").toISOString() });
   await personal.getByRole("button", { name: "Complete", exact: true }).click();
@@ -223,11 +467,13 @@ test("Personal to-dos save reminders, complete and reopen", async ({ page }) => 
   await personal.getByRole("button", { name: "Reopen", exact: true }).click();
   await expect(personal.getByRole("button", { name: "Complete", exact: true })).toBeVisible();
   expect(tasks[0].status).toBe("OPEN");
-  for (const width of [800, 390]) {
+  for (const width of [1920, 834, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    const bounds = await personal.locator(".qms-workspace-grid").boundingBox();
+    const bounds = await personal.boundingBox();
     expect(bounds).not.toBeNull();
-    expect(bounds!.width).toBeLessThanOrEqual(width);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 2);
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(documentWidth).toBeLessThanOrEqual(width + 2);
   }
 });
 
@@ -283,4 +529,57 @@ test("People read access does not expose mutation controls to a Quality Auditor"
   await expect(page.getByRole("button", { name: /Suspend/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Revoke/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Check audit assignment/i })).toHaveCount(0);
+});
+
+
+test("Quality work saved filters persist per user and apply without changing governed source authority", async ({ page }) => {
+  const stored: Array<{
+    id: string; title: string; filters: { view: string; q: string; source: string; due: string; sort: string };
+  }> = [];
+  await prepare(page, async (route, url) => {
+    const path = url.pathname;
+    if (path.endsWith("/work-inbox/saved-views")) {
+      if (route.request().method() === "GET") return json(route, { items: stored, limit: 20 });
+      if (route.request().method() === "POST") {
+        const { title, ...filters } = route.request().postDataJSON();
+        const view = { id: "saved-view-1", title, filters };
+        stored.push(view);
+        return json(route, view, 201);
+      }
+    }
+    if (path.endsWith("/work-inbox/saved-views/saved-view-1") &&
+      route.request().method() === "DELETE") {
+      stored.splice(0, stored.length);
+      return json(route, { deleted: true });
+    }
+    if (path.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 0, approvals: 0, overdue: 0, completed: 0, source_errors: [],
+    });
+    if (path.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [], total: 0, limit: 30, offset: 0, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  const saved = page.getByRole("region", { name: "My saved Quality work views" });
+  await expect(saved.getByText("My saved filters")).toBeVisible();
+  await page.getByLabel("Quality source").selectOption("audits");
+  await page.getByLabel("Deadline", { exact: true }).selectOption("today");
+  await page.getByLabel("Order", { exact: true }).selectOption("title");
+  await saved.getByLabel("Save current filters as").fill("My audit deadlines");
+  await saved.getByRole("button", { name: "Save view" }).click();
+  await expect(saved.getByText('Saved "My audit deadlines" for your own account.')).toBeVisible();
+  expect(stored).toHaveLength(1);
+  expect(stored[0].filters).toMatchObject({
+    view: "assigned-to-me", source: "audits", due: "today", sort: "title",
+  });
+  await page.getByLabel("Quality source").selectOption("cars");
+  await saved.locator("select").selectOption("saved-view-1");
+  await saved.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByLabel("Quality source")).toHaveValue("audits");
+  await expect(page.getByLabel("Deadline", { exact: true })).toHaveValue("today");
+  await expect(page.getByLabel("Order", { exact: true })).toHaveValue("title");
+  await saved.getByRole("button", { name: "Remove saved view" }).click();
+  await expect(saved.getByText("Saved view removed.")).toBeVisible();
+  await expect(saved.getByRole("option", { name: "My audit deadlines" })).toHaveCount(0);
 });

@@ -269,6 +269,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const [newRequest, setNewRequest] = useState<NewRequest>(emptyRequest);
   const [participantDraft, setParticipantDraft] = useState<ExternalParticipantDraft>(emptyExternalParticipant);
   const [oneTimeAccessUrl, setOneTimeAccessUrl] = useState<string | null>(null);
+  const [sendParticipantEmail, setSendParticipantEmail] = useState(true);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
@@ -513,15 +514,35 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         permissions: participantPermissions(participantDraft),
         assurance_level: participantDraft.assuranceLevel,
         expires_at: expiry.toISOString(),
+        send_invitation_email: sendParticipantEmail,
       });
     },
     onSuccess: async (participant) => {
       const relative = participant.access_url || null;
       setOneTimeAccessUrl(relative ? `${window.location.origin}${relative}` : null);
       setParticipantDraft(emptyExternalParticipant);
-      setLocalSuccess("Participant access created. Copy the invitation link shown below.");
+      const receipt = participant.email_delivery;
+      if (!sendParticipantEmail) {
+        setLocalSuccess("Participant access created. No email was requested; copy the one-time invitation link now.");
+        setLocalError(null);
+      } else if (!receipt) {
+        setLocalSuccess("Participant access created. Email sending could not be verified; copy the one-time link now.");
+        setLocalError(null);
+      } else if (receipt.email_delivery_status === "ACCEPTED" && receipt.sending_mode === "SANDBOX") {
+        setLocalSuccess("Participant access created. Resend accepted a SANDBOX message, not an email to the intended participant. Copy the one-time link.");
+        setLocalError(null);
+      } else if (receipt.email_delivery_status === "ACCEPTED" || receipt.email_delivery_status === "DELIVERED") {
+        setLocalSuccess(receipt.email_delivery_status === "DELIVERED"
+          ? "Participant access created. Recipient mail server accepted the invite; inbox placement is not confirmed."
+          : "Participant access created. Resend accepted the email; delivery is not yet confirmed. Copy the one-time link as a fallback.");
+        setLocalError(null);
+      } else {
+        setLocalSuccess("Participant access created. Email was not confirmed as sent; copy the one-time link now.");
+        setLocalError("Invitation email not accepted: " + receipt.email_delivery_status +
+          (receipt.email_log_id ? " · Mail log: " + receipt.email_log_id : "") +
+          ". Check sender configuration and mail logs before issuing another invitation.");
+      }
       setShowParticipantForm(false);
-      setLocalError(null);
       await refresh();
     },
     onError: (error) => setLocalError(error instanceof Error ? error.message : "External participant could not be invited."),
@@ -1234,7 +1255,12 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               <label><span>Access expires</span><input required type="datetime-local" value={participantDraft.expiresAt} onChange={(event) => setParticipantDraft((current) => ({ ...current, expiresAt: event.target.value }))} /></label>
               <label><span>Identity assurance</span><select value={participantDraft.assuranceLevel} onChange={(event) => setParticipantDraft((current) => ({ ...current, assuranceLevel: event.target.value as ExternalParticipantDraft["assuranceLevel"] }))}><option value="EMAIL_LINK">Email link</option>{participantDraft.participantType === "EXTERNAL_AUDITOR" ? <option value="PASSKEY">Passkey required</option> : null}</select></label>
               <fieldset className="is-wide"><legend>Scoped access</legend><label><input type="checkbox" checked={participantDraft.readProgress} onChange={(event) => setParticipantDraft((current) => ({ ...current, readProgress: event.target.checked }))} /> View fieldwork progress</label>{participantDraft.participantType === "AUDITEE_GUEST" ? <label><input type="checkbox" checked={participantDraft.readReleasedEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, readReleasedEvidence: event.target.checked }))} /> View evidence explicitly released with findings</label> : <><label><input type="checkbox" checked={participantDraft.executeChecklist} onChange={(event) => setParticipantDraft((current) => ({ ...current, executeChecklist: event.target.checked }))} /> Execute assigned checklist</label><label><input type="checkbox" checked={participantDraft.createEvidence} onChange={(event) => setParticipantDraft((current) => ({ ...current, createEvidence: event.target.checked }))} /> Add audit evidence</label><label><input type="checkbox" checked={participantDraft.draftFinding} onChange={(event) => setParticipantDraft((current) => ({ ...current, draftFinding: event.target.checked }))} /> Draft findings</label></>}</fieldset>
-              <p className="is-wide">Auditees use email-link access. External auditors may require a passkey when configured.</p>
+              <label className="is-wide"><input type="checkbox" checked={sendParticipantEmail}
+                onChange={event => setSendParticipantEmail(event.target.checked)} />
+                Send a controlled invitation email to this participant
+              </label>
+              <p className="is-wide">Auditees use email-link access. External auditors may require a passkey when configured.
+                The invitation is created even if email fails. Resend acceptance is not proof of delivery or inbox placement.</p>
               <footer><button type="button" onClick={() => setShowParticipantForm(false)}>Cancel</button><button type="submit" className="is-primary" disabled={participantMutation.isPending}>{participantMutation.isPending ? "Creating access…" : "Create invitation"}</button></footer>
             </form> : null}
 
