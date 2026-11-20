@@ -150,6 +150,9 @@ async function prepare(page: Page, state: State): Promise<void> {
 }
 
 test("executes canonical live checklist mutation with versioning, auditor notes and preserved structured evidence", async ({ page }) => {
+  // This lifecycle includes 236 questions, three viewport sizes and retained
+  // full-page screenshots as well as the governed write assertions below.
+  test.setTimeout(120_000);
   const state: State = { mutationBody: null, response: "NOT_VERIFIED", version: 1, notes: null };
   await prepare(page, state);
   await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/live`, { waitUntil: "domcontentloaded" });

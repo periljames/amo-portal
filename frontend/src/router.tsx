@@ -13,6 +13,11 @@ import { AppRouter as PortalRouteSurface } from "./app/PortalRouteSurface";
 const QmsOverviewPage = lazy(() => import("./pages/qms/QmsOverviewPage"));
 const QmsReportsPage = lazy(() => import("./pages/qms/QmsReportsPage"));
 const QmsRegisterPage = lazy(() => import("./pages/qms/QmsRegisterPage"));
+const QmsManagementReviewPage = lazy(() => import("./pages/qms/QmsManagementReviewPage"));
+const QmsControlledRegisterPage = lazy(() => import("./pages/qms/QmsControlledRegisterPage"));
+const QmsWorkInboxPage = lazy(() => import("./pages/qms/QmsWorkInboxPage"));
+const QmsActivityLogPage = lazy(() => import("./pages/qms/QmsActivityLogPage"));
+const QmsFindingViewsPage = lazy(() => import("./pages/qms/QmsFindingViewsPage"));
 const QmsNotFoundPage = lazy(() => import("./pages/qms/QmsNotFoundPage"));
 const QmsCarPerformanceReportPage = lazy(() => import("./pages/qms/QmsCarPerformanceReportPage"));
 const ProcurementModule = lazy(() => import("./pages/procurement/ProcurementModule"));
@@ -290,7 +295,13 @@ export const AppRouter: React.FC = () => {
     return <Navigate to={`/maintenance/${encodeURIComponent(qmsRoute.amoCode || "")}/document-control/${target}`} replace />;
   }
   if (isSupportedCarPerformanceReportPath(location.pathname)) return <QmsCarPerformanceReportRouteSurface />;
+  if (qmsRoute.kind === "known" && qmsRoute.relativePath === "settings/audit-log") return <Suspense fallback={<div role="status">Loading Quality history…</div>}><WorkspaceRequireAuth><QmsActivityLogPage /></WorkspaceRequireAuth></Suspense>;
+  const findingParts = qmsRoute.relativePath?.split("/") || [];
+  if (qmsRoute.kind === "known" && qmsRoute.module?.id === "findings" && findingParts.length <= 2 && (findingParts.length === 1 || qmsRoute.module.validViews.includes(findingParts[1]))) return <Suspense fallback={<div role="status">Loading findings…</div>}><WorkspaceRequireAuth><QmsFindingViewsPage /></WorkspaceRequireAuth></Suspense>;
+  if (qmsRoute.kind === "known" && qmsRoute.module?.id === "inbox") return <Suspense fallback={<div role="status">Loading Quality work…</div>}><WorkspaceRequireAuth><QmsWorkInboxPage /></WorkspaceRequireAuth></Suspense>;
   if (qmsRoute.kind === "overview") return <QmsOverviewRouteSurface />;
+  if (qmsRoute.kind === "known" && qmsRoute.module?.id === "management-review") return <Suspense fallback={<div role="status">Loading management review…</div>}><WorkspaceRequireAuth><QmsManagementReviewPage /></WorkspaceRequireAuth></Suspense>;
+  if (qmsRoute.kind === "known" && ["risk", "system", "equipment-calibration", "external-interface"].includes(qmsRoute.module?.id || "")) return <Suspense fallback={<div role="status">Loading Quality register…</div>}><WorkspaceRequireAuth><QmsControlledRegisterPage /></WorkspaceRequireAuth></Suspense>;
   if (isQmsRegisterWorkspace(qmsRoute)) return <QmsRegisterRouteSurface />;
   if (
     qmsRoute.kind === "unknown" &&
