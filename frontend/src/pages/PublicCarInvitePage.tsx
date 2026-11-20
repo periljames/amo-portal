@@ -1505,7 +1505,7 @@ const PublicCarInvitePage: React.FC = () => {
                                         {!isInviteEditable(invite)
                                            ? "Response locked — no further submissions or changes are permitted."
                                            : entry.submitting
-                                             ? "Submitting response…"
+                                             ? "Submitting response… Keep this page open until confirmation."
                                              : "Preview is required before final submission."}
                                       </span>
                                       <div className="car-invite-actions">

@@ -1053,11 +1053,17 @@ const QualityCarsPage: React.FC = () => {
                 </select>
               </label>
             </div>
+            {(reviewCar.root_cause_review_note || reviewCar.capa_review_note) && <details className="qms-card">
+              <summary>Previous review reasons</summary>
+              {reviewCar.root_cause_review_note && <p><strong>Root cause:</strong> {reviewCar.root_cause_review_note}</p>}
+              {reviewCar.capa_review_note && <p><strong>Action plan:</strong> {reviewCar.capa_review_note}</p>}
+            </details>}
+            <p className="text-muted">Enter a new review reason. Reasons are required for returns and evidence requests.</p>
             <label htmlFor="car-review-root-note">Root cause review note
-              <textarea id="car-review-root-note" aria-label="Root cause review note" className="input" rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
+              <textarea id="car-review-root-note" aria-label="Root cause review note" className="input" maxLength={8000} rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
             </label>
             <label htmlFor="car-review-capa-note">Corrective action review note
-              <textarea id="car-review-capa-note" aria-label="Corrective action review note" className="input" rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
+              <textarea id="car-review-capa-note" aria-label="Corrective action review note" className="input" maxLength={8000} rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
             </label>
             <label htmlFor="car-review-auditee-message">Message to auditee
               <textarea id="car-review-auditee-message" aria-label="Message to auditee" className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
@@ -1097,7 +1103,7 @@ const QualityCarsPage: React.FC = () => {
 
             <div className="upsell-modal__actions">
               <button type="button" className="secondary-chip-btn" onClick={() => { setReviewCar(null); setReviewAttachments([]); }} disabled={reviewBusy}>Cancel</button>
-              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy || reviewAttachmentsLoading || !reviewForm.root_cause_status || !reviewForm.capa_status}>
+              <button type="button" className="primary-chip-btn" onClick={() => void submitReview()} disabled={reviewBusy || reviewAttachmentsLoading || !reviewForm.root_cause_status || !reviewForm.capa_status || (reviewForm.root_cause_status === "REJECTED" && !reviewForm.root_cause_review_note.trim()) || (["REJECTED", "NEEDS_EVIDENCE"].includes(reviewForm.capa_status) && !reviewForm.capa_review_note.trim())}>
                 {reviewBusy ? "Saving review…" : "Record review decision"}
               </button>
             </div>
