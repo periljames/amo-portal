@@ -35,7 +35,7 @@ const App: React.FC = () => {
   const theme = useTimeOfDayTheme();
   const { scheme } = useColorScheme();
   const isPublicAuditAccess = /^\/qms\/audit-access(?:\/[^/]+)?\/?$/i.test(location.pathname);
-  const isPublicCarAccess = /^\/qms\/car-access\/[^/]+\/?$/i.test(location.pathname);
+  const isPublicCarAccess = /^\/(?:car-invite|qms\/car-access(?:\/[^/]+)?)\/?$/i.test(location.pathname);
   const isPublicAuditVerification = /^\/verify\/[^/]+\/?$/i.test(location.pathname);
   const isPublicQualitySurface = isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
   const isExternalProviderSurface = /^\/(?:vendor|partner)(?:\/|$)/i.test(location.pathname);
@@ -112,7 +112,7 @@ const App: React.FC = () => {
     <>
       <GlobalLoadingBar />
       {/^\/maintenance\/[^/]+\/(?:quality|qms)(?:\/|$)/i.test(location.pathname) && <QmsFormFeedback />}
-      {!isExternalProviderSurface && <PortalSessionLifecycle />}
+      {!isExternalProviderSurface && !isPublicCarAccess && <PortalSessionLifecycle />}
       <PortalErrorBoundary><TenantRouteBoundary><AppRouter /></TenantRouteBoundary></PortalErrorBoundary>
     </>
   );

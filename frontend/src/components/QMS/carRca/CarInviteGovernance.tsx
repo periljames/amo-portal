@@ -56,7 +56,7 @@ export default function CarInviteGovernance({ amoCode, carId, canManage, onChang
   };
   return <section className="card car-rca" aria-label="CAR invitation security">
     <div className="car-rca-heading"><div><h3>Invitation access and security</h3>
-      <p>Public CAR links are bearer capabilities. Only Quality may set expiry, revoke access, or rotate a link. Previously issued links remain valid until explicitly limited.</p>
+      <p>Each public link is a bearer capability limited to one CAR. New and replacement links expire after 30 days by default. Quality may set a different expiry, revoke access, or rotate a link. Existing links retain their current controls until updated.</p>
     </div></div>
     {error && <p role="alert">{error} <button type="button" onClick={() => void getCarInviteAccessControl(amoCode,carId).then(row => { showControl(row); setError(null); }).catch(e => setError(String(e)))}>Retry</button></p>}
     {!control && !error && <p role="status">Loading invitation controls…</p>}
