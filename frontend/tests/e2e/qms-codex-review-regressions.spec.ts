@@ -409,7 +409,7 @@ test("Vendor invitations distinguish Resend acceptance, sandbox and real deliver
   await page.getByRole("button", { name: "Inspect invitation delivery for Test Representative" }).click();
   const panel = page.getByRole("region", { name: "Provider invitation delivery history" });
   await expect(panel.getByText("Accepted by Resend — recipient delivery not confirmed")).toBeVisible();
-  await expect(panel.getByText(/Sandbox routing: invitation for representative@example\\.test was redirected to sandbox@example\\.test/)).toBeVisible();
+  await expect(panel.getByText(/Sandbox routing: invitation for representative@example\.test was redirected to sandbox@example\.test/)).toBeVisible();
   await expect(panel.getByText("email-resend-1")).toBeVisible();
   await expect(panel.getByText("sandbox@example.test")).toBeVisible();
   await expect(panel).not.toContainText("one-time-secret");
