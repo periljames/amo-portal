@@ -7,6 +7,9 @@ describe("public CAR invitation URL handling", () => {
       token: "abc123", tokens: ["abc123"], captureMode: true, legacyQuery: false,
     });
   });
+  it("prefers the fragment bearer over any stale query token", () => {
+    expect(parseCarInviteLocation("?token=legacy-token", "#token=current-token").token).toBe("current-token");
+  });
   it("accepts and identifies legacy query-token links for migration", () => {
     expect(parseCarInviteLocation("?token=old-token&capture=1", "")).toMatchObject({
       token: "old-token", captureMode: true, legacyQuery: true,
