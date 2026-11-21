@@ -6866,7 +6866,6 @@ def get_car_invite(
 
 @public_router.get("/cars/invite/{invite_token}", response_model=CARInviteOut)
 def get_car_invite_by_token(invite_token: str, request: Request, db: Session = Depends(get_db)):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -6888,7 +6887,6 @@ def _limit_car_invite_text(value: object, *, max_length: int = 500) -> object:
 
 @public_router.patch("/cars/invite/{invite_token}", response_model=CAROut)
 def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request: Request, db: Session = Depends(get_db)):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -7024,7 +7022,6 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
 
 @public_router.post("/cars/invite/{invite_token}/recall", response_model=CARInviteOut)
 def recall_car_invite_submission(invite_token: str, request: Request, db: Session = Depends(get_db)):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -7204,7 +7201,6 @@ def delete_car_invite_attachment(
     attachment_id: UUID,
     db: Session = Depends(get_db),
 ):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -7248,7 +7244,6 @@ def download_car_invite_attachment(
     attachment_id: UUID,
     db: Session = Depends(get_db),
 ):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -7286,7 +7281,6 @@ def download_car_invite_attachment(
 
 @public_router.get("/cars/invite/{invite_token}/form", response_class=FileResponse)
 def download_car_invite_form(invite_token: str, request: Request, db: Session = Depends(get_db)):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
@@ -7317,7 +7311,6 @@ def download_car_invite_form(invite_token: str, request: Request, db: Session = 
 
 @public_router.get("/cars/invite/{invite_token}/actions", response_model=List[CARActionOut])
 def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
-    route_token = invite_token
     invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
