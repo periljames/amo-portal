@@ -14,10 +14,11 @@ export function parseCarInviteLocation(search: string, hash: string): ParsedCarI
   const fragmentToken = fragment.get("token");
   const queryToken = query.get("token");
   const token = fragmentToken || queryToken;
+  const captureValue = fragment.has("capture") ? fragment.get("capture") : query.get("capture");
   return {
     token,
     tokens: token ? token.split(",").map(value => value.trim()).filter(Boolean) : [],
-    captureMode: fragment.get("capture") === "1" || query.get("capture") === "1",
+    captureMode: captureValue === "1",
     legacyQuery: !fragmentToken && Boolean(queryToken),
   };
 }
