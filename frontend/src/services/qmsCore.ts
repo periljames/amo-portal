@@ -2077,6 +2077,7 @@ export interface CARInviteOut {
   invite_token: string;
   invite_url: string;
   car_form_download_url?: string | null;
+  audit_report_download_url?: string | null;
   next_reminder_at: string | null;
   car_number: string;
   title: string;
