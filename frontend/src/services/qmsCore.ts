@@ -2162,29 +2162,54 @@ export async function qmsRescheduleCarReminder(
   );
 }
 
-async function publicInviteDownloadBlob(token: string, path: string): Promise<Blob> {
+export type PublicCarInviteDownload = { blob: Blob; filename: string | null };
+
+function publicDownloadFilename(value: string | null): string | null {
+  if (!value) return null;
+  const encoded = value.match(/filename\\*\\s*=\\s*UTF-8''([^;]+)/i)?.[1]?.trim();
+  const quoted = value.match(/filename\\s*=\\s*"([^"]+)"/i)?.[1];
+  const plain = value.match(/filename\\s*=\\s*([^;]+)/i)?.[1]?.trim();
+  let candidate = encoded ? decodeURIComponent(encoded.replace(/^"|"$/g, "")) : quoted || plain || "";
+  candidate = candidate.replace(/[\\\\/\\r\\n\\0]/g, "_").trim();
+  return candidate ? candidate.slice(0, 255) : null;
+}
+
+async function publicInviteDownload(token: string, path: string): Promise<PublicCarInviteDownload> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
     referrerPolicy: "no-referrer",
     credentials: "omit",
+    signal: AbortSignal.timeout(300_000),
   });
   if ([401, 403, 404, 410].includes(response.status)) {
     throw new Error("This invitation or evidence file is no longer available.");
   }
   if (!response.ok) throw new Error(`CAR download failed (${response.status}).`);
-  return response.blob();
+  return {
+    blob: await response.blob(),
+    filename: publicDownloadFilename(response.headers.get("Content-Disposition")),
+  };
 }
 
-export const qmsDownloadCarInviteAttachmentBlob = (token: string, attachmentId: string) =>
-  publicInviteDownloadBlob(token, `/quality/cars/invite/current/attachments/${encodeURIComponent(attachmentId)}/download`);
+export const qmsDownloadCarInviteAttachment = (token: string, attachmentId: string) =>
+  publicInviteDownload(token, `/quality/cars/invite/current/attachments/${encodeURIComponent(attachmentId)}/download`);
 
-export const qmsDownloadCarInviteAuditReportBlob = (token: string) =>
-  publicInviteDownloadBlob(token, "/quality/cars/invite/current/audit-report");
+export const qmsDownloadCarInviteAttachmentBlob = async (token: string, attachmentId: string) =>
+  (await qmsDownloadCarInviteAttachment(token, attachmentId)).blob;
 
-export const qmsDownloadCarInviteFormBlob = (token: string) =>
-  publicInviteDownloadBlob(token, "/quality/cars/invite/current/form");
+export const qmsDownloadCarInviteAuditReport = (token: string) =>
+  publicInviteDownload(token, "/quality/cars/invite/current/audit-report");
+
+export const qmsDownloadCarInviteAuditReportBlob = async (token: string) =>
+  (await qmsDownloadCarInviteAuditReport(token)).blob;
+
+export const qmsDownloadCarInviteForm = (token: string) =>
+  publicInviteDownload(token, "/quality/cars/invite/current/form");
+
+export const qmsDownloadCarInviteFormBlob = async (token: string) =>
+  (await qmsDownloadCarInviteForm(token)).blob;
 
 export async function qmsGetCarInviteByToken(
   token: string,
