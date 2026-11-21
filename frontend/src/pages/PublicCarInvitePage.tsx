@@ -1539,13 +1539,13 @@ const PublicCarInvitePage: React.FC = () => {
             </details>
 
             <details className="car-invite-panel" open>
-              <summary><span>Audit report</span><FileText size={16} /></summary>
-              {readyEntries.find((entry) => entry.invite?.audit_report_download_url)?.invite ? (() => {
-                const reportEntry = readyEntries.find((entry) => entry.invite?.audit_report_download_url)!;
-                return <button className="car-invite-btn car-invite-btn--wide" type="button" disabled={reportDownloadingToken === reportEntry.token} onClick={() => void downloadIssuedReport(reportEntry)}>
-                  <FileText size={16} /> {reportDownloadingToken === reportEntry.token ? "Preparing report…" : "View / download issued report"}
-                </button>;
-              })() : <p className="car-invite-subtitle">The auditor has not issued the report yet.</p>}
+              <summary><span>Audit reports</span><FileText size={16} /></summary>
+              {readyEntries.filter((entry) => entry.invite?.audit_report_download_url).map((entry) => (
+                <button key={entry.token} className="car-invite-btn car-invite-btn--wide" type="button" disabled={reportDownloadingToken === entry.token} onClick={() => void downloadIssuedReport(entry)}>
+                  <FileText size={16} /> {reportDownloadingToken === entry.token ? "Preparing report…" : `View / download report · ${entry.invite?.car_number || "CAR"}`}
+                </button>
+              ))}
+              {readyEntries.length > 0 && !readyEntries.some((entry) => entry.invite?.audit_report_download_url) && <p className="car-invite-subtitle">The auditor has not issued a report yet.</p>}
             </details>
 
             <details className="car-invite-panel" open>
