@@ -10,6 +10,9 @@ describe("public CAR invitation URL handling", () => {
   it("prefers the fragment bearer over any stale query token", () => {
     expect(parseCarInviteLocation("?token=legacy-token", "#token=current-token").token).toBe("current-token");
   });
+  it("uses fragment capture settings ahead of stale query settings", () => {
+    expect(parseCarInviteLocation("?capture=1", "#token=current-token&capture=0").captureMode).toBe(false);
+  });
   it("accepts and identifies legacy query-token links for migration", () => {
     expect(parseCarInviteLocation("?token=old-token&capture=1", "")).toMatchObject({
       token: "old-token", captureMode: true, legacyQuery: true,
