@@ -9,7 +9,7 @@ import hashlib
 import json
 import uuid
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -29,8 +29,9 @@ from .tenant_security import (
     TenantContext, assert_quality_permission, require_quality_permission,
     set_postgres_tenant_context, write_tenant_context
 )
+from .public_invite_security import public_invite_security, resolve_public_invite_token
 
-public_router = APIRouter(prefix="/cars/invite", tags=["Quality / Public CAR RCA"])
+public_router = APIRouter(prefix="/cars/invite", tags=["Quality / Public CAR RCA"], dependencies=[Depends(public_invite_security)])
 router = APIRouter(prefix="/cars/{car_id}", tags=["Quality / CAR RCA"])
 
 METHODS = {
@@ -199,7 +200,7 @@ def assert_invite_access(db: Session, car) -> None:
     )
     control = _control_for_car(db, car)
     if control is None:
-        return  # Preserve links issued before governance activation.
+        return  # Grandfathered legacy invitations retain their existing control state.
     if control.revoked_at is not None:
         raise HTTPException(status_code=410, detail="This CAR invitation was revoked by Quality.")
     if control.expires_at is not None:
@@ -211,6 +212,7 @@ def assert_invite_access(db: Session, car) -> None:
 
 
 def _car_for_guest(db: Session, token: str, *, lock=False, lean=False):
+    token = resolve_public_invite_token(token)
     if not token or len(token) > 64:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
     query = db.query(models.CorrectiveActionRequest).filter(
@@ -894,11 +896,18 @@ def rotate_car_invitation(
     old_digest = hashlib.sha256(car.invite_token.encode("utf-8")).hexdigest()[:12]
     car.invite_token = secrets.token_urlsafe(32)
     control = _control_for_car(db, car)
-    if control is not None:
-        # The row now governs the freshly rotated bearer token, not the old
-        # revoked capability. This does NOT reactivate the old link.
+    new_expiry = _utcnow() + timedelta(days=30)
+    if control is None:
+        control = QualityCarInviteAccessControl(
+            id=uuid.uuid4(), amo_id=ctx.amo_id, car_id=car.id,
+            expires_at=new_expiry, reason=payload.reason.strip(),
+            updated_by_user_id=ctx.user_id,
+        )
+        db.add(control)
+    else:
+        # Rotation invalidates the previous bearer and creates a fresh 30-day capability.
         control.revoked_at = None
-        control.expires_at = None
+        control.expires_at = new_expiry
         control.reason = payload.reason.strip()
         control.updated_by_user_id = ctx.user_id
     from .service import add_car_action, build_car_invite_link
@@ -910,7 +919,7 @@ def rotate_car_invitation(
     db.commit()
     return {
         "new_invite_url": build_car_invite_link(car),
-        "expires_at": None, "revoked_at": None,
+        "expires_at": new_expiry, "revoked_at": None,
         "reason": payload.reason.strip(),
     }
 

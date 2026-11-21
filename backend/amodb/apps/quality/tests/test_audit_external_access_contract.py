@@ -224,7 +224,7 @@ def test_document_only_grant_cannot_query_collaboration_summary(monkeypatch):
 
 def test_car_handoff_requires_response_permission_and_open_car():
     car = SimpleNamespace(invite_token="purpose-bound-token", status="OPEN", closed_at=None)
-    assert collaboration_router._car_response_url(car, {"car:respond"}) == "/qms/car-access/purpose-bound-token"
+    assert collaboration_router._car_response_url(car, {"car:respond"}) == "/qms/car-access#token=purpose-bound-token"
     assert collaboration_router._car_response_url(car, {"audit:read_released_findings"}) is None
     car.status = "CLOSED"
     assert collaboration_router._car_response_url(car, {"car:respond"}) is None

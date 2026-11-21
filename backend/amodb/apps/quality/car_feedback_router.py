@@ -13,9 +13,10 @@ from . import models
 from .car_rca_router import _car_for_employee, _car_for_guest
 from .car_feedback import record_shared_feedback, feedback_changed
 from .tenant_security import TenantContext, require_quality_permission, write_tenant_context, assert_quality_permission
+from .public_invite_security import public_invite_security
 
 router = APIRouter(prefix="/cars/{car_id}/feedback", tags=["Quality / CAR feedback"])
-public_router = APIRouter(prefix="/cars/invite/{invite_token}/feedback", tags=["Quality / Public CAR feedback"])
+public_router = APIRouter(prefix="/cars/invite/{invite_token}/feedback", tags=["Quality / Public CAR feedback"], dependencies=[Depends(public_invite_security)])
 
 
 @public_router.get("/events")

@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import os
 import re
+import secrets
 import time
 import uuid
 from collections import defaultdict
@@ -726,8 +727,9 @@ def create_car(
     if not amo_id:
         raise ValueError("amo_id is required to create a tenant-scoped CAR")
 
-    invite_token = uuid.uuid4().hex
-    next_reminder_at = datetime.now(timezone.utc) + timedelta(days=reminder_days)
+    invite_token = secrets.token_urlsafe(32)
+    issued_at = datetime.now(timezone.utc)
+    next_reminder_at = issued_at + timedelta(days=reminder_days)
     car = models.CorrectiveActionRequest(
         amo_id=amo_id,
         program=program,
@@ -747,6 +749,20 @@ def create_car(
     )
     db.add(car)
     db.flush()
+
+    # New respondent invitations are governed from the moment the CAR is issued.
+    from .car_rca_models import QualityCarInviteAccessControl
+    from .tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(
+        db, amo_id=str(amo_id),
+        user_id=str(requested_by_user_id or "00000000-0000-0000-0000-000000000000"),
+    )
+    db.add(QualityCarInviteAccessControl(
+        id=uuid.uuid4(), amo_id=str(amo_id), car_id=car.id,
+        expires_at=issued_at + timedelta(days=30),
+        reason="Initial CAR invitation; default validity is 30 days.",
+        updated_by_user_id=requested_by_user_id,
+    ))
 
     log = models.CARActionLog(
         car=car,
@@ -803,7 +819,7 @@ def build_car_invite_link(
         None,
     )
     base = (configured_base or request_origin or "http://localhost:5173").rstrip("/")
-    return f"{base}/car-invite?token={car.invite_token}"
+    return f"{base}/qms/car-access#token={car.invite_token}"
 
 
 def generate_car_form_pdf(

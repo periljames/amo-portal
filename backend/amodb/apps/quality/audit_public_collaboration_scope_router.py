@@ -26,7 +26,7 @@ def _car_response_url(car: models.CorrectiveActionRequest, scope: set[str]) -> s
     if "car:respond" not in scope or car.closed_at or _enum_value(car.status) == "CLOSED":
         return None
     token = str(car.invite_token or "").strip()
-    return f"/qms/car-access/{quote(token, safe='')}" if token else None
+    return f"/qms/car-access#token={quote(token, safe='')}" if token else None
 
 
 @router.get("/collaboration")
