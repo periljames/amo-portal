@@ -109,3 +109,33 @@
   .qms-saved-views__controls form input { min-width: 0; }
   .qms-saved-views__controls button { white-space: normal; }
 }
+
+
+/* Compact, source-owned register: table at desktop, card fallback at narrow widths. */
+.qms-inbox__layout-toggle{display:flex;gap:4px;padding:3px;border:1px solid var(--border,#cbd5df);border-radius:9px;background:var(--surface,#fff)}
+.qms-inbox__layout-toggle button{min-height:34px;border:0;border-radius:6px;padding:6px 12px;background:transparent;color:var(--text-secondary,#596577);font-size:12px;font-weight:600}
+.qms-inbox__layout-toggle button[aria-pressed=true]{background:var(--primary,#155e75);color:white}
+.qms-inbox__table-scroll{overflow-x:auto;max-width:100%;border-top:1px solid var(--border,#cbd5df)}
+.qms-inbox__compact-table{width:100%;min-width:780px;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.qms-inbox__compact-table caption{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.qms-inbox__compact-table th,.qms-inbox__compact-table td{padding:12px 15px;vertical-align:top;border-bottom:1px solid var(--border,#cbd5df);overflow-wrap:anywhere;text-align:left}
+.qms-inbox__compact-table thead th{font-weight:650;background:var(--surface-muted,#f5f7fb)}
+.qms-inbox__compact-table th:first-child{width:29%}
+.qms-inbox__compact-table th:nth-child(2){width:18%}
+.qms-inbox__compact-table th:nth-child(3){width:14%}
+.qms-inbox__compact-table th:nth-child(4){width:16%}
+.qms-inbox__compact-table th:nth-child(5){width:23%}
+.qms-inbox__compact-table tbody th{font-weight:600}
+.qms-inbox__compact-table tbody tr:hover{background:var(--surface-muted,#f5f7fb)}
+.qms-inbox__table-next,.qms-inbox__table-detail{display:block;margin-top:5px;font-size:12px;font-weight:400;color:var(--text-secondary,#596577);line-height:1.5}
+.qms-inbox__table-overdue,.qms-inbox__table-overdue .qms-inbox__table-detail{color:#9a3412;font-weight:650}
+.qms-inbox__compact-actions{display:flex;flex-wrap:wrap;gap:7px}
+.qms-inbox__compact-actions :is(a,button){display:inline-flex;align-items:center;min-height:34px;box-sizing:border-box;padding:6px 9px;border:1px solid var(--border,#cbd5df);border-radius:7px;text-decoration:none;background:var(--surface,#fff);color:var(--text,#1d2939);font-size:12px;font-weight:600}
+.qms-inbox__compact-actions button:disabled{opacity:.5}
+.qms-inbox__dense-mobile-cards{display:none}
+@media(max-width:760px){
+ .qms-inbox__layout-toggle{width:100%;justify-content:space-between}
+ .qms-inbox__layout-toggle button{flex:1 1 0}
+ .qms-inbox__table-scroll{display:none}
+ .qms-inbox__dense-mobile-cards{display:block}
+}

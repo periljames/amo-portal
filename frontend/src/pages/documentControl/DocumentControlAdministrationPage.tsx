@@ -20,6 +20,7 @@ import {
   updateDocumentControlAdministration,
   type DocumentControlAdministration,
 } from "../../services/documentControlReports";
+import DocumentMicrosoftConnectionPanel from "./DocumentMicrosoftConnectionPanel";
 import DocumentControlShell, {
   DocumentControlEmpty,
   DocumentControlError,
@@ -201,6 +202,8 @@ export default function DocumentControlAdministrationPage() {
             <label className="dms-admin__wide"><span>Governed integration modules</span><input aria-label="Governed integration modules" value={integrationText} onChange={(event) => setIntegrationText(event.target.value)} placeholder="QMS, TRAINING, PLANNING, PROCUREMENT" /><small>Comma-separated source modules permitted to create governed relationship mappings.</small></label>
           </div>
         </DocumentControlSection>
+
+        <DocumentMicrosoftConnectionPanel tenant={tenant} />
 
         <DocumentControlSection title="Physical controlled-copy policy" description="Default custody controls for new numbered copies. Existing custody evidence remains immutable.">
           <div className="dms-admin__policy-grid">

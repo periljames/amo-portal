@@ -20,7 +20,7 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
   const queryClient = useQueryClient();
   const [feed,setFeed]=useState<Feed|null>(null), [items,setItems]=useState<Entry[]>([]);
   const [text,setText]=useState(""), [internal,setInternal]=useState(false), [busy,setBusy]=useState(false);
-  const [error,setError]=useState(""), [live,setLive]=useState(false), [message,setMessage]=useState("");
+  const [error,setError]=useState(""), [sendError,setSendError]=useState(""), [live,setLive]=useState(false), [message,setMessage]=useState("");
   const [streamConnected,setStreamConnected]=useState(false);
   const [refreshError,setRefreshError]=useState("");
   const [paging,setPaging]=useState(false);
@@ -42,7 +42,7 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
   useEffect(()=>{if(followLatest.current&&list.current)list.current.scrollTop=list.current.scrollHeight;},[items]);
   useEffect(()=>{
     let active=true, loading=false;
-    signature.current="";olderLoaded.current=false;followLatest.current=true;setFeed(null);setItems([]);setError("");setRefreshError("");setText("");setStreamConnected(false);pending.current=null;
+    signature.current="";olderLoaded.current=false;followLatest.current=true;setFeed(null);setItems([]);setError("");setSendError("");setRefreshError("");setText("");setStreamConnected(false);pending.current=null;
     const load=async()=>{
       if(loading || document.visibilityState==="hidden") return;
       loading=true;
@@ -57,7 +57,16 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
         if(changed) {
           setMessage("New feedback or review decision received.");
           window.dispatchEvent(new CustomEvent("amo:car-feedback-updated",{detail:{carId}}));
-          if(!token) void queryClient.invalidateQueries({predicate:q=>q.queryKey.some(key=>typeof key==="string"&&key.startsWith("qms-car"))});
+          if(!token) {
+            // A feedback message is not a control-loop transition. Refresh the
+            // response/review projections without invalidating the parent
+            // governance query: an unrelated transient fetch failure must not
+            // unmount the live composer or discard an unsent internal note.
+            void queryClient.invalidateQueries({
+              predicate:q=>["qms-car-control-responses","qms-car-control-rca","qms-car-control-source"].includes(String(q.queryKey[0]||""))
+                && q.queryKey.some(key=>String(key)===carId),
+            });
+          }
           await callback.current?.();
         }
       } catch(cause) {if(active){setLive(false);setRefreshError(feedbackError(cause,"Feedback could not be refreshed. Your message is retained."));}}
@@ -72,12 +81,18 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
   },[carId,path,token,queryClient]);
   async function send() {
     if(!text.trim()||busy)return;
-    setBusy(true);setError("");setMessage("");
+    setBusy(true);setSendError("");setMessage("");
     if(!pending.current||pending.current.text!==text.trim()||pending.current.internal!==internal)pending.current={id:crypto.randomUUID(),text:text.trim(),internal};
     try {
       await request("",{message:pending.current.text,client_message_id:pending.current.id,actor_name:actorName?.trim()||"Invited respondent",visibility:internal&&!token?"INTERNAL":"SHARED"});
-      setText("");pending.current=null;setMessage(internal&&!token?"Internal note recorded.":"Feedback sent and retained in CAR history.");await refresh.current();
-    }catch(cause){setError(feedbackError(cause,"Feedback was not confirmed. Retry; your text is retained."));}
+      setText("");pending.current=null;setSendError("");setMessage(internal&&!token?"Internal note recorded.":"Feedback sent and retained in CAR history.");
+      // Server acknowledgement is authoritative. A failed subsequent read
+      // must not disable this composer or erase the next private draft.
+      void refresh.current();
+    }catch(cause){
+      // Preserve the message and its idempotency ID after an uncertain send.
+      setSendError(feedbackError(cause,"Feedback was not confirmed. Retry; your text is retained."));
+    }
     finally{setBusy(false);}
   }
   async function earlier() {
@@ -90,6 +105,7 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
     <header><h2><MessageSquare size={18} aria-hidden="true"/>Feedback & decision history</h2><span role="status" data-connected={live} title="Updates automatically; a five-second refresh also checks for missed changes.">{live?streamConnected?"Live updates":"Up to date":"Reconnecting…"}</span></header>
     {refreshError&&<p role="alert">{refreshError} <button type="button" onClick={()=>void refresh.current()}>Retry feedback</button></p>}
     {error&&<p role="alert">{error}</p>}
+    {sendError&&<p role="alert">{sendError} Your draft is retained; retry reuses its message ID to avoid duplicates.</p>}
     {message&&<p role="status">{message}</p>}
     {items.length>0&&<button type="button" onClick={()=>{followLatest.current=true;if(list.current)list.current.scrollTop=list.current.scrollHeight;}}>Latest feedback</button>}
     {feed?.next_cursor&&<button type="button" disabled={busy||paging} onClick={()=>void earlier()}>{paging?"Loading history…":"Load earlier history"}</button>}

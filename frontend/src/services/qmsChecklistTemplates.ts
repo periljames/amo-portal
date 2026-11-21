@@ -194,24 +194,128 @@ export function issueChecklistRevision(amoCode: string, templateId: string, revi
   return apiRequest<ChecklistTemplateRevision>(qmsPath(amoCode, `/audit-checklist-templates/${encodeURIComponent(templateId)}/revisions/${encodeURIComponent(revisionId)}/issue`), json("POST", { reason }));
 }
 
-export async function listChecklistBindings(amoCode: string, auditId: string, signal?: AbortSignal) {
-  const readOffline = async () => {
-    const pack = await readAuditOfflinePack(amoCode, auditId);
-    return pack ? requireAuditContract(projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] }, "bindings") : null;
+export type ChecklistBindingPage = {
+  items: ChecklistBinding[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+async function offlineChecklistBindings(amoCode: string, auditId: string): Promise<ChecklistBinding[] | null> {
+  const pack = await readAuditOfflinePack(amoCode, auditId);
+  if (!pack) return null;
+  return requireAuditContract(
+    projectOfflineChecklistBindings(pack) as { items: ChecklistBinding[] },
+    "bindings",
+  ).items;
+}
+
+function isChecklistConnectivityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("offline") || message.includes("could not be reached") || message.includes("cached copy");
+}
+
+function validateBindingPage(page: ChecklistBindingPage): ChecklistBindingPage {
+  requireAuditContract(page, "bindings");
+  if (!Number.isSafeInteger(page.total) || page.total < 0 ||
+      !Number.isSafeInteger(page.offset) || page.offset < 0 ||
+      !Number.isSafeInteger(page.limit) || page.limit < 1 ||
+      page.items.length > page.limit) {
+    throw new Error("Checklist binding pagination could not be verified. Retry to load the committed record.");
+  }
+  return page;
+}
+
+export async function listChecklistBindings(
+  amoCode: string,
+  auditId: string,
+  signal?: AbortSignal,
+  pagination: { offset?: number; limit?: number } = {},
+): Promise<ChecklistBindingPage> {
+  const offset = pagination.offset ?? 0;
+  const limit = pagination.limit ?? 50;
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("Invalid checklist binding page parameters");
+  }
+  const readOffline = async (): Promise<ChecklistBindingPage | null> => {
+    const items = await offlineChecklistBindings(amoCode, auditId);
+    return items ? validateBindingPage({
+      items: items.slice().reverse().slice(offset, offset + limit),
+      total: items.length, offset, limit,
+    }) : null;
+  };
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    const offline = await readOffline();
+    if (offline) return offline;
+  }
+  const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  try {
+    const result = await apiRequest<ChecklistBindingPage>(
+      qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings?${query.toString()}`),
+      { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+    );
+    return validateBindingPage(result);
+  } catch (error) {
+    if (!isChecklistConnectivityError(error)) throw error;
+    const offline = await readOffline();
+    if (offline) return offline;
+    throw error;
+  }
+}
+
+export type ChecklistBindingLineageItem = {
+  checklist_item_id: string;
+  template_code: string;
+  revision_no: number;
+  content_sha256: string;
+  source_context: ChecklistTemplateItem;
+};
+
+export async function getChecklistBindingLineage(
+  amoCode: string, auditId: string, signal?: AbortSignal,
+): Promise<{ items: ChecklistBindingLineageItem[] }> {
+  const readOffline = async (): Promise<{ items: ChecklistBindingLineageItem[] } | null> => {
+    const bindings = await offlineChecklistBindings(amoCode, auditId);
+    if (!bindings) return null;
+    const items: ChecklistBindingLineageItem[] = [];
+    for (const binding of bindings) {
+      for (const [index, itemId] of binding.instantiated_item_ids.entries()) {
+        const source = binding.item_snapshot[index];
+        if (!source) continue;
+        items.push({
+          checklist_item_id: itemId, template_code: binding.template_code,
+          revision_no: binding.revision_no, content_sha256: binding.content_sha256, source_context: source,
+        });
+      }
+    }
+    return { items };
   };
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     const offline = await readOffline();
     if (offline) return offline;
   }
   try {
-    return requireAuditContract(await apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }), "bindings");
+    const result = await apiRequest<{ items: ChecklistBindingLineageItem[] }>(
+      qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-binding-lineage`),
+      { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
+    );
+    if (!Array.isArray(result.items)) throw new Error("Checklist source lineage could not be verified.");
+    return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    if (!isChecklistConnectivityError(error)) throw error;
     const offline = await readOffline();
     if (offline) return offline;
     throw error;
   }
+}
+
+export function getChecklistBinding(
+  amoCode: string, auditId: string, bindingId: string, signal?: AbortSignal,
+): Promise<ChecklistBinding> {
+  return apiRequest<ChecklistBinding>(
+    qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings/${encodeURIComponent(bindingId)}`),
+    { timeoutMs: 15_000, cacheTtlMs: 0, signal },
+  );
 }
 
 export function applyChecklistRevision(amoCode: string, auditId: string, templateRevisionId: string, reason: string, allowExistingItems: boolean) {

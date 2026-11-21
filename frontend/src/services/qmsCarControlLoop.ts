@@ -157,7 +157,13 @@ function controlPath(amoCode: string, carId: string, suffix = ""): string {
 }
 
 export function getCarControlLoop(amoCode: string, carId: string, signal?: AbortSignal): Promise<CarControlLoop> {
-  return apiRequest<CarControlLoop>(controlPath(amoCode, carId), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }).then((data) => requireAuditContract(data, "controlLoop"));
+  // CAR state gates closure and feedback authority. A pre-initialization GET
+  // must never overwrite the confirmed mutation receipt on tab focus or
+  // remount; even a two-second API cache can resurrect initialized=false.
+  return apiRequest<CarControlLoop>(controlPath(amoCode, carId), {
+    timeoutMs: 15_000, cacheTtlMs: 0, persistCache: false,
+    staleWhileOfflineMs: 0, signal,
+  }).then((data) => requireAuditContract(data, "controlLoop"));
 }
 
 export function initializeCarControlLoop(

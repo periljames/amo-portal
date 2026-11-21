@@ -16,6 +16,11 @@ const reports = [
   { id: "car-performance", label: "CAR performance", description: "Corrective actions, priorities, due dates and closure." },
   { id: "finding-trends", label: "Finding trends", description: "Findings, severity, requirements and closure dates." },
   { id: "training-compliance", label: "Training record validity", description: "Completed training records, verification and current validity." },
+  { id: "risk-trends", label: "Risks and opportunities", description: "Source-backed Quality risk and opportunity decisions; no invented risk scores." },
+  { id: "process-performance", label: "Process and KPI evaluations", description: "Recorded actuals, governed targets and independently reviewed measurement periods." },
+  { id: "calibration-due", label: "Calibration due", description: "Equipment due dates, current status and exact last certified calibration reference." },
+  { id: "external-commitments", label: "External commitments", description: "Regulator and customer commitments due within the reporting window." },
+  { id: "management-review-actions", label: "Management review actions", description: "Follow-up decisions, assigned owners, due dates and verified closure states." },
 ];
 type Snapshot = { summary?: { label: string; value: number }[]; kind: string; title: string; tenant: string; generated_at: string; start: string; end: string; population: string; columns: string[]; rows: string[][]; total: number };
 

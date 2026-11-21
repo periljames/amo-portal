@@ -34,7 +34,11 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: start;
-  pointer-events: auto;
+  /* Notifications must never block the underlying workflow (including
+     modal decisions). The outer stack is intentionally non-interactive;
+     only explicit dismiss/action buttons may receive pointer events.
+     Focus on those controls still pauses the expiry timer. */
+  pointer-events: none;
   animation: toast-enter 180ms ease-out;
 }
 

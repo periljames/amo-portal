@@ -517,7 +517,16 @@ def _initialize_control_loop(
         severity="ACTION_REQUIRED",
     )
     db.commit()
-    return _result(db, car=_load_car(db, amo_id=ctx.amo_id, car_id=car_id), profile=_load_profile(db, amo_id=ctx.amo_id, car_id=car_id))
+    # PostgreSQL SET LOCAL RLS scope ends at COMMIT. Re-enter the same
+    # authorised tenant before reading the newly persisted profile: returning
+    # initialized=False after a successful POST wrongly sends the browser back
+    # to its initialization form and discards its live feedback composer.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    committed_car = _load_car(db, amo_id=ctx.amo_id, car_id=car_id)
+    committed_profile = _load_profile(db, amo_id=ctx.amo_id, car_id=car_id)
+    if committed_profile is None:
+        raise HTTPException(status_code=500, detail="CAR control loop was committed but could not be verified under the authorised tenant.")
+    return _result(db, car=committed_car, profile=committed_profile)
 
 
 @router.patch("/profile")
@@ -539,6 +548,9 @@ def update_control_profile(
     profile.updated_by_user_id = ctx.user_id
     _add_event(db, car=car, profile=profile, event_type="CONTROL_PROFILE_UPDATED", reason="CAR accountability or effectiveness controls were updated.", actor_user_id=ctx.user_id)
     db.commit()
+    # A commit clears transaction-local PostgreSQL RLS scope. Every returned
+    # summary queries governed milestone/dependency/event rows under tenant RLS.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _result(db, car=car, profile=profile)
 
 
@@ -591,6 +603,9 @@ def _update_milestone(
         severity="WARNING" if row.status in {"REJECTED", "BLOCKED"} else "INFO",
     )
     db.commit()
+    # A commit clears transaction-local PostgreSQL RLS scope. Every returned
+    # summary queries governed milestone/dependency/event rows under tenant RLS.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _result(db, car=car, profile=profile)
 
 
@@ -644,6 +659,9 @@ def create_dependency(
         severity="CRITICAL" if row.risk_level == "CRITICAL" else "WARNING" if row.blocks_closure or row.risk_level == "HIGH" else "ACTION_REQUIRED",
     )
     db.commit()
+    # A commit clears transaction-local PostgreSQL RLS scope. Every returned
+    # summary queries governed milestone/dependency/event rows under tenant RLS.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _result(db, car=car, profile=profile)
 
 
@@ -687,6 +705,9 @@ def update_dependency(
         severity="CRITICAL" if row.status not in {"RESOLVED", "MITIGATED", "ACCEPTED_RISK", "CANCELLED"} and row.risk_level == "CRITICAL" else "INFO",
     )
     db.commit()
+    # A commit clears transaction-local PostgreSQL RLS scope. Every returned
+    # summary queries governed milestone/dependency/event rows under tenant RLS.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _result(db, car=car, profile=profile)
 
 
@@ -759,4 +780,7 @@ def _close_control_loop(
         severity="INFO",
     )
     db.commit()
+    # A commit clears transaction-local PostgreSQL RLS scope. Every returned
+    # summary queries governed milestone/dependency/event rows under tenant RLS.
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
     return _result(db, car=car, profile=profile)

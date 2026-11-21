@@ -8,19 +8,41 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from amodb.database import get_read_db
 from amodb.apps.accounts.models import User
 from amodb.apps.training.models import TrainingCourse, TrainingRecord
 from .models import QMSAudit, QMSAuditFinding, CorrectiveActionRequest
-from .tenant_security import TenantContext, require_quality_permission, set_postgres_tenant_context
+from .tenant_security import TenantContext, assert_quality_permission, require_quality_permission, set_postgres_tenant_context
 
 router = APIRouter(prefix="/reports", tags=["Quality reports"])
-ReportKind = Literal["executive-dashboard", "audit-performance", "car-performance", "finding-trends", "training-compliance"]
+ReportKind = Literal[
+    "executive-dashboard", "audit-performance", "car-performance", "finding-trends",
+    "training-compliance", "risk-trends", "process-performance",
+    "calibration-due", "external-commitments", "management-review-actions",
+]
 MAX_ROWS = 10000
-TITLES = {"executive-dashboard": "Quality executive summary", "audit-performance": "Audit performance", "car-performance": "CAR performance", "finding-trends": "Finding trends", "training-compliance": "Training record validity"}
+TITLES = {
+    "executive-dashboard": "Quality executive summary",
+    "audit-performance": "Audit performance",
+    "car-performance": "CAR performance",
+    "finding-trends": "Finding trends",
+    "training-compliance": "Training record validity",
+    "risk-trends": "Risk and opportunity decisions",
+    "process-performance": "Process performance against governed objectives",
+    "calibration-due": "Equipment calibration obligations",
+    "external-commitments": "External authority and customer commitments",
+    "management-review-actions": "Management review action follow-up",
+}
+REPORT_DOMAIN_PERMISSION = {
+    "risk-trends": "qms.risk.view",
+    "process-performance": "qms.risk.view",
+    "calibration-due": "qms.equipment.view",
+    "external-commitments": "qms.finding.view",
+    "management-review-actions": "qms.management_review.view",
+}
 
 def _value(value):
     value = getattr(value, "value", value)
@@ -60,6 +82,82 @@ def report_snapshot(db, amo_id, amo_code, kind, start=None, end=None):
         raw = db.query(User.full_name, course.course_id, course.course_name, t.completion_date, t.valid_until, t.verification_status).select_from(t).join(course, course.id == t.course_id).join(User, User.id == t.user_id).filter(t.amo_id == amo_id, course.amo_id == amo_id, User.amo_id == amo_id, or_(t.record_status == "ACTIVE", t.record_status.is_(None)), t.completion_date >= start, t.completion_date <= end).order_by(t.completion_date, t.id).limit(MAX_ROWS+1).all()
         rows = [list(row)+["EXPIRED" if row.valid_until and row.valid_until < now.date() else "UNVERIFIED" if _value(row.verification_status) != "VERIFIED" else "CURRENT" if row.valid_until else "NO_EXPIRY_RECORDED"] for row in raw]
         population = "Active training records completed in the period. Validity is assessed at retrieval, not the period end. This is not a role-requirement compliance certification."
+    elif kind == "risk-trends":
+        columns = ["Type", "Record ID", "Title", "Status", "Owner ID", "Review due", "Created (UTC)"]
+        sql = text("""
+            SELECT type, id, title, status, owner_user_id, due_date, created_at
+            FROM (
+                SELECT 'RISK' AS type, CAST(id AS text) id, title, status, owner_user_id,
+                       due_date, created_at FROM qms_risks
+                WHERE amo_id=:amo_id AND deleted_at IS NULL
+                  AND created_at >= :lower AND created_at < :upper
+                UNION ALL
+                SELECT 'OPPORTUNITY' AS type, CAST(id AS text) id, title, status, owner_user_id,
+                       due_date, created_at FROM qms_opportunities
+                WHERE amo_id=:amo_id AND deleted_at IS NULL
+                  AND created_at >= :lower AND created_at < :upper
+            ) q ORDER BY created_at, id LIMIT :limit
+        """)
+        rows = db.execute(sql, {
+            "amo_id": amo_id, "lower": lower, "upper": upper, "limit": MAX_ROWS + 1,
+        }).all()
+        population = ("Tenant-owned Quality risks and opportunities identified in the period, "
+                      "showing their current governed status. No universal risk score or SMS compliance is inferred.")
+    elif kind == "process-performance":
+        columns = ["Process", "Objective", "Actual", "Target", "Unit", "Target met", "Review state", "Period start", "Period end"]
+        rows = db.execute(text("""
+            SELECT p.title, item->>'code', item->>'actual', item->>'target',
+                   item->>'unit', item->>'target_met', review.status,
+                   review.period_start, review.period_end
+            FROM qms_process_performance_reviews review
+            JOIN qms_processes p ON p.id=review.process_id AND p.amo_id=review.amo_id
+            CROSS JOIN LATERAL jsonb_array_elements(review.measurements) item
+            WHERE review.amo_id=:amo_id AND review.period_end >= :start
+              AND review.period_end <= :end AND p.deleted_at IS NULL
+            ORDER BY review.period_end, review.id, item->>'code'
+            LIMIT :limit
+        """), {"amo_id": amo_id, "start": start, "end": end,
+               "limit": MAX_ROWS + 1}).all()
+        population = ("Canonical process objective measurements from performance reviews whose period "
+                      "end falls within the selected dates. 'Target met' compares actual with the "
+                      "recorded direction and target; it does not certify process compliance.")
+    elif kind == "calibration-due":
+        columns = ["Equipment ID", "Equipment", "Current state", "Calibration due", "Last approved calibration", "Created (UTC)"]
+        rows = db.execute(text("""
+            SELECT CAST(id AS text), title, status, due_date,
+                   payload->>'verified_calibration_id', created_at
+            FROM qms_equipment
+            WHERE amo_id=:amo_id AND deleted_at IS NULL
+              AND due_date >= :start AND due_date <= :end
+            ORDER BY due_date, id LIMIT :limit
+        """), {"amo_id": amo_id, "start": start, "end": end, "limit": MAX_ROWS + 1}).all()
+        population = ("Equipment with recorded calibration due dates in the selected period, including "
+                      "current status. A date or SERVICEABLE label alone does not prove the Inventory issue gate "
+                      "or an independently verified calibration certificate.")
+    elif kind == "external-commitments":
+        columns = ["Commitment ID", "Title", "Status", "Owner ID", "Due date", "External issue ID", "Created (UTC)"]
+        rows = db.execute(text("""
+            SELECT CAST(id AS text), title, status, owner_user_id, due_date,
+                   payload->>'external_id', created_at
+            FROM qms_external_commitments
+            WHERE amo_id=:amo_id AND deleted_at IS NULL
+              AND due_date >= :start AND due_date <= :end
+            ORDER BY due_date, id LIMIT :limit
+        """), {"amo_id": amo_id, "start": start, "end": end, "limit": MAX_ROWS + 1}).all()
+        population = ("Regulator/customer commitments due during the selected period, with current "
+                      "governed response and verification state, excluding soft-deleted records.")
+    elif kind == "management-review-actions":
+        columns = ["Action ID", "Action", "State", "Owner ID", "Due date", "Meeting ID", "Created (UTC)"]
+        rows = db.execute(text("""
+            SELECT CAST(id AS text), title, status, owner_user_id, due_date,
+                   payload->>'meeting_id', created_at
+            FROM qms_management_review_actions
+            WHERE amo_id=:amo_id AND deleted_at IS NULL
+              AND due_date >= :start AND due_date <= :end
+            ORDER BY due_date, id LIMIT :limit
+        """), {"amo_id": amo_id, "start": start, "end": end, "limit": MAX_ROWS + 1}).all()
+        population = ("Management-review actions due in the selected period. Current states are from "
+                      "the governed meeting decision/action lifecycle, not an inferred sign-off.")
     else:
         raise HTTPException(422, "Unknown report type.")
     if len(rows) > MAX_ROWS:
@@ -99,12 +197,16 @@ def html_output(snapshot):
 def preview_report(kind: ReportKind, start: date | None = None, end: date | None = None,
                    ctx: TenantContext = Depends(require_quality_permission("qms.reports.view")), db: Session = Depends(get_read_db)):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    if kind in REPORT_DOMAIN_PERMISSION:
+        assert_quality_permission(db, ctx, REPORT_DOMAIN_PERMISSION[kind])
     return report_snapshot(db, ctx.amo_id, ctx.amo_code, kind, start, end)
 
 @router.get("/output")
 def download_report(kind: ReportKind, output: Literal["csv", "html"] = "csv", start: date | None = None, end: date | None = None,
                     ctx: TenantContext = Depends(require_quality_permission("qms.reports.export")), db: Session = Depends(get_read_db)):
     set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    if kind in REPORT_DOMAIN_PERMISSION:
+        assert_quality_permission(db, ctx, REPORT_DOMAIN_PERMISSION[kind])
     snapshot = report_snapshot(db, ctx.amo_id, ctx.amo_code, kind, start, end)
     content = csv_output(snapshot) if output == "csv" else html_output(snapshot)
     return Response(content, media_type="text/csv" if output == "csv" else "text/html", headers={"Content-Disposition": f'attachment; filename="QMS-{kind}-{snapshot["end"]}.{output}"', "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

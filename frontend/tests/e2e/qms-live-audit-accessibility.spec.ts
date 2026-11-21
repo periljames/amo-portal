@@ -108,6 +108,10 @@ test("released finding acknowledgement is keyboard operable, visibly focused and
   await installSessionFixture(page);
   await page.goto("/qms/audit-access/keyboard-test-token", { waitUntil: "domcontentloaded" });
   const acknowledge = page.getByRole("button", { name: "Acknowledge finding" });
+  // Focus only after the async guest session has hydrated the actionable
+  // control. Keep the real focus, keyboard and visible-ring assertions.
+  await expect(acknowledge).toBeVisible();
+  await expect(acknowledge).toBeEnabled();
   await acknowledge.focus();
   await expect(acknowledge).toBeFocused();
   const focusStyle = await acknowledge.evaluate((element) => {

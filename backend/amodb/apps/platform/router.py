@@ -102,6 +102,99 @@ def create_tenant(payload: dict[str, Any], db: Session = Depends(get_db), user=D
         _bad(exc)
 
 
+@router.get("/tenants/{tenant_id}/storage-quota")
+def tenant_storage_quota(
+    tenant_id: str, db: Session = Depends(get_read_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    if not db.get(account_models.AMO, tenant_id):
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return storage_quota_service.read_quota(db, tenant_id)
+
+
+@router.post("/tenants/{tenant_id}/storage-quota")
+def update_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        quota_bytes = payload.get("quota_bytes")
+        if type(quota_bytes) is not int:
+            raise ValueError("Provide an exact integer allocation in bytes")
+        result = storage_quota_service.allocate(
+            db, tenant_id=tenant_id, quota_bytes=quota_bytes,
+            actor_id=_actor_id(user), reason=_reason(payload),
+        )
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.changed",
+            tenant_id=tenant_id, reason=_reason(payload),
+            details={"quota_bytes": quota_bytes, "generation": result["generation"]})
+        db.commit()
+        return result
+    except (ValueError, TypeError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/tenants/{tenant_id}/storage-quota/reconcile")
+def reconcile_tenant_storage_quota(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        result = storage_quota_service.reconcile(db, tenant_id=tenant_id, actor_id=_actor_id(user))
+        services.audit(db, actor_user_id=_actor_id(user), action="tenant.storage_quota.reconciled",
+            tenant_id=tenant_id, reason=_reason(payload), details={"drift": result["drift"]})
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/tenants/{tenant_id}/storage-quota/verify-objects")
+def verify_tenant_retained_objects(
+    tenant_id: str, payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    user=Depends(require_platform_superuser),
+):
+    """Operator-triggered physical audit; refuses incomplete large scans."""
+    from . import storage_quota_service
+    from amodb.apps.quality.tenant_security import set_postgres_tenant_context
+    set_postgres_tenant_context(db, amo_id=tenant_id, user_id=_actor_id(user))
+    try:
+        result = storage_quota_service.audit_retained_objects(
+            db, tenant_id=tenant_id, actor_id=_actor_id(user),
+            max_objects=payload.get("max_objects", 1000),
+            verify_checksums=payload.get("verify_checksums", False),
+        )
+        services.audit(
+            db, actor_user_id=_actor_id(user), action="tenant.storage_objects.physically_verified",
+            tenant_id=tenant_id, reason=_reason(payload),
+            details={"checked_objects": result["checked_objects"],
+                     "physically_verified": result["physically_verified"],
+                     "checksum_verified": result["checksum_verified"],
+                     "ledger_drift": result["ledger_drift"]},
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+
+
 @router.get("/tenants/{tenant_id}")
 def tenant_detail(tenant_id: str, db: Session = Depends(get_read_db), user=Depends(require_platform_superuser)):
     try:

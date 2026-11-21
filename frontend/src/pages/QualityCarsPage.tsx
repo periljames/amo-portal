@@ -963,15 +963,15 @@ const QualityCarsPage: React.FC = () => {
             </div>
 
             <div className="qms-form-grid">
-              <label>Root cause decision
-                <select className="input" value={reviewForm.root_cause_status} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_status: event.target.value as CarReviewForm["root_cause_status"] }))}>
+              <label htmlFor="car-review-root-cause-decision">Root cause decision
+                <select id="car-review-root-cause-decision" aria-label="Root cause decision" className="input" value={reviewForm.root_cause_status} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_status: event.target.value as CarReviewForm["root_cause_status"] }))}>
                   <option value="">Choose a decision</option>
                   <option value="ACCEPTED">Accept</option>
                   <option value="REJECTED">Return</option>
                 </select>
               </label>
-              <label>Corrective action decision
-                <select className="input" value={reviewForm.capa_status} onChange={(event) => setReviewForm((current) => ({ ...current, capa_status: event.target.value as CarReviewForm["capa_status"] }))}>
+              <label htmlFor="car-review-corrective-action-decision">Corrective action decision
+                <select id="car-review-corrective-action-decision" aria-label="Corrective action decision" className="input" value={reviewForm.capa_status} onChange={(event) => setReviewForm((current) => ({ ...current, capa_status: event.target.value as CarReviewForm["capa_status"] }))}>
                   <option value="">Choose a decision</option>
                   <option value="ACCEPTED">Accept</option>
                   <option value="REJECTED">Return</option>
@@ -979,19 +979,20 @@ const QualityCarsPage: React.FC = () => {
                 </select>
               </label>
             </div>
-            {(reviewCar.root_cause_review_note || reviewCar.capa_review_note) && <details className="qms-card"><summary>Previous review reasons</summary>
+            {(reviewCar.root_cause_review_note || reviewCar.capa_review_note) && <details className="qms-card">
+              <summary>Previous review reasons</summary>
               {reviewCar.root_cause_review_note && <p><strong>Root cause:</strong> {reviewCar.root_cause_review_note}</p>}
               {reviewCar.capa_review_note && <p><strong>Action plan:</strong> {reviewCar.capa_review_note}</p>}
             </details>}
             <p className="text-muted">Enter a new review reason. Reasons are required for returns and evidence requests.</p>
-            <label>Root cause review note
-              <textarea className="input" aria-label="Root cause review note" maxLength={8000} rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
+            <label htmlFor="car-review-root-note">Root cause review note
+              <textarea id="car-review-root-note" aria-label="Root cause review note" className="input" maxLength={8000} rows={2} value={reviewForm.root_cause_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, root_cause_review_note: event.target.value }))} />
             </label>
-            <label>Corrective action review note
-              <textarea className="input" aria-label="Corrective action review note" maxLength={8000} rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
+            <label htmlFor="car-review-capa-note">Corrective action review note
+              <textarea id="car-review-capa-note" aria-label="Corrective action review note" className="input" maxLength={8000} rows={2} value={reviewForm.capa_review_note} onChange={(event) => setReviewForm((current) => ({ ...current, capa_review_note: event.target.value }))} />
             </label>
-            <label>Message to auditee
-              <textarea className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
+            <label htmlFor="car-review-auditee-message">Message to auditee
+              <textarea id="car-review-auditee-message" aria-label="Message to auditee" className="input" rows={2} value={reviewForm.message} onChange={(event) => setReviewForm((current) => ({ ...current, message: event.target.value }))} />
             </label>
 
             <div className="qms-card">

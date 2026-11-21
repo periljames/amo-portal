@@ -125,18 +125,19 @@ test.describe("Document Control daily operating model", () => {
     await page.goto(`/maintenance/${AMO_CODE}/document-control/library?per_page=25`);
     const library = page.getByTestId("integrated-document-library");
     await expect(library).toBeVisible({ timeout: 30_000 });
+    const categories = library.locator(".dlibrary__categories");
     for (const shelf of ["Policies", "Manuals", "Procedures", "Work instructions", "Forms", "Checklists", "Registers", "External data"]) {
-      await expect(library.getByRole("button", { name: new RegExp(shelf, "i") })).toBeVisible();
+      await expect(categories.getByRole("button", { name: new RegExp(shelf, "i") })).toBeVisible();
     }
 
-    await library.getByRole("button", { name: /Policies/i }).click();
+    await categories.getByRole("button", { name: /Policies/i }).click();
     await expect(page).toHaveURL(/type=POLICY/);
     await expect(page.getByText("DMS-CI-POL-001", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Controlled Information Policy")).toBeVisible();
 
-    await library.getByRole("button", { name: /External data/i }).click();
+    await categories.getByRole("button", { name: /External data/i }).click();
     await expect(page).toHaveURL(/type=EXTERNAL_DOCUMENT/);
-    await library.getByRole("button", { name: "Shelf", exact: true }).click();
+    await library.getByRole("button", { name: "Cards", exact: true }).click();
     const externalCard = library.locator("article.dlibrary-card").filter({ hasText: "KCAA-CI-EXT-001" });
     await expect(externalCard).toBeVisible({ timeout: 30_000 });
     await expect(externalCard).toContainText("Kenya Civil Aviation Authority");

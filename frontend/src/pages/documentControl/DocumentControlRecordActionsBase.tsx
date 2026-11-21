@@ -15,7 +15,6 @@ import {
   issueDistributionCampaign,
   transitionDocumentWorkflow,
   type DocumentDetailResponse,
-  type DocumentWorkflow,
 } from "../../services/documentControl";
 import {
   updateDocumentMetadata,

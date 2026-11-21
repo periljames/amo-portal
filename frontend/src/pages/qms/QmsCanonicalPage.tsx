@@ -8,10 +8,13 @@ const QualityCarsPage = lazy(qmsPageLoaders.cars);
 const QmsAuditProgrammeSchedulePage = lazy(qmsPageLoaders.programmeSchedule);
 const QmsAuditProgrammeWorkspacePage = lazy(qmsPageLoaders.programme);
 const QmsModuleWorkspacePage = lazy(qmsPageLoaders.module);
+const QmsManagementReviewWorkflowPage = lazy(() => import("./QmsManagementReviewWorkflowPage"));
+const QmsProcessGovernancePage = lazy(() => import("./QmsProcessGovernancePage"));
+const QmsRiskGovernancePage = lazy(() => import("./QmsRiskGovernancePage"));
+const QmsExternalInterfaceGovernancePage = lazy(() => import("./QmsExternalInterfaceGovernancePage"));
+const QmsEquipmentCalibrationGovernancePage = lazy(() => import("./QmsEquipmentCalibrationGovernancePage"));
 const QmsCarControlLoopPage = lazy(qmsPageLoaders.carControl);
 const QmsReportsPage = lazy(() => import("./QmsReportsPage"));
-const QmsManagementReviewPage = lazy(() => import("./QmsManagementReviewPage"));
-const QmsControlledRegisterPage = lazy(() => import("./QmsControlledRegisterPage"));
 const QmsCarPerformanceReportPage = lazy(qmsPageLoaders.carReport);
 const QmsExternalProvidersPage = lazy(qmsPageLoaders.providers);
 const QmsRegisterPage = lazy(qmsPageLoaders.register);
@@ -114,12 +117,23 @@ function QmsCanonicalContent(): React.ReactElement {
     const target = ["change-requests", "approvals"].includes(view) ? "changes" : view === "distribution" ? "distribution" : view === "compliance" ? "compliance" : "library";
     return <Navigate to={`/maintenance/${amoCode}/document-control/${target}`} replace />;
   }
+  if (pathname.includes("/quality/equipment-calibration")) {
+    return <QmsEquipmentCalibrationGovernancePage />;
+  }
+  if (pathname.includes("/quality/external-interface")) {
+    return <QmsExternalInterfaceGovernancePage />;
+  }
+  if (pathname.includes("/quality/risk")) {
+    return <QmsRiskGovernancePage />;
+  }
+  if (pathname.includes("/quality/system")) return <QmsProcessGovernancePage />;
+  if (pathname.includes("/quality/management-review")) {
+    return <QmsManagementReviewWorkflowPage />;
+  }
   if (pathname.includes("/quality/reports")) {
     if (pathname.endsWith("/car-performance") && searchParams.get("analysis") === "1") return <QmsCarPerformanceReportPage />;
     return <QmsReportsPage />;
   }
-  if (pathname.includes("/quality/management-review")) return <QmsManagementReviewPage />;
-  if (/\/quality\/(risk|system|equipment-calibration|external-interface)(?:\/|$)/.test(pathname)) return <QmsControlledRegisterPage />;
 
   // Evidence Vault list/search stays the bounded register owner; when reached from the
   // Assurance rail it keeps Audit Assurance chrome instead of a bare register shell.

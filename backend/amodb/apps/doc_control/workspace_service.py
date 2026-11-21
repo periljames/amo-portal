@@ -428,6 +428,26 @@ def workflow_blockers(
         blockers.append({"code": "QMS_BLOCKED", "message": "A linked QMS item is not resolved."})
     if workflow.distribution_readiness_status not in {"NOT_REQUIRED", "READY", "WAIVED"}:
         blockers.append({"code": "DISTRIBUTION_NOT_READY", "message": "Distribution readiness has not been confirmed."})
+    # A controlled Word manual must not be published without a valid page-layout
+    # rendition. Regulated/critical manuals additionally require explicit review
+    # of the exact derivative checksum. Existing published issues are unchanged.
+    revision = db.query(manual_models.ManualRevision).filter(
+        manual_models.ManualRevision.id == workflow.revision_id,
+        manual_models.ManualRevision.manual_id == workflow.manual_id,
+    ).first()
+    source_type = str(getattr(getattr(revision, "source_type_enum", None), "value", getattr(revision, "source_type_enum", "")) or "").upper()
+    if revision and source_type in {"DOCX", "DOC", "ODT", "RTF"}:
+        from amodb.apps.manuals.office_rendition import rendition_payload
+        state = rendition_payload(db, revision)
+        if state.get("status") not in {"READY", "REVIEW_REQUIRED"} or not state.get("pdf_sha256"):
+            blockers.append({"code": "OFFICE_LAYOUT_NOT_READY", "message": "The Word manual has no valid PDF reading rendition."})
+        else:
+            profile = db.query(domain_models.DocumentControlProfile).filter(
+                domain_models.DocumentControlProfile.tenant_id == workflow.tenant_id,
+                domain_models.DocumentControlProfile.manual_id == workflow.manual_id,
+            ).first()
+            if profile and (profile.regulated_flag or profile.criticality == "CRITICAL") and not state.get("verified_at"):
+                blockers.append({"code": "OFFICE_LAYOUT_NOT_VERIFIED", "message": "Verify the Word PDF rendition against the original before regulated publication."})
     if workflow.requires_authority:
         approved = (
             db.query(domain_models.DocumentAuthoritySubmission)

@@ -583,3 +583,44 @@ test("Quality work saved filters persist per user and apply without changing gov
   await expect(saved.getByText("Saved view removed.")).toBeVisible();
   await expect(saved.getByRole("option", { name: "My audit deadlines" })).toHaveCount(0);
 });
+
+
+test("Compact Quality table retains deep links, overdue status and mobile cards", async ({ page }) => {
+  await prepare(page, async (route, url) => {
+    if (url.pathname.endsWith("/work-inbox/summary")) return json(route, {
+      assigned_to_me: 1, approvals: 0, overdue: 1, completed: 0, source_errors: [],
+    });
+    if (url.pathname.endsWith("/work-inbox/assigned-to-me")) return json(route, {
+      items: [{ id: "cars:car-1", record_id: "car-1", source: "cars",
+        source_label: "CAR / CAPA", title: "Verify corrective action effectiveness",
+        status: "OPEN", due_date: "2020-01-01", scope: "ASSIGNED",
+        route: "/maintenance/tenant-a/quality/cars/car-1/control-loop",
+        next_action: "Independent verification", watching: false }],
+      total: 1, offset: 0, limit: 30, source_errors: [],
+    });
+    return emptyRegister(route);
+  });
+  await page.goto("/maintenance/tenant-a/quality/inbox/assigned-to-me", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Compact table" }).click();
+  await expect(page).toHaveURL(/layout=table/);
+  const table = page.getByRole("table", { name: /Quality work/ });
+  await expect(table).toBeVisible();
+  const item = table.getByRole("row").filter({ hasText: "Verify corrective action effectiveness" });
+  await expect(item).toContainText("Independent verification");
+  await expect(item).toContainText("days overdue");
+  await expect(item.getByRole("link", { name: "Open workflow" })).toHaveAttribute(
+    "href", "/maintenance/tenant-a/quality/cars/car-1/control-loop",
+  );
+  await expect(item.getByRole("button", { name: "Watch Verify corrective action effectiveness" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(table).toBeHidden();
+  const card = page.getByRole("article").filter({ hasText: "Verify corrective action effectiveness" });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("link", { name: "Open workflow" })).toHaveAttribute(
+    "href", "/maintenance/tenant-a/quality/cars/car-1/control-loop",
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(392);
+  await page.getByRole("button", { name: "Comfortable cards" }).click();
+  await expect(page).not.toHaveURL(/layout=table/);
+  await expect(card).toBeVisible();
+});
