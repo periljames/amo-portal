@@ -296,7 +296,7 @@ const isInviteEvidenceFileAllowed = (file: File): { ok: true } | { ok: false; re
   return { ok: false, reason: `${file.name} is not an accepted evidence type.` };
 };
 
-const inviteShareUrl = (_invite: CARInviteOut, tokenValue: string): string =>
+const inviteShareUrl = (tokenValue: string): string =>
   typeof window !== "undefined" ? buildCarInviteUrl(window.location.origin, tokenValue, true) : buildCarInviteUrl("", tokenValue, true);
 
 const isInviteEditable = (invite: CARInviteOut | null): boolean => {
@@ -1169,7 +1169,7 @@ const PublicCarInvitePage: React.FC = () => {
               const dueCountdown = countdownText(invite?.due_date || invite?.target_closure_date, now);
               const locked = !isInviteEditable(invite) || entry.submitting;
               const canSubmit = canSubmitInvite(invite);
-              const shareUrl = inviteShareUrl(invite, entry.token);
+              const shareUrl = inviteShareUrl(entry.token);
               const activeStep = getActiveStep(entry);
 
               return (
@@ -1552,8 +1552,8 @@ const PublicCarInvitePage: React.FC = () => {
               <summary><span>Phone capture</span><QrCodeIcon size={16} /></summary>
               {readyEntries[0]?.invite ? (
                 <div className="car-invite-share">
-                  <InviteQr value={inviteShareUrl(readyEntries[0].invite, readyEntries[0].token)} />
-                  <a className="car-invite-btn" href={inviteShareUrl(readyEntries[0].invite, readyEntries[0].token)} target="_blank" rel="noreferrer"><Link2 size={16} /> Open link</a>
+                  <InviteQr value={inviteShareUrl(readyEntries[0].token)} />
+                  <a className="car-invite-btn" href={inviteShareUrl(readyEntries[0].token)} target="_blank" rel="noreferrer"><Link2 size={16} /> Open link</a>
                 </div>
               ) : <p className="car-invite-subtitle">QR appears after a CAR loads.</p>}
             </details>
