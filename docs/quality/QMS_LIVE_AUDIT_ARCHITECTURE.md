@@ -28,7 +28,7 @@ Purpose-bound external access uses:
 ```text
 /qms/audit-access/:token     one-time signed invitation exchange
 /qms/audit-access            HTTP-only scoped guest session
-/qms/car-access/:token       governed CAR external response path
+/qms/car-access#token=...   fragment-held CAR bearer; API uses Authorization header
 ```
 
 Vite development and production-preview middleware explicitly preserve these signed HTML deep links as SPA routes while JSON/API requests remain proxied.

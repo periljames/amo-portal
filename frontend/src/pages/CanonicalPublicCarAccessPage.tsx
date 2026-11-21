@@ -1,45 +1,40 @@
 import React, { useEffect, useMemo } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { buildCarInviteHash, parseCarInviteLocation } from "../utils/carInviteUrl";
 
 import PublicCarInvitePage from "./PublicCarInvitePage";
 
 /**
- * Canonical QMS guest CAR route adapter.
- *
- * The established CAR response workspace consumes its invitation from the
- * `token` query parameter. The canonical QMS information architecture exposes
- * that same governed workflow at `/qms/car-access/:token`. Keep the canonical
- * path in place and mirror its path token into the existing query contract so
- * no second CAR implementation or weaker access path is introduced.
+ * Public CAR route adapter. Hold the bearer in the URL fragment and convert
+ * previously issued path/query invitations to the canonical no-login route.
  */
 const CanonicalPublicCarAccessPage: React.FC = () => {
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const routeToken = useMemo(() => {
     const match = location.pathname.match(/^\/qms\/car-access\/([^/]+)\/?$/i);
     if (!match?.[1]) return "";
-    try {
-      return decodeURIComponent(match[1]);
-    } catch {
-      return "";
-    }
+    try { return decodeURIComponent(match[1]); } catch { return ""; }
   }, [location.pathname]);
-  const queryToken = searchParams.get("token") || "";
+  const parsed = useMemo(
+    () => parseCarInviteLocation(location.search, location.hash),
+    [location.search, location.hash],
+  );
+  const fragmentToken = new URLSearchParams(location.hash.replace(/^#/, "")).get("token");
+  const token = fragmentToken || routeToken || parsed.token;
+  const canonicalHash = token ? buildCarInviteHash(token, parsed.captureMode) : "";
+  const isCanonical = location.pathname.toLowerCase() === "/qms/car-access"
+    && location.search === ""
+    && location.hash === canonicalHash;
 
   useEffect(() => {
-    if (!routeToken || queryToken === routeToken) return;
-    const next = new URLSearchParams(searchParams);
-    next.set("token", routeToken);
-    setSearchParams(next, { replace: true });
-  }, [queryToken, routeToken, searchParams, setSearchParams]);
+    if (!token || isCanonical) return;
+    navigate({ pathname: "/qms/car-access", search: "", hash: canonicalHash }, { replace: true });
+  }, [token, isCanonical, canonicalHash, navigate]);
 
-  // Do not mount the legacy workspace until the canonical path token has been
-  // mirrored into its established token contract; otherwise it would latch an
-  // initial "Invite token missing" state before the URL update completes.
-  if (routeToken && queryToken !== routeToken) {
+  if (token && !isCanonical) {
     return <div role="status" aria-live="polite">Opening corrective action response…</div>;
   }
-
   return <PublicCarInvitePage />;
 };
 

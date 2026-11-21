@@ -35,6 +35,7 @@ from .router import (
     submit_car_from_invite as _submit_car_from_invite_base,
 )
 from .schemas import CARInviteOut, CARInviteUpdate, CAROut
+from .public_invite_security import public_invite_security, resolve_public_invite_token
 
 
 class CARInviteWithAuditReportOut(CARInviteOut):
@@ -45,7 +46,7 @@ class CARInviteWithAuditReportOut(CARInviteOut):
     structured_rca_required: bool = False
 
 
-_extension_router = APIRouter(prefix="/quality", tags=["Quality / Public CAR"])
+_extension_router = APIRouter(prefix="/quality", tags=["Quality / Public CAR"], dependencies=[Depends(public_invite_security)])
 _DETAILED_RESPONSE_FIELDS = (
     "containment_action",
     "root_cause",
@@ -56,7 +57,7 @@ _DETAILED_RESPONSE_MAX_LENGTH = 8000
 
 
 def _car_for_token(db: Session, invite_token: str, *, lock: bool = False) -> models.CorrectiveActionRequest:
-    clean_token = (invite_token or "").strip()
+    clean_token = resolve_public_invite_token(invite_token)
     if not clean_token or len(clean_token) > 255:
         raise HTTPException(status_code=404, detail="CAR invitation not found")
     query = (
@@ -194,8 +195,10 @@ def get_car_invite_with_report(
     payload["structured_rca_required"] = structured_rca_required(db, car)
     audit = _audit_for_car(car)
     report_path = _issued_report_path(db, audit)
+    route_token = "current" if invite_token == "current" else car.invite_token
+    payload["car_form_download_url"] = f"/quality/cars/invite/{route_token}/form"
     payload["audit_report_download_url"] = (
-        f"/quality/cars/invite/{car.invite_token}/audit-report" if report_path is not None else None
+        f"/quality/cars/invite/{route_token}/audit-report" if report_path is not None else None
     )
     payload["deadline_change_requires_review"] = db.query(QualityCARControlProfile.id).filter(
         QualityCARControlProfile.amo_id == car.amo_id,
@@ -279,7 +282,9 @@ def download_invited_audit_report(
         media_type=media_type,
         headers={
             "Cache-Control": "private, no-store, max-age=0",
+            "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
         },
     )
 

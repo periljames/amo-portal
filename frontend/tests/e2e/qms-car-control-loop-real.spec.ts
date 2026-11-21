@@ -122,7 +122,9 @@ async function reviewIndividualActionUi(page:Page,data:Fixture,description:strin
 async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffix: string, whileEditing?:()=>Promise<void>): Promise<void> {
   console.log(`CAR acceptance: ${suffix} public response opened`);
   await page.bringToFront();
-  await page.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`/qms/car-access#token=${encodeURIComponent(data.car_loop_invite_token)}`, { waitUntil: "domcontentloaded" });
+  expect(new URL(page.url()).hash).toBe(`#token=${encodeURIComponent(data.car_loop_invite_token)}`);
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
   await expect(page.locator(".car-invite-kicker").getByText(data.car_loop_number, { exact: true })).toBeVisible({ timeout: 30_000 });
   const responderName = page.getByLabel("Your name");
   if (await responderName.isVisible().catch(() => false)) {
@@ -247,7 +249,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByLabel("I confirm this response and evidence are accurate for audit closeout.").check();
   await page.getByRole("button", { name: "Preview submission" }).click();
   await expect(page.getByRole("dialog", { name: "Preview CAR submission" })).toBeVisible();
-  const committedSubmission=page.waitForResponse(response=>new URL(response.url()).pathname===`/quality/cars/invite/${data.car_loop_invite_token}`&&response.request().method()==="PATCH",{timeout:60000});
+  const committedSubmission=page.waitForResponse(response=>new URL(response.url()).pathname==="/quality/cars/invite/current"&&response.request().method()==="PATCH",{timeout:60000});
   await page.getByRole("button", { name: "Confirm and submit" }).click();
   expect((await committedSubmission).status()).toBe(200);
   await expect(page.getByRole("dialog",{name:"Preview CAR submission"})).toHaveCount(0,{timeout:30000});
@@ -284,7 +286,7 @@ test("real responsible-manager and Quality browsers prove CAR rejection/rework, 
 
     if(process.env.E2E_CAR_RESUME_SUBMITTED === "1") {
       expect((guestBody as {submitted_at?:string}).submitted_at,"Resume requires an already submitted synthetic CAR").toBeTruthy();
-      await publicPage.goto(`/qms/car-access/${encodeURIComponent(data.car_loop_invite_token)}`);
+      await publicPage.goto(`/qms/car-access#token=${encodeURIComponent(data.car_loop_invite_token)}`);
       if(process.env.E2E_CAR_RESUME_AFTER_REJECTION !== "1") await expect(async()=>{
         const retry=publicPage.getByRole("button",{name:"Retry loading response",exact:true});
         if(await retry.isVisible())await retry.click();

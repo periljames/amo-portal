@@ -89,7 +89,7 @@ export const emptyCarRca = (problem_statement = ""): CarRcaDocument => ({
   effectiveness_proposal: null,
 });
 
-const publicPath = (token: string, path: string) => `/quality/cars/invite/${encodeURIComponent(token)}${path}`;
+const publicPath = (_token: string, path: string) => `/quality/cars/invite/current${path}`;
 
 export class CarRcaRequestError extends Error {
   readonly status: number;
@@ -106,8 +106,13 @@ async function publicRcaRequest<T>(token: string, path: string, method: "GET" | 
   try {
     const response = await fetch(`${getApiBaseUrl()}${publicPath(token, path)}`, {
       method,
-      headers: { Accept: "application/json", ...(method !== "GET" ? { "Content-Type": "application/json" } : {}) },
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+      },
       cache: "no-store",
+      referrerPolicy: "no-referrer",
       credentials: "omit",
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,

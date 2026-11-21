@@ -1,6 +1,6 @@
 import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   Camera,
@@ -9,9 +9,8 @@ import {
   Clock3,
   Eye,
   FileText,
+  Image as ImageIcon,
   Link2,
-  List,
-  ListOrdered,
   Paperclip,
   QrCode as QrCodeIcon,
   RotateCcw,
@@ -32,13 +31,15 @@ import {
   qmsUploadCarInviteAttachment,
   qmsUpdateCarInviteAttachment,
   qmsDeleteCarInviteAttachment,
+  qmsDownloadCarInviteAttachmentBlob,
+  qmsDownloadCarInviteAuditReport,
+  qmsDownloadCarInviteForm,
   type CARActionOut,
   type CARAttachmentOut,
   type CARInviteOut,
   type CARPriority,
   type CARStatus,
 } from "../services/qms";
-import { getApiBaseUrl } from "../services/config";
 import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
 import { emptyCarRca, getCarRcaInvite, saveCarRcaInvite, type CarRcaDocument, type CarRcaAction } from "../services/qmsCarRca";
 import { RESPONSE_SECTIONS, type ResponseSection } from "./qualityAudits/carResponseEvidence";
@@ -48,6 +49,7 @@ import CarRcaActions from "../components/QMS/carRca/CarRcaActions";
 import CarFeedbackPanel from "../components/QMS/carRca/CarFeedbackPanel";
 import "../components/QMS/carRca/car-rca.css";
 import { personDisplay } from "../utils/personDisplay";
+import { buildCarInviteUrl, parseCarInviteLocation } from "../utils/carInviteUrl";
 import "../styles/car-invite.css";
 import "../styles/car-invite-responsive.css";
 
@@ -273,11 +275,6 @@ const countdownText = (dateValue: string | null | undefined, now: Date): { label
   return diffMs >= 0 ? { label: `Due in ${label}`, tone: "normal" } : { label: `Overdue by ${label}`, tone: "late" };
 };
 
-const absoluteApiUrl = (url: string): string => {
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${getApiBaseUrl()}${url.startsWith("/") ? url : `/${url}`}`;
-};
-
 const statusBadgeClass = (status: CARStatus): string => {
   if (status === "CLOSED") return "car-invite-badge car-invite-badge--success";
   if (status === "ESCALATED") return "car-invite-badge car-invite-badge--danger";
@@ -300,10 +297,8 @@ const isInviteEvidenceFileAllowed = (file: File): { ok: true } | { ok: false; re
   return { ok: false, reason: `${file.name} is not an accepted evidence type.` };
 };
 
-const inviteShareUrl = (_invite: CARInviteOut, tokenValue: string): string => {
-  const path = `/qms/car-access/${encodeURIComponent(tokenValue)}?capture=1`;
-  return typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
-};
+const inviteShareUrl = (tokenValue: string): string =>
+  typeof window !== "undefined" ? buildCarInviteUrl(window.location.origin, tokenValue, true) : buildCarInviteUrl("", tokenValue, true);
 
 const isInviteEditable = (invite: CARInviteOut | null): boolean => {
   if (!invite) return false;
@@ -408,13 +403,22 @@ const SubmissionPreview: React.FC<{
 };
 
 const PublicCarInvitePage: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
-  const captureMode = searchParams.get("capture") === "1";
+  const location = useLocation();
+  const parsedLocation = useMemo(
+    () => parseCarInviteLocation(location.search, location.hash),
+    [location.search, location.hash],
+  );
+  const token = parsedLocation.token;
+  const captureMode = parsedLocation.captureMode;
   const [evidenceSections,setEvidenceSections]=useState<Record<string,ResponseSection|"">>({});
   const [evidenceMetadataBusy,setEvidenceMetadataBusy]=useState<string|null>(null);
   const [entries, setEntries] = useState<InviteEntry[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<SelectedPreview | null>(null);
+  const [selectedPreviewUrl, setSelectedPreviewUrl] = useState<string | null>(null);
+  const [selectedPreviewLoading, setSelectedPreviewLoading] = useState(false);
+  const [selectedPreviewError, setSelectedPreviewError] = useState<string | null>(null);
+  const [reportDownloadingToken, setReportDownloadingToken] = useState<string | null>(null);
+  const [formDownloadingToken, setFormDownloadingToken] = useState<string | null>(null);
   const [submissionPreviewToken, setSubmissionPreviewToken] = useState<string | null>(null);
   const [camera, setCamera] = useState<CameraState | null>(null);
   const [activeSteps, setActiveSteps] = useState<Record<string, InviteStepId>>({});
@@ -770,6 +774,34 @@ const PublicCarInvitePage: React.FC = () => {
     if (!stillExists) setSelectedPreview(null);
   }, [entries, selectedPreview]);
 
+  useEffect(() => {
+    if (!selectedPreview) {
+      setSelectedPreviewUrl(null);
+      setSelectedPreviewError(null);
+      setSelectedPreviewLoading(false);
+      return;
+    }
+    let active = true;
+    let objectUrl: string | null = null;
+    setSelectedPreviewUrl(null);
+    setSelectedPreviewError(null);
+    setSelectedPreviewLoading(true);
+    void qmsDownloadCarInviteAttachmentBlob(selectedPreview.token, selectedPreview.attachment.id)
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setSelectedPreviewUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch(error => {
+        if (active) setSelectedPreviewError(getErrorMessage(error, "Evidence preview could not be loaded. Download the original file instead."));
+      })
+      .finally(() => { if (active) setSelectedPreviewLoading(false); });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedPreview]);
+
   const validateEntry = (entry: InviteEntry): string | null => {
     if (!entry.invite) return "CAR invite is not loaded.";
     if (!canSubmitInvite(entry.invite)) return entry.invite.locked_reason || "This CAR cannot be submitted right now.";
@@ -854,6 +886,46 @@ const PublicCarInvitePage: React.FC = () => {
         recalling: false,
         error: getErrorMessage(error, "Failed to recall submission."),
       }));
+    }
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  };
+
+  const downloadIssuedReport = async (entry: InviteEntry) => {
+    if (reportDownloadingToken || !entry.invite?.audit_report_download_url) return;
+    setReportDownloadingToken(entry.token);
+    updateEntry(entry.token, current => ({ ...current, error: null }));
+    try {
+      const file = await qmsDownloadCarInviteAuditReport(entry.token);
+      downloadBlob(file.blob, file.filename || `${entry.invite.car_number || "CAR"}-issued-audit-report.pdf`);
+    } catch (error) {
+      updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The issued audit report could not be downloaded.") }));
+    } finally {
+      setReportDownloadingToken(null);
+    }
+  };
+
+  const downloadOriginalCarForm = async (entry: InviteEntry) => {
+    if (formDownloadingToken || !entry.invite?.car_form_download_url) return;
+    setFormDownloadingToken(entry.token);
+    updateEntry(entry.token, current => ({ ...current, error: null }));
+    try {
+      const file = await qmsDownloadCarInviteForm(entry.token);
+      downloadBlob(file.blob, file.filename || `${entry.invite.car_number || "CAR"}_CAR_form.pdf`);
+    } catch (error) {
+      updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The original CAR form could not be downloaded.") }));
+    } finally {
+      setFormDownloadingToken(null);
     }
   };
 
@@ -1086,6 +1158,7 @@ const PublicCarInvitePage: React.FC = () => {
             <p className="car-invite-kicker">Public CAR workspace</p>
             <h2 className="car-invite-title">Assigned corrective actions</h2>
             <p className="car-invite-subtitle">Fields marked <strong>*</strong> are required. Response fields are limited to {MAX_RESPONSE_CHARS} characters each.</p>
+            <p className="car-invite-subtitle">No AMO Portal account is required. This invitation grants access only to the assigned CAR and can be revoked or expire under Quality controls.</p>
           </div>
           <div className="car-invite-toolbar__stats" aria-label="Workspace status">
             <span><ClipboardCheck size={16} /> {readyEntries.length} CAR{readyEntries.length === 1 ? "" : "s"}</span>
@@ -1112,7 +1185,7 @@ const PublicCarInvitePage: React.FC = () => {
               const dueCountdown = countdownText(invite?.due_date || invite?.target_closure_date, now);
               const locked = !isInviteEditable(invite) || entry.submitting;
               const canSubmit = canSubmitInvite(invite);
-              const shareUrl = `${window.location.origin}/qms/car-access/${encodeURIComponent(entry.token)}?capture=1`;
+              const shareUrl = inviteShareUrl(entry.token);
               const activeStep = getActiveStep(entry);
 
               return (
@@ -1345,7 +1418,6 @@ const PublicCarInvitePage: React.FC = () => {
                                     {entry.attachments.length > 0 && (
                                       <div className="car-invite-evidence-list">
                                         {entry.attachments.map((attachment) => {
-                                          const url = absoluteApiUrl(attachment.download_url);
                                           const isImage = attachment.content_type?.startsWith("image/");
                                           const isVideo = attachment.content_type?.startsWith("video/");
                                           const isPdf = attachment.content_type?.includes("pdf") || attachment.filename.toLowerCase().endsWith(".pdf");
@@ -1353,7 +1425,7 @@ const PublicCarInvitePage: React.FC = () => {
                                             <article key={attachment.id} className="car-invite-evidence-item">
                                               <button type="button" className="car-invite-file car-invite-file--compact" onClick={() => setSelectedPreview({ token: entry.token, attachment, carNumber: invite.car_number })}>
                                                 <span className="car-invite-file__preview">
-                                                  {isImage ? <img src={url} alt={attachment.filename} /> : isVideo ? <Video size={24} /> : isPdf ? "PDF" : <FileText size={22} />}
+                                                  {isImage ? <ImageIcon size={24} /> : isVideo ? <Video size={24} /> : isPdf ? "PDF" : <FileText size={22} />}
                                                 </span>
                                                 <strong>{attachment.filename}</strong>
                                               </button>
@@ -1467,12 +1539,23 @@ const PublicCarInvitePage: React.FC = () => {
             </details>
 
             <details className="car-invite-panel" open>
-              <summary><span>Audit report</span><FileText size={16} /></summary>
-              {readyEntries.find((entry) => entry.invite?.audit_report_download_url)?.invite ? (
-                <a className="car-invite-btn car-invite-btn--wide" href={absoluteApiUrl(readyEntries.find((entry) => entry.invite?.audit_report_download_url)!.invite!.audit_report_download_url!)} target="_blank" rel="noreferrer">
-                  <FileText size={16} /> View / download report
-                </a>
-              ) : <p className="car-invite-subtitle">The auditor has not issued the report yet.</p>}
+              <summary><span>Audit reports</span><FileText size={16} /></summary>
+              {readyEntries.filter((entry) => entry.invite?.audit_report_download_url).map((entry) => (
+                <button key={entry.token} className="car-invite-btn car-invite-btn--wide" type="button" disabled={reportDownloadingToken === entry.token} onClick={() => void downloadIssuedReport(entry)}>
+                  <FileText size={16} /> {reportDownloadingToken === entry.token ? "Preparing report…" : `View / download report · ${entry.invite?.car_number || "CAR"}`}
+                </button>
+              ))}
+              {readyEntries.length > 0 && !readyEntries.some((entry) => entry.invite?.audit_report_download_url) && <p className="car-invite-subtitle">The auditor has not issued a report yet.</p>}
+            </details>
+
+            <details className="car-invite-panel" open>
+              <summary><span>Original CAR form</span><FileText size={16} /></summary>
+              {readyEntries.filter((entry) => entry.invite?.car_form_download_url).map((entry) => (
+                <button key={entry.token} className="car-invite-btn car-invite-btn--wide" type="button" disabled={formDownloadingToken === entry.token} onClick={() => void downloadOriginalCarForm(entry)}>
+                  <FileText size={16} /> {formDownloadingToken === entry.token ? "Preparing original form…" : `Download original CAR form · ${entry.invite?.car_number || "CAR"}`}
+                </button>
+              ))}
+              {readyEntries.length > 0 && !readyEntries.some((entry) => entry.invite?.car_form_download_url) && <p className="car-invite-subtitle">The original CAR form is not available.</p>}
             </details>
 
             <details className="car-invite-panel" open>
@@ -1495,8 +1578,8 @@ const PublicCarInvitePage: React.FC = () => {
               <summary><span>Phone capture</span><QrCodeIcon size={16} /></summary>
               {readyEntries[0]?.invite ? (
                 <div className="car-invite-share">
-                  <InviteQr value={inviteShareUrl(readyEntries[0].invite, readyEntries[0].token)} />
-                  <a className="car-invite-btn" href={inviteShareUrl(readyEntries[0].invite, readyEntries[0].token)} target="_blank" rel="noreferrer"><Link2 size={16} /> Open link</a>
+                  <InviteQr value={inviteShareUrl(readyEntries[0].token)} />
+                  <a className="car-invite-btn" href={inviteShareUrl(readyEntries[0].token)} target="_blank" rel="noreferrer"><Link2 size={16} /> Open link</a>
                 </div>
               ) : <p className="car-invite-subtitle">QR appears after a CAR loads.</p>}
             </details>
@@ -1510,7 +1593,7 @@ const PublicCarInvitePage: React.FC = () => {
       {selectedPreview && (() => {
         const previewEntryState = entries.find((entry) => entry.token === selectedPreview.token);
         const previewLocked = !isInviteEditable(previewEntryState?.invite ?? null);
-        const previewUrl = absoluteApiUrl(selectedPreview.attachment.download_url);
+        const previewUrl = selectedPreviewUrl;
         const contentType = selectedPreview.attachment.content_type || "";
         const filename = selectedPreview.attachment.filename.toLowerCase();
         const isImage = contentType.startsWith("image/");
@@ -1531,10 +1614,13 @@ const PublicCarInvitePage: React.FC = () => {
                 </div>
               </div>
               <div className="car-invite-preview-surface">
-                {isImage && <img src={previewUrl} alt={selectedPreview.attachment.filename} />}
-                {isVideo && <video src={previewUrl} controls playsInline />}
-                {isPdf && <embed src={previewUrl} type="application/pdf" />}
-                {!isImage && !isVideo && !isPdf && <iframe src={previewUrl} title={selectedPreview.attachment.filename} />}
+                {selectedPreviewLoading && <InlineLoading label="Loading evidence preview…" />}
+                {selectedPreviewError && <p className="car-invite-error" role="alert">{selectedPreviewError}</p>}
+                {!selectedPreviewLoading && previewUrl && isImage && <img src={previewUrl} alt={selectedPreview.attachment.filename} />}
+                {!selectedPreviewLoading && previewUrl && isVideo && <video src={previewUrl} controls playsInline />}
+                {!selectedPreviewLoading && previewUrl && isPdf && <embed src={previewUrl} type="application/pdf" />}
+                {!selectedPreviewLoading && previewUrl && !isImage && !isVideo && !isPdf && <p className="car-invite-subtitle">This file type is not rendered in the browser. Download the original document to preserve its native layout.</p>}
+                {previewUrl && <a className="car-invite-btn" href={previewUrl} download={selectedPreview.attachment.filename}><FileText size={16}/> Download original</a>}
               </div>
             </div>
           </div>

@@ -63,3 +63,42 @@ describe("protected request recovery", () => {
     expect(handleAuthFailure).toHaveBeenCalledOnce();
   });
 });
+
+  it("preserves a public CAR bearer instead of replacing it with the employee token", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    install(fetch);
+    const response = await window.fetch("http://portal.test/quality/cars/invite/current", {
+      headers: { Authorization: "Bearer car-invite-capability" },
+      credentials: "omit",
+    });
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(new Headers(fetch.mock.calls[0][1].headers).get("Authorization")).toBe("Bearer car-invite-capability");
+    expect(recoverSessionAfterUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke employee recovery when a public CAR capability is rejected", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    install(fetch);
+    const response = await window.fetch("http://portal.test/quality/cars/invite/current/feedback", {
+      headers: { Authorization: "Bearer car-invite-capability" },
+      credentials: "omit",
+    });
+    expect(response.status).toBe(401);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(recoverSessionAfterUnauthorized).not.toHaveBeenCalled();
+    expect(handleAuthFailure).not.toHaveBeenCalled();
+  });
+
+  it("does not inject employee credentials into legacy path-token CAR endpoints", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    install(fetch);
+    const response = await window.fetch("http://portal.test/quality/cars/invite/legacy-token/draft", {
+      headers: { Accept: "application/json" },
+      credentials: "omit",
+    });
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(new Headers(fetch.mock.calls[0][1].headers).get("Authorization")).toBeNull();
+    expect(recoverSessionAfterUnauthorized).not.toHaveBeenCalled();
+  });

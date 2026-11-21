@@ -2,7 +2,7 @@ import {test,expect,type Page} from "@playwright/test";
 import {mockQualityShell} from "./helpers/mockQualityShell";
 
 const carId="11111111-1111-4111-8111-111111111111";
-async function prepare(page:Page,closed=false,holdFirst=false,withAction=false,legacyConclusion=""){
+async function prepare(page:Page,closed=false,holdFirst=false,withAction=false,legacyConclusion="",withIssuedReport=false){
   await mockQualityShell(page);
   let revision=0;
   const writes:Array<{expected_revision:number;form:Record<string,string>;investigation:Record<string,unknown>}>=[];
@@ -26,7 +26,7 @@ async function prepare(page:Page,closed=false,holdFirst=false,withAction=false,l
       return json({car_id:carId,revision,draft,submitted_revision:null,submitted_snapshot:null,submitted_at:null,actions:withAction?[{id:"action-mobile",car_id:carId,sequence_no:1,action_number:"CA-001",kind:"CORRECTIVE",description:"Maintain an independently verified effectiveness checkpoint and accountable evidence owner.",external_owner_name:"SIMULATED responsible manager",target_date:"2026-11-01",state:"VERIFIED",cause_node_ids:[],evidence_references:[],priority:"MEDIUM",completion_note:"Controlled register and evidence index updated.",quality_review_note:"Independently verified against the retained evidence."}]:[],action_events:[],retained_responses:[],history:[]});
     }
     if(path.endsWith("/attachments")||path.endsWith("/actions"))return json([]);
-    return json({car_id:carId,car_number:"QA-CAR-001",title:"Synthetic draft coordination",summary:"Synthetic finding",priority:"HIGH",status:closed?"CLOSED":"OPEN",can_edit:!closed&&!withAction,can_submit:!closed&&!withAction,root_cause_status:withAction?"ACCEPTED":"PENDING",capa_status:withAction?"ACCEPTED":"PENDING",related_cars:[],evidence_required:false,structured_rca_required:false,...draft.form,submitted_at:null,submission_count:0,remaining_submissions:2});
+    return json({car_id:carId,car_number:"QA-CAR-001",title:"Synthetic draft coordination",summary:"Synthetic finding",priority:"HIGH",status:closed?"CLOSED":"OPEN",can_edit:!closed&&!withAction,can_submit:!closed&&!withAction,root_cause_status:withAction?"ACCEPTED":"PENDING",capa_status:withAction?"ACCEPTED":"PENDING",related_cars:[],evidence_required:false,structured_rca_required:false,car_form_download_url:"/quality/cars/invite/current/form",...(withIssuedReport?{audit_report_download_url:"/quality/cars/invite/current/audit-report"}:{}),...draft.form,submitted_at:null,submission_count:0,remaining_submissions:2});
   });
   return {writes,release};
 }
@@ -55,7 +55,7 @@ test("public RCA uses one conclusion field and a keyboard accessible tool drawer
 test("phone capture opens evidence directly and permits multiple attachments and retry",async({page})=>{
  await prepare(page);await page.setViewportSize({width:390,height:844});
  let uploads=0;let fail=true;
- await page.route('**/quality/cars/invite/synthetic-token/attachments',async route=>{
+ await page.route('**/quality/cars/invite/current/attachments',async route=>{
  if(route.request().method()!=='POST')return route.fulfill({contentType:'application/json',body:'[]'});
  uploads++;if(fail){fail=false;return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Temporary upload failure'})});}
  return route.fulfill({contentType:'application/json',body:JSON.stringify({id:'file-'+uploads,filename:'evidence.pdf',content_type:'application/pdf',uploaded_at:'2026-11-21T10:00:00Z',download_url:'/files/evidence.pdf'})});
@@ -70,7 +70,7 @@ test("phone capture opens evidence directly and permits multiple attachments and
  await page.locator('input[type="file"][multiple]').setInputFiles([{name:'photo.jpg',mimeType:'image/jpeg',buffer:Buffer.from('synthetic image')},{name:'record.txt',mimeType:'text/plain',buffer:Buffer.from('record')}]);
  await expect.poll(()=>uploads).toBe(4);await expect(page.locator('.car-invite-evidence-actions')).toContainText('3 attached');
  await page.getByText('Use phone camera',{exact:false}).click();
- await expect(page.getByRole('link',{name:'Open phone capture page'})).toHaveAttribute('href',/\/qms\/car-access\/synthetic-token\?capture=1$/);
+ await expect(page.getByRole('link',{name:'Open phone capture page'})).toHaveAttribute('href',/\/qms\/car-access#token=synthetic-token&capture=1$/);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
 });
 
@@ -86,7 +86,7 @@ test("camera captures a real video frame and uploads the JPEG",async({page})=>{
  (window as unknown as {cameraTracks:MediaStreamTrack[]}).cameraTracks=tracks;
  });
  let imageBytes=0;
- await page.route('**/quality/cars/invite/synthetic-token/attachments',async route=>{
+ await page.route('**/quality/cars/invite/current/attachments',async route=>{
  if(route.request().method()!=='POST')return route.fulfill({contentType:'application/json',body:'[]'});
  imageBytes=route.request().postDataBuffer()?.length||0;
  await route.fulfill({contentType:'application/json',body:JSON.stringify({id:'photo-1',filename:'captured.jpg',content_type:'image/jpeg',download_url:'/files/captured.jpg'})});
@@ -115,7 +115,7 @@ test("mobile photo control opens the native camera input and permission errors o
 
 test("attachments can be uploaded and cited without leaving the root cause tools",async({page})=>{
  const state=await prepare(page);
- await page.route('**/quality/cars/invite/synthetic-token/attachments',route=>route.fulfill({contentType:'application/json',body:route.request().method()==='POST'?JSON.stringify({id:'analysis-file',filename:'inspection.pdf',content_type:'application/pdf',download_url:'/files/inspection.pdf'}):'[]'}));
+ await page.route('**/quality/cars/invite/current/attachments',route=>route.fulfill({contentType:'application/json',body:route.request().method()==='POST'?JSON.stringify({id:'analysis-file',filename:'inspection.pdf',content_type:'application/pdf',download_url:'/files/inspection.pdf'}):'[]'}));
  await page.goto('/qms/car-access/synthetic-token');
  const workbench=page.getByRole('region',{name:'Root cause investigation'});
  await expect(workbench.getByLabel('Final root cause explanation',{exact:true})).toBeVisible({timeout:20000});
@@ -141,18 +141,103 @@ test("existing legacy response is retained in the single conclusion editor and c
 test("public evidence keeps its response-section label through upload and reassignment",async({page})=>{
  await prepare(page);let uploaded=false;let patched=false;
  const file={id:'section-file',car_id:carId,filename:'containment.txt',description:'Isolation record',response_section:'CONTAINMENT',content_type:'text/plain',download_url:'/files/containment.txt'};
- await page.route('**/quality/cars/invite/synthetic-token/attachments*',async route=>{
+ await page.route('**/quality/cars/invite/current/attachments*',async route=>{
   if(route.request().method()==='POST'){
    const data=route.request().postDataBuffer()?.toString()||'';expect(data).toContain('name="response_section"');expect(data).toContain('CONTAINMENT');uploaded=true;
    return route.fulfill({contentType:'application/json',body:JSON.stringify(file)});
   }
   return route.fulfill({contentType:'application/json',body:'[]'});
  });
- await page.route('**/quality/cars/invite/synthetic-token/attachments/section-file',route=>{const data=route.request().postDataJSON();expect(data).toEqual({response_section:'ROOT_CAUSE'});patched=true;return route.fulfill({contentType:'application/json',body:JSON.stringify({...file,response_section:data.response_section})});});
+ await page.route('**/quality/cars/invite/current/attachments/section-file',route=>{const data=route.request().postDataJSON();expect(data).toEqual({response_section:'ROOT_CAUSE'});patched=true;return route.fulfill({contentType:'application/json',body:JSON.stringify({...file,response_section:data.response_section})});});
  await page.goto('/qms/car-access/synthetic-token?capture=1');
  await page.getByRole('combobox',{name:'Evidence response section',exact:true}).selectOption('CONTAINMENT');
  await page.locator('input[type="file"][multiple]').setInputFiles({name:'containment.txt',mimeType:'text/plain',buffer:Buffer.from('Isolation record')});
  await expect.poll(()=>uploaded).toBe(true);
  const section=page.getByRole('combobox',{name:'Response section for containment.txt',exact:true});await expect(section).toHaveValue('CONTAINMENT');
  await section.selectOption('ROOT_CAUSE');await expect.poll(()=>patched).toBe(true);await expect(section).toHaveValue('ROOT_CAUSE');
+});
+
+test("fragment invitation opens without employee login and keeps the bearer out of API paths", async ({ page }) => {
+  await prepare(page);
+  const publicRequests: Array<{ pathname: string; authorization: string | undefined }> = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.includes("/quality/cars/invite/current")) {
+      publicRequests.push({ pathname: url.pathname, authorization: request.headers()["authorization"] });
+    }
+  });
+  await page.goto("/qms/car-access#token=synthetic-token");
+  await expect(page.locator(".car-invite-kicker").getByText("QA-CAR-001", { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(page).toHaveURL(/\/qms\/car-access#token=synthetic-token$/);
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
+  await expect.poll(() => publicRequests.some(request => request.authorization === "Bearer synthetic-token")).toBe(true);
+  expect(publicRequests.length).toBeGreaterThan(0);
+  expect(publicRequests.every(request => request.authorization === "Bearer synthetic-token")).toBe(true);
+  expect(publicRequests.every(request => !request.pathname.includes("synthetic-token"))).toBe(true);
+});
+
+test("legacy query invites migrate to a token fragment without employee login", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/car-invite?token=synthetic-token&capture=1");
+  await expect(page.locator(".car-invite-kicker").getByText("QA-CAR-001", { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(page).toHaveURL(/\/qms\/car-access#token=synthetic-token&capture=1$/);
+  await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
+});
+
+test("original CAR form download sends the invitation bearer in the header", async ({ page }) => {
+  await prepare(page);
+  let authorization = "";
+  await page.route("**/quality/cars/invite/current/form", async route => {
+    authorization = route.request().headers()["authorization"] || "";
+    await route.fulfill({ status: 200, contentType: "application/pdf", headers: { "Content-Disposition": 'attachment; filename="QA-CAR-001_CAR_form.pdf"' }, body: Buffer.from("%PDF-1.4 synthetic CAR form") });
+  });
+  await page.goto("/qms/car-access#token=synthetic-token");
+  const button = page.getByRole("button", { name: /Download original CAR form/ });
+  await expect(button).toBeVisible({ timeout: 15000 });
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  expect(authorization).toBe("Bearer synthetic-token");
+  expect(download.suggestedFilename()).toBe("QA-CAR-001_CAR_form.pdf");
+});
+
+test("issued audit report download sends the invitation bearer in the header", async ({ page }) => {
+  await prepare(page, false, false, false, "", true);
+  let authorization = "";
+  await page.route("**/quality/cars/invite/current/audit-report", async route => {
+    authorization = route.request().headers()["authorization"] || "";
+    await route.fulfill({ status: 200, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers: { "Content-Disposition": 'attachment; filename="AUDIT-26_issued-audit-report.docx"' }, body: Buffer.from("synthetic DOCX report") });
+  });
+  await page.goto("/qms/car-access#token=synthetic-token");
+  const button = page.getByRole("button", { name: "View / download issued report", exact: true });
+  await expect(button).toBeVisible({ timeout: 15000 });
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  expect(authorization).toBe("Bearer synthetic-token");
+  expect(download.suggestedFilename()).toBe("AUDIT-26_issued-audit-report.docx");
+});
+
+test("evidence preview downloads through the bearer-protected endpoint", async ({ page }) => {
+  await prepare(page);
+  const attachment = {
+    id: "evidence-preview-1", car_id: carId, filename: "inspection.png",
+    description: "Inspection photograph", response_section: "ROOT_CAUSE",
+    content_type: "image/png", size_bytes: 68, sha256: null,
+    uploaded_at: "2026-11-21T10:00:00Z",
+    download_url: "/quality/cars/invite/current/attachments/evidence-preview-1/download",
+  };
+  let authorization = "";
+  await page.route("**/quality/cars/invite/current/attachments", route =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify([attachment]) }));
+  await page.route("**/quality/cars/invite/current/attachments/evidence-preview-1/download", async route => {
+    authorization = route.request().headers()["authorization"] || "";
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6ZkAAAAASUVORK5CYII=", "base64");
+    await route.fulfill({ status: 200, contentType: "image/png", body: png });
+  });
+  await page.goto("/qms/car-access#token=synthetic-token");
+  await expect(page.getByRole("button", { name: /Inspection photograph/ })).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: /Inspection photograph/ }).click();
+  await expect(page.locator(".car-invite-preview-surface img")).toBeVisible({ timeout: 15000 });
+  expect(authorization).toBe("Bearer synthetic-token");
 });

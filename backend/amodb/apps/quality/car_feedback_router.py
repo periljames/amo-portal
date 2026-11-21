@@ -13,9 +13,10 @@ from . import models
 from .car_rca_router import _car_for_employee, _car_for_guest
 from .car_feedback import record_shared_feedback, feedback_changed
 from .tenant_security import TenantContext, require_quality_permission, write_tenant_context, assert_quality_permission
+from .public_invite_security import public_invite_security
 
 router = APIRouter(prefix="/cars/{car_id}/feedback", tags=["Quality / CAR feedback"])
-public_router = APIRouter(prefix="/cars/invite/{invite_token}/feedback", tags=["Quality / Public CAR feedback"])
+public_router = APIRouter(prefix="/cars/invite/{invite_token}/feedback", tags=["Quality / Public CAR feedback"], dependencies=[Depends(public_invite_security)])
 
 
 @public_router.get("/events")
@@ -49,7 +50,14 @@ def public_feedback_events(invite_token: str):
         finally:
             broker.unsubscribe_async(queue)
     return StreamingResponse(updates(), media_type="text/event-stream",
-        headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+            "X-Accel-Buffering": "no",
+        })
 
 
 class FeedbackCreate(BaseModel):

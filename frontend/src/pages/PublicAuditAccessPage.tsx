@@ -319,7 +319,7 @@ const PublicAuditAccessPage: React.FC = () => {
                 {collaboration.cars.map((car) => (
                   <article key={car.id}>
                     <div><strong>{car.car_number} · {car.title}</strong><p>{car.summary}</p><small>{car.finding_ref || "Finding"} · {car.priority || "Priority not stated"} · {car.status || "Open"}</small><small>Target closure {car.target_closure_date || car.due_date || "not set"}</small></div>
-                    {canRespondToCars && car.response_url?.startsWith("/qms/car-access/") ? (
+                    {canRespondToCars && (car.response_url?.startsWith("/qms/car-access#token=") || car.response_url?.startsWith("/qms/car-access/")) ? (
                       <a className="qms-public-audit__response-link" href={car.response_url} target="_blank" rel="noopener noreferrer">Open CAP response <span className="sr-only">for {car.car_number} in a new tab</span></a>
                     ) : <small>{car.closed_at || car.status === "CLOSED" ? "Corrective action closed" : "Quality will provide response access to the responsible auditee."}</small>}
                   </article>

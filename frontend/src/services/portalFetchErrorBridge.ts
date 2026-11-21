@@ -111,6 +111,26 @@ function isPortalApiUrl(url: string): boolean {
   }
 }
 
+/**
+ * CAR invitation requests use a scoped bearer capability, not the employee
+ * access token. Never let the global session bridge replace that credential or
+ * trigger employee-session recovery for a public respondent.
+ */
+function isPublicCarInviteApiUrl(url: string): boolean {
+  try {
+    const requestUrl = new URL(url, window.location.origin);
+    const apiBase = new URL(getApiBaseUrl() || "/", window.location.origin);
+    if (requestUrl.origin !== apiBase.origin) return false;
+    const basePath = apiBase.pathname.replace(/\/+$/, "");
+    const path = basePath && requestUrl.pathname.startsWith(basePath + "/")
+      ? requestUrl.pathname.slice(basePath.length)
+      : requestUrl.pathname;
+    return /^\/quality\/cars\/invite\/[^/]+(?:\/|$)/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
 function withCurrentAccessToken(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
@@ -240,13 +260,17 @@ export function installPortalFetchErrorBridge(): () => void {
     const authRecoveryRequest = isAuthRecoveryUrl(url);
     const publicAuthRequest = isPublicAuthUrl(url);
     const publicHealthRequest = isPublicHealthUrl(url);
+    const publicCarInviteRequest = isPublicCarInviteApiUrl(url);
     const platformOpsRequest = isPlatformOpsUrl(url);
-    const silent = headers.get("X-AMO-Silent-Error") === "1" || isSilentBackgroundMutation(url);
+    const silent = headers.get("X-AMO-Silent-Error") === "1"
+      || isSilentBackgroundMutation(url)
+      || publicCarInviteRequest;
     const portalRequest = isPortalApiUrl(url) && !platformOpsRequest;
     const authenticatedRequest = portalRequest
       && !authRecoveryRequest
       && !publicAuthRequest
       && !publicHealthRequest
+      && !publicCarInviteRequest
       && (
       (headers.get("Authorization") || "").startsWith("Bearer ")
       || hasRecoverableSession()

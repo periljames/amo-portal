@@ -168,6 +168,9 @@ function qualitySections(amoCode: string, user: PortalUser | null): PortalNavIte
   const groups = new Map<QmsModuleRoute["section"], PortalNavItem[]>();
   for (const route of qmsNavigationItems(amoCode)) {
     if (!userHasQmsRolePermission(user, route.permission)) continue;
+    // Accountable Executives retain read access to external commitments, but
+    // provider account administration belongs to the Quality review roles.
+    if (route.id === "provider-access" && user?.role === "ACCOUNTABLE_EXECUTIVE" && !isTenantAdmin(user)) continue;
     const children = groups.get(route.section) ?? [];
     children.push({ id: `qms-${route.id}`, label: route.navigationLabel, path: route.path,
     });

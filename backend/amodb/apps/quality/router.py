@@ -46,6 +46,7 @@ from .audit_deletion_service import (
 )
 from .audit_schedule_rules import validate_planned_window
 from .tenant_security import set_postgres_tenant_context
+from .public_invite_security import public_invite_security, resolve_public_invite_token
 from . import transitions as car_transitions
 from .schemas import (
     CARActionCreate,
@@ -112,6 +113,7 @@ router = APIRouter(
 public_router = APIRouter(
     prefix="/quality",
     tags=["Quality / Public CAR"],
+    dependencies=[Depends(public_invite_security)],
 )
 
 CAR_ATTACHMENT_DIR = Path(__file__).resolve().parents[2] / "generated" / "quality" / "car_attachments"
@@ -464,6 +466,7 @@ def _advance_schedule_date(schedule: models.QMSAuditSchedule, base_date: date) -
 
 
 def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -> CARAttachmentOut:
+    route_token = "current" if invite_token == "current" else invite_token
     return CARAttachmentOut(
         id=attachment.id,
         car_id=attachment.car_id,
@@ -474,7 +477,7 @@ def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -
         size_bytes=attachment.size_bytes,
         sha256=attachment.sha256,
         uploaded_at=attachment.uploaded_at,
-        download_url=f"/quality/cars/invite/{invite_token}/attachments/{attachment.id}/download",
+        download_url=f"/quality/cars/invite/{route_token}/attachments/{attachment.id}/download",
     )
 
 
@@ -6863,6 +6866,7 @@ def get_car_invite(
 
 @public_router.get("/cars/invite/{invite_token}", response_model=CARInviteOut)
 def get_car_invite_by_token(invite_token: str, request: Request, db: Session = Depends(get_db)):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -6883,6 +6887,7 @@ def _limit_car_invite_text(value: object, *, max_length: int = 500) -> object:
 
 @public_router.patch("/cars/invite/{invite_token}", response_model=CAROut)
 def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request: Request, db: Session = Depends(get_db)):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7017,6 +7022,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
 
 @public_router.post("/cars/invite/{invite_token}/recall", response_model=CARInviteOut)
 def recall_car_invite_submission(invite_token: str, request: Request, db: Session = Depends(get_db)):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7089,6 +7095,8 @@ def recall_car_invite_submission(invite_token: str, request: Request, db: Sessio
 
 @public_router.get("/cars/invite/{invite_token}/attachments", response_model=List[CARAttachmentOut])
 def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)):
+    route_token = invite_token
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7098,7 +7106,7 @@ def list_car_invite_attachments(invite_token: str, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Invite not found")
     from .car_rca_router import assert_invite_access
     assert_invite_access(db, car)
-    return [_serialize_attachment(invite_token, attachment) for attachment in car.attachments]
+    return [_serialize_attachment(route_token if route_token == "current" else invite_token, attachment) for attachment in car.attachments]
 
 
 @public_router.post(
@@ -7113,6 +7121,8 @@ def upload_car_invite_attachment(
     response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = Form(default=None),
     db: Session = Depends(get_db),
 ):
+    route_token = invite_token
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7141,7 +7151,7 @@ def upload_car_invite_attachment(
     car.evidence_received_at = func.now()
     db.commit()
     db.refresh(attachment)
-    return _serialize_attachment(invite_token, attachment)
+    return _serialize_attachment(route_token if route_token == "current" else invite_token, attachment)
 
 
 @public_router.patch(
@@ -7154,6 +7164,8 @@ def update_car_invite_attachment(
     payload: CARAttachmentUpdate,
     db: Session = Depends(get_db),
 ):
+    route_token = invite_token
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7177,7 +7189,7 @@ def update_car_invite_attachment(
         attachment.response_section = payload.response_section
     db.commit()
     db.refresh(attachment)
-    return _serialize_attachment(invite_token, attachment)
+    return _serialize_attachment(route_token if route_token == "current" else invite_token, attachment)
 
 
 @public_router.delete(
@@ -7189,6 +7201,7 @@ def delete_car_invite_attachment(
     attachment_id: UUID,
     db: Session = Depends(get_db),
 ):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7231,6 +7244,7 @@ def download_car_invite_attachment(
     attachment_id: UUID,
     db: Session = Depends(get_db),
 ):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7256,11 +7270,18 @@ def download_car_invite_attachment(
         path=file_path,
         filename=attachment.filename,
         media_type=attachment.content_type or "application/octet-stream",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
 
 
 @public_router.get("/cars/invite/{invite_token}/form", response_class=FileResponse)
 def download_car_invite_form(invite_token: str, request: Request, db: Session = Depends(get_db)):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)
@@ -7279,11 +7300,18 @@ def download_car_invite_form(invite_token: str, request: Request, db: Session = 
         path=output_path,
         filename=f"{car.car_number}_CAR_form.pdf",
         media_type="application/pdf",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
 
 
 @public_router.get("/cars/invite/{invite_token}/actions", response_model=List[CARActionOut])
 def list_car_invite_actions(invite_token: str, db: Session = Depends(get_db)):
+    invite_token = resolve_public_invite_token(invite_token)
     car = (
         db.query(models.CorrectiveActionRequest)
         .filter(models.CorrectiveActionRequest.invite_token == invite_token)

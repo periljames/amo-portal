@@ -552,34 +552,35 @@ async function downloadBinary(path: string): Promise<Blob> {
   }
 }
 
-async function publicFetchJson<T>(path: string): Promise<T> {
+async function publicFetchJson<T>(path: string, inviteToken: string): Promise<T> {
   beginBackgroundLoading();
   try {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      credentials: "omit",
-      signal: controller.signal,
-    });
-    window.clearTimeout(timeout);
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(
-        "This invite is not available. Check that the link is correct and still active.",
-      );
+    try {
+      const res = await fetch(`${getApiBaseUrl()}${path}`, {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${inviteToken}` },
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("This invite is not available. Check that the link is correct and still active.");
+      }
+      if (res.status === 503) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || "Service unavailable. Please retry or contact support.");
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+      }
+      return (await res.json()) as T;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        text || "Service unavailable. Please retry or contact support.",
-      );
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-    }
-    return (await res.json()) as T;
   } finally {
     endBackgroundLoading();
   }
@@ -589,41 +590,42 @@ async function publicSendJson<T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",
   body: unknown,
+  inviteToken: string,
 ): Promise<T> {
   beginLoading();
   try {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body ?? {}),
-      credentials: "omit",
-      signal: controller.signal,
-    });
-    window.clearTimeout(timeout);
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(
-        "This invite is not available. Check that the link is correct and still active.",
-      );
+    try {
+      const res = await fetch(`${getApiBaseUrl()}${path}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${inviteToken}`,
+        },
+        body: JSON.stringify(body ?? {}),
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("This invite is not available. Check that the link is correct and still active.");
+      }
+      if (res.status === 503) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || "Service unavailable. Please retry or contact support.");
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+      }
+      if (res.status === 204) return undefined as T;
+      return (await res.json()) as T;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        text || "Service unavailable. Please retry or contact support.",
-      );
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-    }
-    if (res.status === 204) {
-      return undefined as T;
-    }
-    return (await res.json()) as T;
   } finally {
     endLoading();
   }
@@ -2071,6 +2073,7 @@ export interface CARInviteOut {
   invite_token: string;
   invite_url: string;
   car_form_download_url?: string | null;
+  audit_report_download_url?: string | null;
   next_reminder_at: string | null;
   car_number: string;
   title: string;
@@ -2155,10 +2158,66 @@ export async function qmsRescheduleCarReminder(
   );
 }
 
+export type PublicCarInviteDownload = { blob: Blob; filename: string | null };
+
+function publicDownloadFilename(value: string | null): string | null {
+  if (!value) return null;
+  const encoded = value.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1]?.trim();
+  const quoted = value.match(/filename\s*=\s*"([^"]+)"/i)?.[1];
+  const plain = value.match(/filename\s*=\s*([^;]+)/i)?.[1]?.trim();
+  let candidate = quoted || plain || "";
+  if (encoded) {
+    try {
+      candidate = decodeURIComponent(encoded.replace(/^"|"$/g, ""));
+    } catch {
+      candidate = encoded;
+    }
+  }
+  candidate = candidate.replace(/[\\\/\r\n\0]/g, "_").trim();
+  return candidate ? candidate.slice(0, 255) : null;
+}
+
+async function publicInviteDownload(token: string, path: string): Promise<PublicCarInviteDownload> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+    referrerPolicy: "no-referrer",
+    credentials: "omit",
+    signal: AbortSignal.timeout(300_000),
+  });
+  if ([401, 403, 404, 410].includes(response.status)) {
+    throw new Error("This invitation or evidence file is no longer available.");
+  }
+  if (!response.ok) throw new Error(`CAR download failed (${response.status}).`);
+  return {
+    blob: await response.blob(),
+    filename: publicDownloadFilename(response.headers.get("Content-Disposition")),
+  };
+}
+
+export const qmsDownloadCarInviteAttachment = (token: string, attachmentId: string) =>
+  publicInviteDownload(token, `/quality/cars/invite/current/attachments/${encodeURIComponent(attachmentId)}/download`);
+
+export const qmsDownloadCarInviteAttachmentBlob = async (token: string, attachmentId: string) =>
+  (await qmsDownloadCarInviteAttachment(token, attachmentId)).blob;
+
+export const qmsDownloadCarInviteAuditReport = (token: string) =>
+  publicInviteDownload(token, "/quality/cars/invite/current/audit-report");
+
+export const qmsDownloadCarInviteAuditReportBlob = async (token: string) =>
+  (await qmsDownloadCarInviteAuditReport(token)).blob;
+
+export const qmsDownloadCarInviteForm = (token: string) =>
+  publicInviteDownload(token, "/quality/cars/invite/current/form");
+
+export const qmsDownloadCarInviteFormBlob = async (token: string) =>
+  (await qmsDownloadCarInviteForm(token)).blob;
+
 export async function qmsGetCarInviteByToken(
   token: string,
 ): Promise<CARInviteOut> {
-  return publicFetchJson(`/quality/cars/invite/${encodeURIComponent(token)}`);
+  return publicFetchJson("/quality/cars/invite/current", token);
 }
 
 export async function qmsSubmitCarInvite(
@@ -2178,9 +2237,10 @@ export async function qmsSubmitCarInvite(
   },
 ): Promise<CAROut> {
   return publicSendJson<CAROut>(
-    `/quality/cars/invite/${encodeURIComponent(token)}`,
+    "/quality/cars/invite/current",
     "PATCH",
     payload,
+    token,
   );
 }
 
@@ -2188,9 +2248,10 @@ export async function qmsRecallCarInviteSubmission(
   token: string,
 ): Promise<CARInviteOut> {
   return publicSendJson<CARInviteOut>(
-    `/quality/cars/invite/${encodeURIComponent(token)}/recall`,
+    "/quality/cars/invite/current/recall",
     "POST",
     {},
+    token,
   );
 }
 
@@ -2282,19 +2343,17 @@ export async function qmsListCarInviteActions(
   token: string,
 ): Promise<CARActionOut[]> {
   return publicFetchJson<CARActionOut[]>(
-    `/quality/cars/invite/${encodeURIComponent(token)}/actions`,
+    "/quality/cars/invite/current/actions",
+    token,
   );
-}
-
-export function qmsGetCarInviteFormUrl(token: string): string {
-  return `${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/form`;
 }
 
 export async function qmsListCarInviteAttachments(
   token: string,
 ): Promise<CARAttachmentOut[]> {
   return publicFetchJson<CARAttachmentOut[]>(
-    `/quality/cars/invite/${encodeURIComponent(token)}/attachments`,
+    "/quality/cars/invite/current/attachments",
+    token,
   );
 }
 
@@ -2309,11 +2368,15 @@ export async function qmsUploadCarInviteAttachment(
   if (description?.trim()) formData.append("description", description.trim());
   if (responseSection) formData.append("response_section", responseSection);
   const res = await fetch(
-    `${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/attachments`,
+    `${getApiBaseUrl()}/quality/cars/invite/current/attachments`,
     {
       method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
       body: formData,
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
       credentials: "omit",
+      signal: AbortSignal.timeout(300_000),
     },
   );
 
@@ -2335,9 +2398,10 @@ export async function qmsUpdateCarInviteAttachment(
   payload: { description?: string | null; response_section?: CARAttachmentOut["response_section"] },
 ): Promise<CARAttachmentOut> {
   return publicSendJson<CARAttachmentOut>(
-    `/quality/cars/invite/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
+    `/quality/cars/invite/current/attachments/${encodeURIComponent(attachmentId)}`,
     "PATCH",
     payload,
+    token,
   );
 }
 
@@ -2346,9 +2410,10 @@ export async function qmsDeleteCarInviteAttachment(
   attachmentId: string,
 ): Promise<void> {
   await publicSendJson<void>(
-    `/quality/cars/invite/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
+    `/quality/cars/invite/current/attachments/${encodeURIComponent(attachmentId)}`,
     "DELETE",
     undefined,
+    token,
   );
 }
 

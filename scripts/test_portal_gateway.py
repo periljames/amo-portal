@@ -144,7 +144,7 @@ def test_public_navigation_stays_spa_while_ops_and_json_stay_api(root):
         return httpx.Response(200, stream=Chunks(b"{}"), headers={"content-type": "application/json"})
 
     with TestClient(gateway.create_app(root, transport=httpx.MockTransport(upstream)), base_url="http://localhost") as client:
-        for path in ("/platform/control", "/qms/audit-access/token", "/qms/car-access/signed.token.value", "/verify/signed.token.value"):
+        for path in ("/platform/control", "/car-invite?token=legacy-token", "/qms/audit-access/token", "/qms/car-access", "/qms/car-access/signed.token.value", "/verify/signed.token.value"):
             assert "portal shell" in client.get(path, headers={"Accept": "text/html"}).text
         assert not requests
         client.get("/platform/settings", headers={"Accept": "application/json"})

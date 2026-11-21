@@ -21,7 +21,7 @@ $env:E2E_AMO_CODE = "safarilink"
 $env:E2E_AMO_ADMIN_EMAIL = "<dedicated-test-user>"
 $env:E2E_AMO_ADMIN_PASSWORD = "<secret>"
 $env:E2E_QUALITY_AUDIT_PATH = "/maintenance/safarilink/quality/audits/<test-audit-reference>"
-$env:E2E_CAR_INVITE_URL = "https://james.tail05da5e.ts.net/car-invite?token=<test-token>"
+$env:E2E_CAR_INVITE_URL = "https://james.tail05da5e.ts.net/qms/car-access#token=<test-token>"
 
 npx playwright test tests/e2e/quality-tailnet-live.spec.ts
 ```

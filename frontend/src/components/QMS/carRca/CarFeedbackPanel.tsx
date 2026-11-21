@@ -30,11 +30,11 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
   const olderLoaded=useRef(false);
   const list=useRef<HTMLOListElement>(null), followLatest=useRef(true);
   const refresh=useRef<()=>Promise<void>>(async()=>undefined);
-  const path=token ? `/quality/cars/invite/${encodeURIComponent(token)}/feedback` : qmsPath(amoCode||"",`/cars/${encodeURIComponent(carId)}/feedback`);
+  const path=token ? "/quality/cars/invite/current/feedback" : qmsPath(amoCode||"",`/cars/${encodeURIComponent(carId)}/feedback`);
   async function request<T>(suffix="",body?:unknown):Promise<T> {
     if(!token) return apiRequest<T>(path+suffix,{method:body===undefined?"GET":"POST",body:body===undefined?undefined:JSON.stringify(body),cacheTtlMs:0,persistCache:false,staleWhileOfflineMs:0,headers:{"X-AMO-Silent-Error":"1"}});
-    const response=await fetch(getApiBaseUrl()+path+suffix,{method:body===undefined?"GET":"POST",cache:"no-store",credentials:"omit",
-      headers:{Accept:"application/json",...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+    const response=await fetch(getApiBaseUrl()+path+suffix,{method:body===undefined?"GET":"POST",cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
+      headers:{Accept:"application/json",Authorization:`Bearer ${token}`,...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
     if(!response.ok) {const data=await response.json().catch(()=>null);throw new Error(typeof data?.detail==="string"?data.detail:`Feedback unavailable (${response.status}).`);}
     return response.json() as Promise<T>;
   }
@@ -66,9 +66,10 @@ export default function CarFeedbackPanel({amoCode,carId,token,actorName,canWrite
     refresh.current=load;void load();
     const interval=window.setInterval(()=>void load(),5000);
     const visible=()=>void load();window.addEventListener("focus",visible);document.addEventListener("visibilitychange",visible);
-    const stream=token?new EventSource(getApiBaseUrl()+path+"/events"):null;
-    if(stream){stream.onopen=()=>{if(active)setStreamConnected(true);};stream.onerror=()=>{if(active)setStreamConnected(false);};stream.onmessage=()=>void load();stream.addEventListener("access-ended",()=>{stream.close();setLive(false);setStreamConnected(false);void load();});}
-    return()=>{active=false;window.clearInterval(interval);window.removeEventListener("focus",visible);document.removeEventListener("visibilitychange",visible);stream?.close();};
+    // EventSource cannot set bearer headers. Public feedback continues using
+    // the existing bounded polling loop, without placing tokens in URLs.
+    setStreamConnected(false);
+    return()=>{active=false;window.clearInterval(interval);window.removeEventListener("focus",visible);document.removeEventListener("visibilitychange",visible);};
   },[carId,path,token,queryClient]);
   async function send() {
     if(!text.trim()||busy)return;
