@@ -247,7 +247,7 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   await page.getByLabel("I confirm this response and evidence are accurate for audit closeout.").check();
   await page.getByRole("button", { name: "Preview submission" }).click();
   await expect(page.getByRole("dialog", { name: "Preview CAR submission" })).toBeVisible();
-  const committedSubmission=page.waitForResponse(response=>new URL(response.url()).pathname===`/quality/cars/invite/${data.car_loop_invite_token}`&&response.request().method()==="PATCH",{timeout:60000});
+  const committedSubmission=page.waitForResponse(response=>new URL(response.url()).pathname==="/quality/cars/invite/current"&&response.request().method()==="PATCH",{timeout:60000});
   await page.getByRole("button", { name: "Confirm and submit" }).click();
   expect((await committedSubmission).status()).toBe(200);
   await expect(page.getByRole("dialog",{name:"Preview CAR submission"})).toHaveCount(0,{timeout:30000});

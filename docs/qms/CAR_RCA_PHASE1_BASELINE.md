@@ -17,8 +17,8 @@ This feature is **an additive, backward-compatible enhancement** to existing QMS
 
 | Entry | Resolution verified in source | Status |
 | --- | --- | --- |
-| `/car-invite?token=...` | `frontend/src/portalRoutes.tsx:512` loads `PublicCarInvitePage`; `qmsCore.ts` public client uses `/quality/cars/invite/{token}` | EXISTS |
-| `/qms/car-access/:token` | `frontend/src/App.tsx:37,106-108` intercepts before `AppRouter`; `CanonicalPublicCarAccessPage.tsx` adapts to the **same** invite page | EXISTS |
+| `/qms/car-access#token=...` | `App.tsx` intercepts before authenticated routes; the fragment remains browser-side and the page sends the bearer in `Authorization` | PUBLIC, NO EMPLOYEE LOGIN |
+| Legacy `/car-invite?token=...` and `/qms/car-access/:token` | Accepted for existing invitations and rewritten to the canonical fragment URL | BACKWARD COMPATIBLE |
 | `/maintenance/:amoCode/quality/cars` and register scopes | `portalRoutes.tsx:831-839` → `QmsCanonicalPage.tsx:56-66` → register/control-loop page | EXISTS |
 | `/maintenance/:amoCode/quality/cars/:carId/*` | `portalRoutes.tsx:840` → `QualityCarsPage` / `CarRecordView` | EXISTS |
 | `?control={carId}` | `QmsCanonicalPage.tsx:56-59` delegates to `QmsCarControlLoopPage.tsx` and `QmsCarControlOperations.tsx` | EXISTS |
