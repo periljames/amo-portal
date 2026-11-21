@@ -269,9 +269,9 @@ jobs:
           assert 'qmsDeleteCarAttachment' in service
           assert 'qmsDownloadCarAttachmentBlob' in service
           PY
+      - name: Verify public CAR URL and SPA gateway contracts
+        run: npm exec -- vitest run src/utils/carInviteUrl.test.ts src/services/devProxyRouting.test.ts
       - name: Typecheck and production build
-       - name: Verify public CAR URL and SPA gateway contracts
-         run: npm exec -- vitest run src/utils/carInviteUrl.test.ts src/services/devProxyRouting.test.ts
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
