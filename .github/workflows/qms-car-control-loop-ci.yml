@@ -41,6 +41,8 @@ on:
       - "frontend/src/utils/carInviteUrl.test.ts"
       - "frontend/src/services/devProxyRouting.ts"
       - "frontend/src/services/devProxyRouting.test.ts"
+      - "frontend/src/services/portalFetchErrorBridge.ts"
+      - "frontend/src/services/portalFetchRecovery.test.ts"
       - "frontend/src/app/portalRouteManifest.ts"
       - "frontend/src/app/routeGuards.ts"
       - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"
@@ -236,6 +238,7 @@ jobs:
           src/App.tsx
           src/utils/carInviteUrl.ts
           src/services/devProxyRouting.ts
+          src/services/portalFetchErrorBridge.ts
           src/app/portalRouteManifest.ts
           src/app/routeGuards.ts
           src/pages/qms/routes/qmsWorkspaceRegistry.ts
@@ -279,7 +282,7 @@ jobs:
           assert 'qmsDownloadCarAttachmentBlob' in service
           PY
       - name: Verify public CAR URL and SPA gateway contracts
-        run: npm exec -- vitest run src/utils/carInviteUrl.test.ts src/services/devProxyRouting.test.ts
+        run: npm exec -- vitest run src/utils/carInviteUrl.test.ts src/services/devProxyRouting.test.ts src/services/portalFetchRecovery.test.ts
       - name: Typecheck and production build
         run: npm run build
       - name: Install Chromium
