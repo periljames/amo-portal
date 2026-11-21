@@ -11,8 +11,6 @@ import {
   FileText,
   Image as ImageIcon,
   Link2,
-  List,
-  ListOrdered,
   Paperclip,
   QrCode as QrCodeIcon,
   RotateCcw,
