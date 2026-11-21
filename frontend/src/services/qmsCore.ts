@@ -2166,11 +2166,18 @@ export type PublicCarInviteDownload = { blob: Blob; filename: string | null };
 
 function publicDownloadFilename(value: string | null): string | null {
   if (!value) return null;
-  const encoded = value.match(/filename\\*\\s*=\\s*UTF-8''([^;]+)/i)?.[1]?.trim();
-  const quoted = value.match(/filename\\s*=\\s*"([^"]+)"/i)?.[1];
-  const plain = value.match(/filename\\s*=\\s*([^;]+)/i)?.[1]?.trim();
-  let candidate = encoded ? decodeURIComponent(encoded.replace(/^"|"$/g, "")) : quoted || plain || "";
-  candidate = candidate.replace(/[\\\\/\\r\\n\\0]/g, "_").trim();
+  const encoded = value.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1]?.trim();
+  const quoted = value.match(/filename\s*=\s*"([^"]+)"/i)?.[1];
+  const plain = value.match(/filename\s*=\s*([^;]+)/i)?.[1]?.trim();
+  let candidate = quoted || plain || "";
+  if (encoded) {
+    try {
+      candidate = decodeURIComponent(encoded.replace(/^"|"$/g, ""));
+    } catch {
+      candidate = encoded;
+    }
+  }
+  candidate = candidate.replace(/[\\\/\r\n\0]/g, "_").trim();
   return candidate ? candidate.slice(0, 255) : null;
 }
 
