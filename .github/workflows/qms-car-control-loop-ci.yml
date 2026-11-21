@@ -228,6 +228,14 @@ jobs:
           src/pages/qms/QmsCarControlOperations.tsx
           src/pages/qms/QmsCarPerformanceReportPage.tsx
           src/pages/PublicCarInvitePage.tsx
+          src/pages/CanonicalPublicCarAccessPage.tsx
+          src/services/qmsCore.ts
+          src/services/qmsCarRca.ts
+          src/components/QMS/carRca/CarFeedbackPanel.tsx
+          src/App.tsx
+          src/utils/carInviteUrl.ts
+          src/services/devProxyRouting.ts
+          src/app/portalRouteManifest.ts
           src/app/routeGuards.ts
           src/pages/qms/routes/qmsWorkspaceRegistry.ts
           src/pages/qms/routes/qmsRouteRegistry.ts
@@ -235,8 +243,8 @@ jobs:
           src/components/panels/ActionPanel.tsx
           tests/e2e/qms-car-control-loop.spec.ts
           tests/e2e/qms-car-performance-report.spec.ts
-           tests/e2e/public-car-response.spec.ts
-           tests/e2e/qms-car-draft-coordination.spec.ts
+          tests/e2e/public-car-response.spec.ts
+          tests/e2e/qms-car-draft-coordination.spec.ts
       - name: Verify public CAR response length contract
         run: |
           python - <<'PY'
