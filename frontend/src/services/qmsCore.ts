@@ -2319,10 +2319,6 @@ export async function qmsListCarInviteActions(
   );
 }
 
-export function qmsGetCarInviteFormUrl(token: string): string {
-  return `${getApiBaseUrl()}/quality/cars/invite/current/form`;
-}
-
 export async function qmsListCarInviteAttachments(
   token: string,
 ): Promise<CARAttachmentOut[]> {
