@@ -122,7 +122,7 @@ function isPublicCarInviteApiUrl(url: string): boolean {
     const apiBase = new URL(getApiBaseUrl() || "/", window.location.origin);
     if (requestUrl.origin !== apiBase.origin) return false;
     const basePath = apiBase.pathname.replace(/\/+$/, "");
-    const path = basePath && requestUrl.pathname.startsWith(\`\${basePath}/\`)
+    const path = basePath && requestUrl.pathname.startsWith(basePath + "/")
       ? requestUrl.pathname.slice(basePath.length)
       : requestUrl.pathname;
     return /^\/quality\/cars\/invite\/[^/]+(?:\/|$)/i.test(path);
