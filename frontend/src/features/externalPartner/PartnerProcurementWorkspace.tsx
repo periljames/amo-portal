@@ -70,25 +70,29 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
     setReference(previous?.external_reference||"");setQuoteRevision(previous?previous.revision_no+1:1);
     setValidUntil(rfq.value.response_due_at?.slice(0,10)||today());
   },[rfq.value]);
-  useEffect(()=>{if(!po.value)return;
+  useEffect(()=>{
+    const controller=new AbortController();
+    setDocuments([]);setInvoiceMatches([]);setInvoiceCandidates([]);
+    if(!po.value)return;
     setShipLines(po.value.lines.map(l=>({po_line_id:l.id,part_number:l.part_number||"",
       quantity:Math.max(0,l.quantity-(l.received_quantity||0)),serial_lot_batch:"",
       manufacturer:"",source:"",traceability_reference:"",release_certificate_reference:"",
       shelf_life_expires_on:"",material_case:""})));
     if(capabilities.includes("document.read")){
       void partnerRequest<{items:{id:string;filename:string;status:string;related_kind:string;
-        related_id:string|null;evidence_type:string}[]}>(tenant,"documents/submissions?limit=50&offset=0")
-        .then(q=>setInvoiceCandidates(q.items.filter(item=>item.related_kind==="PO" &&
+        related_id:string|null;evidence_type:string}[]}>(tenant,"documents/submissions?limit=50&offset=0",{signal:controller.signal})
+        .then(q=>{if(controller.signal.aborted)return;setInvoiceCandidates(q.items.filter(item=>item.related_kind==="PO" &&
           item.related_id===String(po.value!.id) &&
           ["SUPPLIER_INVOICE","PROFORMA_INVOICE","CREDIT_NOTE"].includes(item.evidence_type) &&
-          item.status==="ACCEPTED")))
-        .catch(()=>setInvoiceCandidates([]));
+          item.status==="ACCEPTED"));})
+        .catch(()=>{if(!controller.signal.aborted)setInvoiceCandidates([]);});
     }
     void partnerRequest<{items:{id:number;invoice_number:string;status:string;matched_at:string}[]}>(tenant,
-      "commerce/purchase-orders/"+po.value.id+"/invoice-status")
-      .then(q=>setInvoiceMatches(q.items)).catch(()=>setInvoiceMatches([]));
+      "commerce/purchase-orders/"+po.value.id+"/invoice-status",{signal:controller.signal})
+      .then(q=>{if(!controller.signal.aborted)setInvoiceMatches(q.items);}).catch(()=>{if(!controller.signal.aborted)setInvoiceMatches([]);});
     void partnerRequest<{items:{id:number;title:string;revision:string|null}[]}>(tenant,
-      "commerce/purchase-orders/"+po.value.id+"/documents").then(r=>setDocuments(r.items)).catch(()=>setDocuments([]));
+      "commerce/purchase-orders/"+po.value.id+"/documents",{signal:controller.signal}).then(r=>{if(!controller.signal.aborted)setDocuments(r.items);}).catch(()=>{if(!controller.signal.aborted)setDocuments([]);});
+    return()=>controller.abort();
   },[po.value,tenant]);
   async function execute(call:()=>Promise<unknown>,ok:string){
     setBusy(true);setError("");setNotice("");
@@ -138,29 +142,30 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
     setShipLines(a=>a.map(v=>v.po_line_id===id?{...v,[field]:value}:v));
   }
   return <div className="partner-stack">
+    <ActionNotice value={error} error/><ActionNotice value={notice}/>
     <div className="partner-buttons">
-      <button type="button" aria-pressed={tab==="rfq"} onClick={()=>setTab("rfq")}>RFQs and quotations</button>
-      <button type="button" aria-pressed={tab==="po"} onClick={()=>setTab("po")}>POs and deliveries</button>
-      <button type="button" onClick={()=>setRevision(v=>v+1)}>Refresh</button>
+      <button type="button" disabled={busy} aria-pressed={tab==="rfq"} onClick={()=>setTab("rfq")}>RFQs and quotations</button>
+      <button type="button" disabled={busy} aria-pressed={tab==="po"} onClick={()=>setTab("po")}>POs and deliveries</button>
+      <button type="button" disabled={busy} onClick={()=>setRevision(v=>v+1)}>Refresh</button>
     </div>
     {tab==="rfq"&&<Section title="Assigned RFQ invitations" description="Only RFQs issued to your supplier. Competitors and internal approvals are never shown.">
       <State pending={listing.pending} error={listing.error} retry={listing.reload}/>
       {!listing.pending&&!listing.value?.items.length&&<p className="partner-empty">No RFQ invitations.</p>}
       {listing.value?.items.map(r=><div className="partner-row" key={r.id}><div><strong>{r.rfq_number} · {r.title}</strong>
         <small>Respond by {friendlyDate(r.response_due_at)}</small></div><div><Status value={r.status}/>
-        <button type="button" onClick={()=>setRfqId(r.id)}>Open</button></div></div>)}
+        <button type="button" disabled={busy} onClick={()=>{setRfqId(r.id);setMessage("");setError("");setNotice("");setTax(0);setFreight(0);setCurrency("USD");}}>Open</button></div></div>)}
     </Section>}
     {tab==="rfq"&&rfqId!==null&&<Section title="RFQ response & revisions" description="Alternates and deviations require technical review; a quote does not authorize award.">
       <State pending={rfq.pending} error={rfq.error} retry={rfq.reload}/>
       {rfq.value&&<>
         <strong>{rfq.value.rfq_number}</strong><p>{rfq.value.terms}</p><p>{rfq.value.quality_clauses}</p>
-        <table><thead><tr><th>Invited line</th><th>Quantity</th><th>Controlled specification</th></tr></thead><tbody>
+        <div className="partner-table-wrap" role="region" aria-label="Commercial line items" tabIndex={0}><table><thead><tr><th>Invited line</th><th>Quantity</th><th>Controlled specification</th></tr></thead><tbody>
           {rfq.value.lines.map(l=><tr key={l.id}><td>{l.line_number} · {l.part_number||"Service"} · {l.description}</td>
             <td>{l.quantity} {l.uom}</td><td>{l.technical_specification||"—"}
               {l.controlled_document_id&&<button type="button" onClick={()=>void controlledFile(tenant,
                 "commerce/rfqs/"+rfqId+"/specifications/"+l.id,
                 rfq.value!.rfq_number+"-line-"+l.line_number).catch(e=>setError(errmsg(e)))}>Download released specification</button>}
-            </td></tr>)}</tbody></table>
+            </td></tr>)}</tbody></table></div>
         {canRespond&&<button type="button" disabled={busy} onClick={()=>void execute(
           ()=>partnerRequest(tenant,"commerce/rfqs/"+rfqId+"/acknowledge",{
             method:"POST",csrf,body:{reference:null,note:message,idempotency_key:retryKey()}}),
@@ -213,15 +218,15 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
       {!purchases.pending&&!purchases.value?.items.length&&<p className="partner-empty">No issued purchase orders.</p>}
       {purchases.value?.items.map(p=><div key={p.id} className="partner-row"><div><strong>{p.po_number}</strong>
         <small>{friendlyDate(p.promised_delivery_date)}</small></div><div><Status value={p.status}/>
-          <button type="button" onClick={()=>setPoId(p.id)}>Open PO</button></div></div>)}
+          <button type="button" disabled={busy} onClick={()=>{setPoId(p.id);setMessage("");setError("");setNotice("");setPoAck("");setShipmentRef("");setAirwayBill("");setPackingList("");setInvoiceRef("");setInvoiceOriginal("");setInvoiceTotal(0);}}>Open PO</button></div></div>)}
     </Section>}
     {tab==="po"&&poId!==null&&<Section title="PO acceptance, shipment and receiving" description="Stores and Quality control physical acceptance, quarantine, inspection and release.">
       <State pending={po.pending} error={po.error} retry={po.reload}/>
       {po.value&&<>
         <strong>{po.value.po_number} · {po.value.currency}</strong>
-        <table><thead><tr><th>Part / material</th><th>Ordered</th><th>Internally received</th></tr></thead><tbody>
+        <div className="partner-table-wrap" role="region" aria-label="Commercial line items" tabIndex={0}><table><thead><tr><th>Part / material</th><th>Ordered</th><th>Internally received</th></tr></thead><tbody>
           {po.value.lines.map(l=><tr key={l.id}><td>{l.part_number||"Service"} · {l.description}</td>
-            <td>{l.quantity} {l.uom}</td><td>{l.received_quantity||0} {l.uom}</td></tr>)}</tbody></table>
+            <td>{l.quantity} {l.uom}</td><td>{l.received_quantity||0} {l.uom}</td></tr>)}</tbody></table></div>
         {documents.map(d=><button key={d.id} type="button" onClick={()=>void controlledFile(tenant,
           "commerce/purchase-orders/"+poId+"/documents/"+d.id+"/download",
           po.value!.po_number+"-"+d.title).catch(e=>setError(errmsg(e)))}>Download {d.title} {d.revision||""}</button>)}
@@ -302,6 +307,5 @@ export default function PartnerProcurementWorkspace({tenant,csrf,capabilities}:P
         <Link to={"/partner/"+encodeURIComponent(tenant)+"/documents"}>Upload invoice, packing list and conformity documents</Link>
       </>}
     </Section>}
-    <ActionNotice value={error} error/><ActionNotice value={notice}/>
   </div>;
 }

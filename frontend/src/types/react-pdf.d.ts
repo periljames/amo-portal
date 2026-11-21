@@ -5,6 +5,7 @@ declare module "react-pdf" {
 
   export interface DocumentProps {
     file: string | Blob | Uint8Array | { url: string; httpHeaders?: Record<string, string>; withCredentials?: boolean } | null;
+    options?: { isEvalSupported?: boolean };
     className?: string;
     loading?: React.ReactNode;
     error?: React.ReactNode;

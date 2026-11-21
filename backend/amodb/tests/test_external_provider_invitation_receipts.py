@@ -30,9 +30,9 @@ def test_external_mail_uses_dedicated_template_and_safe_grant_correlation(monkey
     def send(**kwargs):
         calls.append(kwargs)
         return SimpleNamespace(
-            id="email-log-1", status=mail_models.EmailStatus.SENT,
+            id="email-log-1", recipient="representative@example.test", status=mail_models.EmailStatus.SENT,
             delivery_status="ACCEPTED", provider_message_id="email-resend-1",
-            context_json={"_delivery": {"mode": "SANDBOX"}},
+            context_json={"_delivery": {"mode": "SANDBOX", "effective_recipient": "test@example.test"}},
         )
     monkeypatch.setattr(external.notifications, "send_email", send)
     receipt = external._send(
@@ -44,7 +44,8 @@ def test_external_mail_uses_dedicated_template_and_safe_grant_correlation(monkey
     assert sent["email_class"] == "ESSENTIAL"
     assert sent["amo_id"] == "tenant-a"
     assert sent["recipient"] == "representative@example.test"
-    assert sent["context"]["action_url"] == "https://portal.example.test/vendor/login?amo=safarilink"
+    assert sent["context"]["action_url"] == "https://portal.example.test/vendor/" + {"invitation":"invite","reverification":"verify","password recovery":"reset"}[kind] + "?amo=safarilink"
+    assert "10 minutes" in sent["context"]["message"]
     assert "one-time-secret" in sent["context"]["message"]
     assert "one-time-secret" not in str(sent["audit_context"])
     assert "one-time-secret" not in sent["correlation_id"]
@@ -54,6 +55,7 @@ def test_external_mail_uses_dedicated_template_and_safe_grant_correlation(monkey
         "email_status": "SENT", "email_delivery_status": "ACCEPTED",
         "email_log_id": "email-log-1", "provider_message_id": "email-resend-1",
         "sending_mode": "SANDBOX", "provider_accepted": True,
+        "recipient": "representative@example.test", "effective_recipient": "test@example.test",
     }
 
 

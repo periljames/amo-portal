@@ -64,8 +64,12 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
   });
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
-  useEffect(() => { onCaptureStateChange?.({ busy, hasDraft: Boolean(file) }); }, [busy, file, onCaptureStateChange]);
-  useEffect(() => () => { onCaptureStateChange?.({ busy: false, hasDraft: false }); }, [onCaptureStateChange]);
+  const captureListener = useRef(onCaptureStateChange);
+  // A new parent callback is not a discarded evidence draft. In particular,
+  // changing questions must not alternate cleanup/reset and capture updates.
+  useEffect(() => { captureListener.current = onCaptureStateChange; }, [onCaptureStateChange]);
+  useEffect(() => { captureListener.current?.({ busy, hasDraft: Boolean(file) }); }, [busy, file]);
+  useEffect(() => () => { captureListener.current?.({ busy: false, hasDraft: false }); }, []);
 
   useEffect(() => {
     if (fileInput.current) fileInput.current.value = "";

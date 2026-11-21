@@ -1,3 +1,4 @@
+import { Link, useSearchParams } from "react-router-dom";
 import React,{useEffect,useRef,useState} from "react";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import PublicationDocxLayoutViewer from "../../pages/manuals/PublicationDocxLayoutViewer";
@@ -23,6 +24,9 @@ function saveBlob(blob:Blob,filename:string){
   window.setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps){
+  const [params]=useSearchParams();
+  const requestedWork=params.get("work")||"";
+  const appliedWork=useRef("");
   const [refresh,setRefresh]=useState(0);const [offset,setOffset]=useState(0);
   const [requirementId,setRequirementId]=useState("");
   const [file,setFile]=useState<File|null>(null);
@@ -60,6 +64,12 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     Promise.resolve({items:[] as {id:string;work_number:string;work_title:string}[]}),tenant+":maintenanceDocs:"+refresh);
   useEffect(()=>()=>{xhrRef.current?.abort();resumableAbort.current?.abort();
     if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);
+  useEffect(()=>{
+    if(requestedWork && appliedWork.current!==requestedWork && maintenance.value?.items.some(item=>item.id===requestedWork)){
+      setRelated("CONTRACTED_WORK");setRelatedId(requestedWork);setSupersedes("");
+      appliedWork.current=requestedWork;
+    }
+  },[requestedWork,maintenance.value]);
   const current=requirements.value?.items.find(r=>r.id===requirementId);
   const prior=(submissions.value?.items||[]).filter(s=>s.requirement_id===requirementId &&
      s.related_kind===related && (s.related_id||"")===(relatedId||""));
@@ -238,6 +248,7 @@ export default function PartnerDocuments({tenant,csrf,capabilities}:PartnerProps
     </Section>
     {capabilities.includes("document.submit")&&<Section title="Submit a controlled response"
       description="PDF, DOCX, JPEG, PNG or UTF-8 text (up to 512 MiB). Large originals transfer in recoverable 8 MiB chunks. Quality review remains separate.">
+      {requestedWork && related==="CONTRACTED_WORK" && relatedId===requestedWork && <p className="partner-context-note">Uploading evidence for <strong>{maintenance.value?.items.find(item=>item.id===requestedWork)?.work_number}</strong>. <Link to={`/partner/${encodeURIComponent(tenant)}/work?work=${encodeURIComponent(requestedWork)}`}>Return to work order</Link></p>}
       <form className="partner-form" onSubmit={upload}>
         <label>Requirement
           <select required value={requirementId} onChange={e=>{setRequirementId(e.target.value);setSupersedes("");resetRetry();}}>

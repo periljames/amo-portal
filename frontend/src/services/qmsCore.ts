@@ -2208,6 +2208,7 @@ export interface CARAttachmentOut {
   id: string;
   car_id: string;
   filename: string;
+  response_section?: "CONTAINMENT" | "ROOT_CAUSE" | "CORRECTIVE" | "PREVENTIVE" | null;
   description?: string | null;
   content_type: string | null;
   size_bytes: number | null;
@@ -2301,10 +2302,12 @@ export async function qmsUploadCarInviteAttachment(
   token: string,
   file: File,
   description?: string,
+  responseSection?: CARAttachmentOut["response_section"],
 ): Promise<CARAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
   if (description?.trim()) formData.append("description", description.trim());
+  if (responseSection) formData.append("response_section", responseSection);
   const res = await fetch(
     `${getApiBaseUrl()}/quality/cars/invite/${encodeURIComponent(token)}/attachments`,
     {
@@ -2329,7 +2332,7 @@ export async function qmsUploadCarInviteAttachment(
 export async function qmsUpdateCarInviteAttachment(
   token: string,
   attachmentId: string,
-  payload: { description?: string | null },
+  payload: { description?: string | null; response_section?: CARAttachmentOut["response_section"] },
 ): Promise<CARAttachmentOut> {
   return publicSendJson<CARAttachmentOut>(
     `/quality/cars/invite/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
@@ -2380,9 +2383,13 @@ export async function qmsListCarAttachmentsBulk(params?: {
 export async function qmsUploadCarAttachment(
   carId: string,
   file: File,
+  description?: string,
+  responseSection?: CARAttachmentOut["response_section"],
 ): Promise<CARAttachmentOut> {
   const formData = new FormData();
   formData.append("file", file);
+  if (description?.trim()) formData.append("description", description.trim());
+  if (responseSection) formData.append("response_section", responseSection);
   const authToken = getToken();
   const res = await fetch(
     `${getApiBaseUrl()}/quality/cars/${encodeURIComponent(carId)}/attachments`,

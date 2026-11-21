@@ -18,3 +18,10 @@ it("restores a newer committed response over an older offline package without re
   expect(restoreChecklistReceipts([row(2, "NO")], { q: row(1) })[0].response_value).toBe("NO");
   expect(restoreChecklistReceipts([row(0, "", "other")], { q: row(1) })[0].response_value).toBe("");
 });
+it("keeps unchanged checklist rows stable through refreshes and single-row receipts", () => {
+  const previous = { ...pack(row(1)), items: [row(1), { ...row(1), checklist_item_id: "other" }] };
+  expect(reconcileChecklistExecution(previous, JSON.parse(JSON.stringify(previous)))).toBe(previous);
+  const updated = acceptChecklistReceipt(previous, row(2, "NO"))!;
+  expect(updated.items[0]).not.toBe(previous.items[0]);
+  expect(updated.items[1]).toBe(previous.items[1]);
+});

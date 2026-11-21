@@ -63,7 +63,7 @@ export default function ExternalPartnerPage(){
       });
       if(!response.ok)throw new Error("Unable to revoke your vendor session. Use account security to retry.");
       setSession(null);
-      navigate("/vendor/login",{replace:true});
+      navigate(`/vendor/login?amo=${encodeURIComponent(tenant)}`,{replace:true});
     }catch(reason){setError(reason instanceof Error?reason.message:"Unable to sign out");}
   };
   if(loading)return <main className="partner-shell partner-loading" role="status">Checking authorized partner session…</main>;
@@ -75,13 +75,14 @@ export default function ExternalPartnerPage(){
   const current=authorized.find(s=>s.id===section);
   const props:PartnerProps={tenant,csrf,capabilities:session.capabilities,reloadSummary:()=>setRevision(v=>v+1)};
   return <div className="partner-shell">
+    <a className="partner-skip-link" href="#partner-main">Skip to workspace</a>
     <header className="partner-topbar">
       <div><span className="partner-brand">AMO PORTAL <strong>PARTNER</strong></span>
         <span className="partner-organization">{session.organization?.legal_name||"External organization"}</span>
       </div>
       <div className="partner-topbar-actions">
         <span className="partner-tenant">{tenant.toUpperCase()}</span>
-        <Link to="/vendor/account">Account security</Link>
+        <Link to={`/vendor/account?amo=${encodeURIComponent(tenant)}`}>Account security</Link>
         <button type="button" onClick={()=>void signOut()}>Sign out / change account</button>
       </div>
     </header>
@@ -98,7 +99,7 @@ export default function ExternalPartnerPage(){
         </nav>
         <div className="partner-sidebar__foot">Access is limited to assigned providers, approved scopes and current membership grants.</div>
       </aside>
-      <main className="partner-main">
+      <main className="partner-main" id="partner-main" tabIndex={-1}>
         <header className="partner-page-title">
           <div><small>EXTERNAL PARTNER PORTAL / {tenant.toUpperCase()}</small>
             <h1>{current?.name||"Access not granted"}</h1>

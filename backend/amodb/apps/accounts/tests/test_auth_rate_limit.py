@@ -77,3 +77,25 @@ def test_shared_limiter_outage_does_not_fall_back_to_local_counters(monkeypatch)
         limiter.enforce("one", "login")
     assert error.value.status_code == 503
     assert not limiter.STATE
+
+def test_short_code_budget_lasts_for_the_whole_code_lifetime(monkeypatch):
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: 100.0)
+    for _ in range(5):
+        limiter.enforce("account", "short-code", 5, window_seconds=600)
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: 161.0)
+    with pytest.raises(HTTPException) as error:
+        limiter.enforce("account", "short-code", 5, window_seconds=600)
+    assert error.value.status_code == 429
+    assert int(error.value.headers["Retry-After"]) == 539
+
+
+def test_mixed_lifetimes_expire_even_behind_a_long_code_budget(monkeypatch):
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(limiter, "MAX_KEYS", 2)
+    limiter.enforce("long", "code", 1, window_seconds=600)
+    limiter.enforce("short", "login", 1, window_seconds=60)
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: 161.0)
+    limiter.enforce("short", "login", 1, window_seconds=60)
+    monkeypatch.setattr(limiter.time, "monotonic", lambda: 222.0)
+    limiter.enforce("new", "login", 1, window_seconds=60)
+    assert len(limiter.STATE) == 2

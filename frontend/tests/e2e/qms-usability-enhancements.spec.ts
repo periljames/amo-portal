@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { mockQualityShell } from "./helpers/mockQualityShell";
+
 type StoredScale = "standard" | "large" | "extra-large";
 type TestState = {
   scale: StoredScale;
@@ -48,6 +50,7 @@ function carRecord(id = "car-1", program: "QUALITY" | "RELIABILITY" = "QUALITY")
 }
 
 async function prepare(page: Page, state: TestState): Promise<void> {
+  await mockQualityShell(page);
   const token = futureToken();
   await page.addInitScript(({ storedToken }) => {
     localStorage.setItem("amo_portal_token", storedToken);
@@ -349,6 +352,7 @@ test("CAR register stays bounded and preserves governed assignee and creation co
   expect(state.carRegisterUrls.at(-1)).toContain("limit=25");
   expect(state.carRegisterUrls.at(-1)).not.toContain("limit=1000");
 
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
   const ownerFilter = page
     .locator(".audit-workspace__toolbar-row label")
     .filter({ hasText: "Responsible" })

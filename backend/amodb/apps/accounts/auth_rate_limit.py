@@ -41,22 +41,30 @@ def _redis_client():
     )
 
 
-def enforce(subject: str, endpoint: str, limit: int = MAX_ATTEMPTS) -> None:
+def enforce(subject: str, endpoint: str, limit: int = MAX_ATTEMPTS, *, window_seconds: int = WINDOW_SECONDS) -> None:
     # Neither identifiers nor refresh credentials belong in Redis key names.
     digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()
     key = f"amo:auth-limit:v1:{endpoint}:{digest}"
     try:
         client = _redis_client()
         if client is not None:
-            count, ttl_ms = client.eval(SCRIPT, 1, key, WINDOW_SECONDS * 1000)
+            count, ttl_ms = client.eval(SCRIPT, 1, key, window_seconds * 1000)
             retry_after = max(1, math.ceil(int(ttl_ms) / 1000))
         else:
             now = time.monotonic()
             with LOCK:
-                # Entries are ordered by creation/expiry, not last access.
+                # Remove expired head entries quickly; mixed lifetimes are also
+                # checked on lookup and before reporting capacity exhaustion.
                 while STATE and next(iter(STATE.values()))[0] <= now:
                     STATE.popitem(last=False)
-                expires, count = STATE.get(key, (now + WINDOW_SECONDS, 0))
+                expires, count = STATE.get(key, (now + window_seconds, 0))
+                if expires <= now:
+                    STATE.pop(key, None)
+                    expires, count = now + window_seconds, 0
+                if key not in STATE and len(STATE) >= MAX_KEYS:
+                    expired = [entry for entry, (deadline, _) in STATE.items() if deadline <= now]
+                    for entry in expired:
+                        STATE.pop(entry, None)
                 if key not in STATE and len(STATE) >= MAX_KEYS:
                     raise RuntimeError("Authentication limiter capacity exhausted")
                 count = min(count + 1, limit + 1)

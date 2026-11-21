@@ -41,7 +41,9 @@ class Login(BaseModel):
     totp_code: str | None = Field(default=None,pattern=r"^\d{6}$")
 
 class AccountAction(BaseModel):
-    code: str = Field(min_length=20,max_length=256)
+    code: str = Field(min_length=6,max_length=256)
+    amo_slug: str | None = Field(default=None,max_length=64)
+    email: EmailStr | None = None
     password: str | None = Field(default=None,min_length=8,max_length=128)
     display_name: str | None = Field(default=None,max_length=255)
 
@@ -50,7 +52,9 @@ class RecoveryRequest(BaseModel):
     email: EmailStr
 
 class PasswordReset(BaseModel):
-    code: str = Field(min_length=20,max_length=256)
+    code: str = Field(min_length=6,max_length=256)
+    amo_slug: str | None = Field(default=None,max_length=64)
+    email: EmailStr | None = None
     password: str = Field(min_length=8,max_length=128)
 
 class PasswordChange(BaseModel):
@@ -147,7 +151,7 @@ def _merge_manager_scopes(proposed, existing):
             merged[key]=existing[key]
     return merged
 
-def _vendor_action_url(db, amo: str) -> str | None:
+def _vendor_action_url(db, amo: str, kind: str | None = None) -> str | None:
     """Public HTTPS sign-in only; never put a one-time credential in the URL."""
     base = os.getenv("PORTAL_FRONTEND_BASE_URL", "").strip().rstrip("/")
     parsed = urlsplit(base)
@@ -157,7 +161,8 @@ def _vendor_action_url(db, amo: str) -> str | None:
     slug = str(getattr(tenant, "login_slug", None) or getattr(tenant, "amo_code", None) or "").strip()
     if not slug:
         return None
-    return base + "/vendor/login?amo=" + quote(slug, safe="")
+    page={"invitation":"invite","reverification":"verify","password recovery":"reset"}.get(kind,"login")
+    return base + f"/vendor/{page}?amo=" + quote(slug, safe="")
 
 
 def _email_receipt(log) -> dict:
@@ -171,6 +176,8 @@ def _email_receipt(log) -> dict:
         "email_log_id": str(log.id) if getattr(log, "id", None) else None,
         "provider_message_id": getattr(log, "provider_message_id", None),
         "sending_mode": internal_delivery.get("mode"),
+        "recipient": getattr(log, "recipient", None),
+        "effective_recipient": internal_delivery.get("effective_recipient"),
         "provider_accepted": status == "SENT" and state in {"ACCEPTED", "DELIVERED"},
     }
 
@@ -184,10 +191,7 @@ def _send(db, amo, email, code, kind, *, grant_id: str | None = None):
         "reverification": "external-provider-reverification",
         "password recovery": "external-provider-password-recovery",
     }
-    msg = (
-        f"AMO Portal external provider {kind} code: {code}. "
-        "Enter this code in the vendor portal. It expires and may be used only once."
-    )
+    msg = f"Your one-time code is {code}. It expires in {core.EMAIL_CODE_MINUTES} minutes. Use it only once."
     correlation = (
         f"extmail:{grant_id}:{'I' if kind == 'invitation' else 'R'}:{secrets.token_hex(4)}"
         if grant_id else f"extmail:{core.new_id()}"
@@ -195,8 +199,8 @@ def _send(db, amo, email, code, kind, *, grant_id: str | None = None):
     outcome = notifications.send_email(
         template_key=templates.get(kind, "external-provider-account"),
         recipient=email,
-        subject=f"AMO Portal external provider {kind}",
-        context={"message": msg, "action_url": _vendor_action_url(db, amo)},
+        subject="Your Venspera access code",
+        context={"message": msg, "code": code, "expires_minutes": core.EMAIL_CODE_MINUTES, "event": kind, "action_url": _vendor_action_url(db, amo, kind)},
         audit_context={"purpose": "external-provider-account", "event": kind, "grant_id": grant_id},
         correlation_id=correlation,
         critical=False, email_class="ESSENTIAL",
@@ -278,7 +282,7 @@ def _invite(db,*,amo,supplier_id,inviter,req,organization_id=None,provider_id=No
         VALUES(:id,:amo,:provider,:member,:identity,:role,CAST(:caps AS JSON),CAST(:scope AS JSON),'PENDING')""",
         db,id=grant,amo=amo,provider=tenant_provider_id,member=member_id,identity=identity_id,
         role=req.role_code,caps=json.dumps(caps),scope=json.dumps(scopes))
-    raw=core.token(db,tenant_id=amo,grant_id=grant,identity_id=identity_id,kind="INVITE",hours=48)
+    raw=core.token(db,tenant_id=amo,grant_id=grant,identity_id=identity_id,kind="INVITE",minutes=core.EMAIL_CODE_MINUTES)
     core.event(db,amo=amo,identity=identity_id,grant=grant,action="INVITED",
                actor_user=inviter if internal else None,actor_identity=None if internal else inviter)
     db.commit()
@@ -294,10 +298,51 @@ def quality_invite(amo_code:str,payload:QualityInvite, db:Session=Depends(get_db
     return _invite(db,amo=amo,supplier_id=payload.supplier_id,inviter=str(user.id),
                    req=payload,organization_id=payload.organization_id)
 
+def _redeem_code(db, payload, request, kind):
+    if payload.code.strip().isdigit() and len(payload.code.strip())==6:
+        tenant_id=core.tenant(db,payload.amo_slug or "")
+        subject=f"{tenant_id}:{str(payload.email or '').lower()}"
+        # A stable account bucket prevents guessing by changing the submitted code.
+        core.auth_limit(request,subject,"email-code")
+        core.auth_rate_limit.enforce(subject.casefold(),"external-short-code",limit=5,window_seconds=core.EMAIL_CODE_MINUTES*60)
+        return core.redeem_token(db,payload.code,kind,amo_slug=payload.amo_slug,email=str(payload.email) if payload.email else None)
+    core.auth_limit(request,core.digest(payload.code),"legacy-email-code")
+    return core.redeem_token(db,payload.code,kind)
+
+
+@router.post("/invitations/request-code",status_code=202)
+def request_invitation_code(payload:RecoveryRequest,request:Request,db:Session=Depends(get_db)):
+    email=str(payload.email).lower()
+    core.auth_limit(request,email,"invitation-code-request")
+    core.auth_rate_limit.enforce(email,"external-invitation-resend",limit=3,window_seconds=600)
+    response={"message":"If a pending invitation matches, a new code will be emailed. It expires in 10 minutes."}
+    try:
+        amo=core.tenant(db,payload.amo_slug)
+    except HTTPException as failure:
+        if failure.status_code==404:return response
+        raise
+    core.context(db,amo)
+    grant=core.one("""SELECT g.id,g.identity_id,i.email FROM external_tenant_grants g
+        JOIN external_identities i ON i.id=g.identity_id
+        WHERE g.amo_id=:amo AND i.email=:email AND g.status='PENDING'
+        AND i.status IN ('INVITED','ACTIVE')
+        AND EXISTS (SELECT 1 FROM external_identity_tokens t WHERE t.grant_id=g.id AND t.kind='INVITE')
+        ORDER BY (SELECT max(t.created_at) FROM external_identity_tokens t WHERE t.grant_id=g.id AND t.kind='INVITE') DESC,g.id LIMIT 1""",db,amo=amo,email=email)
+    if not grant:return response
+    core.one("SELECT id FROM external_identities WHERE id=:id FOR UPDATE",db,id=grant["identity_id"])
+    recent=core.one("""SELECT id FROM external_identity_tokens WHERE amo_id=:amo
+        AND identity_id=:identity AND kind='INVITE' AND created_at>:since LIMIT 1""",db,
+        amo=amo,identity=grant["identity_id"],since=core.now()-timedelta(seconds=60))
+    if recent:return response
+    raw=core.token(db,tenant_id=amo,grant_id=grant["id"],identity_id=grant["identity_id"],kind="INVITE",minutes=core.EMAIL_CODE_MINUTES)
+    core.event(db,amo=amo,identity=grant["identity_id"],grant=grant["id"],action="INVITATION_CODE_REQUESTED")
+    db.commit();_send(db,amo,email,raw,"invitation",grant_id=grant["id"]);db.commit()
+    return response
+
+
 @router.post("/invitations/accept")
 def accept_invitation(payload:AccountAction,request:Request,db:Session=Depends(get_db)):
-    core.auth_limit(request,core.digest(payload.code),"invitation-accept")
-    t=core.redeem_token(db,payload.code,"INVITE")
+    t=_redeem_code(db,payload,request,"INVITE")
     person=core.one("SELECT * FROM external_identities WHERE id=:id FOR UPDATE",db,id=t["identity_id"])
     if not person or person["status"] in {"LOCKED","REVOKED"}:
         raise HTTPException(409,"Identity is locked or revoked; contact Quality for controlled recovery")
@@ -487,16 +532,15 @@ def forgot(payload:RecoveryRequest,request:Request,db:Session=Depends(get_db)):
         AND g.status='ACTIVE' LIMIT 1""",db,amo=amo,email=str(payload.email).lower())
     if grant:
         code=core.token(db,tenant_id=amo,grant_id=grant["id"],
-                        identity_id=grant["identity_id"],kind="RESET",hours=1)
+                        identity_id=grant["identity_id"],kind="RESET",minutes=core.EMAIL_CODE_MINUTES)
         core.event(db,amo=amo,identity=grant["identity_id"],grant=grant["id"],action="RESET_REQUESTED")
         db.commit();_send(db,amo,grant["email"],code,"password recovery");db.commit()
     return msg
 
 @router.post("/password/reset")
 def reset(payload:PasswordReset,request:Request,response:Response,db:Session=Depends(get_db)):
-    core.auth_limit(request,core.digest(payload.code),"password-reset")
     core.password_is_valid(payload.password)
-    t=core.redeem_token(db,payload.code,"RESET")
+    t=_redeem_code(db,payload,request,"RESET")
     core.run("""UPDATE external_credentials SET password_hash=:hash,password_version=password_version+1,
         failed_attempts=0,locked_until=NULL,changed_at=:at WHERE identity_id=:identity""",
         db,hash=get_password_hash(payload.password),at=core.now(),identity=t["identity_id"])
@@ -878,7 +922,7 @@ def resend_invitation(amo_code:str,grant_id:str,db:Session=Depends(get_db),
       WHERE amo_id=:amo AND grant_id=:grant AND kind='INVITE' AND used_at IS NULL AND revoked_at IS NULL""",
       db,at=core.now(),amo=amo,grant=grant_id)
     raw=core.token(db,tenant_id=amo,grant_id=grant_id,
-                   identity_id=grant["identity_id"],kind="INVITE",hours=48)
+                   identity_id=grant["identity_id"],kind="INVITE",minutes=core.EMAIL_CODE_MINUTES)
     core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,
                action="INVITATION_RESENT",actor_user=str(user.id))
     db.commit()
@@ -898,7 +942,7 @@ def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
        WHERE amo_id=:amo AND id=:id""",db,amo=amo,id=grant_id)
     core.run("""UPDATE external_sessions SET revoked_at=:at WHERE amo_id=:amo
        AND grant_id=:id AND revoked_at IS NULL""",db,at=core.now(),amo=amo,id=grant_id)
-    raw=core.token(db,tenant_id=amo,grant_id=grant_id,identity_id=grant["identity_id"],kind="VERIFY",hours=24)
+    raw=core.token(db,tenant_id=amo,grant_id=grant_id,identity_id=grant["identity_id"],kind="VERIFY",minutes=core.EMAIL_CODE_MINUTES)
     core.event(db,amo=amo,identity=grant["identity_id"],grant=grant_id,action="REVERIFICATION_REQUIRED",
                actor_user=str(user.id),details={"reason":payload.reason})
     db.commit();delivery=_send(db,amo,grant["email"],raw,"reverification",grant_id=grant_id);db.commit()
@@ -906,8 +950,7 @@ def quality_reverify(amo_code:str,grant_id:str,payload:Decision,db:Session=Depen
 
 @router.post("/verification/confirm")
 def verify_again(payload:AccountAction,request:Request,db:Session=Depends(get_db)):
-    core.auth_limit(request,core.digest(payload.code),"reverification")
-    row=core.redeem_token(db,payload.code,"VERIFY")
+    row=_redeem_code(db,payload,request,"VERIFY")
     core.run("""UPDATE external_identities SET verified_at=:at,updated_at=:at
         WHERE id=:id AND status='ACTIVE'""",db,at=core.now(),id=row["identity_id"])
     core.event(db,amo=row["amo_id"],identity=row["identity_id"],grant=row["grant_id"],action="IDENTITY_REVERIFIED")

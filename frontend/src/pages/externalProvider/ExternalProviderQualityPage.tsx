@@ -3,9 +3,11 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import DepartmentLayout from "../../components/Layout/DepartmentLayout";
 import { apiRequest } from "../../services/apiClient";
 import { getCachedUser } from "../../services/auth";
+import { userHasQmsRolePermission } from "../../app/routeGuards";
 import { isTenantAdmin } from "../../utils/tenantAccess";
 import ExternalPartnerQualityReview from "./ExternalPartnerQualityReview";
 import "./external-provider-portal.css";
+import { invitationNotice, type DeliveryReceipt } from "./invitationDelivery";
 
 type Grant = {
   grant_id: string; provider_id: string; supplier_id: number; version: number;
@@ -23,14 +25,6 @@ const ROLES = ["PROVIDER_ADMIN", "QUALITY_REPRESENTATIVE", "TECHNICAL_REPRESENTA
   "COMMERCIAL_REPRESENTATIVE", "DOCUMENT_SUBMITTER", "READ_ONLY", "CUSTOM"];
 const CAPS = ["profile.read", "profile.propose", "document.read", "document.submit", "capa.respond",
   "task.read", "task.respond", "contract.read", "contract.acknowledge", "members.read", "members.manage", "sessions.manage"];
-type DeliveryReceipt = {
-  email_status: string;
-  email_delivery_status: string;
-  email_log_id: string | null;
-  provider_message_id: string | null;
-  sending_mode: string | null;
-  provider_accepted: boolean;
-};
 type DeliveryAttempt = DeliveryReceipt & {
   attempted_at: string;
   recipient: string;
@@ -63,7 +57,7 @@ export default function ExternalProviderQualityPage() {
   const setSection = (view: string) => { const next = new URLSearchParams(query); next.set("view", view); setQuery(next); setEditing(null); setError(""); };
 
   const accountRole = getCachedUser()?.role;
-  const manager = isTenantAdmin(getCachedUser()) || accountRole === "QUALITY_MANAGER";
+  const manager = (isTenantAdmin(getCachedUser()) || accountRole === "QUALITY_MANAGER") && userHasQmsRolePermission(getCachedUser(), "qms.audit.manage");
   const canReviewAccounts = manager || accountRole === "QUALITY_OFFICER";
   const [items, setItems] = useState<Grant[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -179,18 +173,9 @@ export default function ExternalProviderQualityPage() {
       });
       if (result.delivery) {
         const receipt = result.delivery;
-        const accepted = receipt.provider_accepted;
-        const sandbox = receipt.sending_mode === "SANDBOX";
-        if (!accepted) {
-          setError("Account record saved, but invitation email was not accepted. " +
-            deliveryLabel(receipt.email_delivery_status) +
-            (receipt.email_log_id ? " · Mail log: " + receipt.email_log_id : "") +
-            ". Review delivery history and mail configuration before resending.");
-        } else {
-          setMessage(sandbox
-            ? "Invitation recorded. Resend accepted the sandbox message, but the intended recipient was NOT emailed."
-            : "Invitation recorded. Resend accepted the email; recipient delivery is not yet confirmed.");
-        }
+        const notice = invitationNotice(receipt);
+        if (notice.tone === "success") setMessage(notice.message);
+        else setError(notice.message);
         const grantId = result.id || (path.match(/\/grants\/([^/]+)/)?.[1] ?? null);
         if (grantId) void loadDeliveryHistory(grantId);
       } else if (result.delivery_status && result.delivery_status !== "SENT") {
@@ -280,7 +265,8 @@ export default function ExternalProviderQualityPage() {
       {message ? <div role="status" className="vendor-success">{message}</div> : null}
       {manager && section === "invite" && <section className="vendor-card">
         <h2>Invite provider representative</h2>
-        <form className="vendor-grid-form" onSubmit={(e) => {
+        <p className="vendor-section-intro">Choose the organization and representative. After issuing, check the delivery notice for the actual email destination. Email verification and Quality approval are separate steps.</p>
+        <form className="vendor-grid-form vendor-invitation-form" onSubmit={(e) => {
           e.preventDefault();
           void act("/invitations", {
             supplier_id:Number(supplier), name:name.trim(),email:email.trim(),role_code:role,capabilities:null,object_scope:{},
@@ -311,7 +297,7 @@ export default function ExternalProviderQualityPage() {
             <input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)}/></label>
           <label className="vendor-field"><span>External role</span>
             <select value={role} onChange={(e)=>setRole(e.target.value)}>{ROLES.filter(x=>x!=="CUSTOM").map(x=><option key={x} value={x}>{LABEL(x)}</option>)}</select></label>
-          <button type="submit" disabled={busy||!supplier}>Issue one-time email invitation</button>
+          <div className="vendor-form-footer"><p>Inviting: <strong>{email.trim() || "Enter the representative email above"}</strong></p><button className="vendor-primary" type="submit" disabled={busy||!supplier}>{busy ? "Issuing invitation..." : "Issue one-time email invitation"}</button></div>
         </form>
       </section>}
       {section === "accounts" && <section className="vendor-card">
@@ -401,9 +387,9 @@ export default function ExternalProviderQualityPage() {
               <p>Template: {attempt.template_key} · Log: {attempt.email_log_id || "Unavailable"}</p>
               {attempt.provider_message_id && <p>Resend message: {attempt.provider_message_id}</p>}
               {attempt.sending_mode === "SANDBOX" && <p className="vendor-delivery-warning">
-                Sandbox routing was active. The intended recipient was not the actual delivery destination.
+                Sandbox routing: invitation for {attempt.recipient} was redirected to {attempt.effective_recipient || "an unrecorded test mailbox"}.
               </p>}
-              {attempt.effective_recipient && <p>Effective destination: {attempt.effective_recipient}</p>}
+              {attempt.effective_recipient && <p>Actual email destination: {attempt.effective_recipient}</p>}
               {!!attempt.events.length && <ul aria-label="Provider events">
                 {attempt.events.map((event, index) => <li key={index}>
                   {LABEL(event.event)} · <time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>

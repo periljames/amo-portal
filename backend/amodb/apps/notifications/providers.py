@@ -84,23 +84,31 @@ def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) 
         if not message:
             raise ValueError("An external provider message cannot be sent without its one-time instruction.")
         action_url = str(context.get("action_url") or "").strip()
+        code = str(context.get("code") or "").strip()
         action = (
-            f"<p><a href='{html.escape(action_url, quote=True)}'>Open the external provider sign-in</a></p>"
+            f"<p><a href='{html.escape(action_url, quote=True)}'>Open vendor portal</a></p>"
             if action_url.startswith("https://") else ""
         )
-        html_body = (
-            "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#172033'>"
-            f"<h2>{html.escape(subject)}</h2>"
-            f"<p>{html.escape(message)}</p>{action}"
-            "<p>If you did not expect an AMO Portal account invitation or verification, "
-            "contact the Quality team using a known channel. Do not share the one-time code.</p>"
-            "</body></html>"
-        )
-        text_body = (
-            subject + "\n\n" + message + "\n\n"
-            + (action_url + "\n\n" if action_url.startswith("https://") else "")
-            + "If this was unexpected, contact your Quality team. Never share your one-time code."
-        )
+        if code:
+            minutes = int(context.get("expires_minutes") or 10)
+            purpose = {"invitation": "complete your vendor invitation", "password recovery": "reset your password",
+                       "reverification": "verify your email address"}.get(str(context.get("event")), "access your vendor account")
+            instruction = f"Use this code to {purpose}."
+            html_body = (
+                "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#172033;line-height:1.6'>"
+                f"<p>{html.escape(instruction)}</p>"
+                f"<p style='font-size:32px;font-weight:700;letter-spacing:6px'>{html.escape(code)}</p>"
+                f"<p>This code expires in <strong>{minutes} minutes</strong> and can be used once.</p>{action}"
+                "<p>If you did not expect this email, ignore it. Do not share this code.</p></body></html>"
+            )
+            text_body = (f"{instruction}\n\nYour one-time code: {code}\n\n"
+                         f"This code expires in {minutes} minutes and can be used once.\n\n"
+                         + (action_url + "\n\n" if action_url.startswith("https://") else "")
+                         + "If you did not expect this email, ignore it. Do not share this code.")
+        else:
+            html_body = ("<!doctype html><html><body>"+f"<p>{html.escape(message)}</p>{action}"
+                         +"<p>If this was unexpected, contact your Quality team. Never share your one-time code.</p></body></html>")
+            text_body = message+"\n\n"+(action_url+"\n\n" if action_url.startswith("https://") else "")+"If this was unexpected, contact your Quality team. Never share your one-time code."
         return html_body, text_body
 
     if template_key == "qms_audit_notice_memo":
@@ -272,7 +280,9 @@ class ResendProvider(EmailProvider):
         from_name = str(self.config.get("from_name") or "AMO Portal").strip()
         from_value = f"{from_name} <{from_email}>" if from_name else from_email
         mapping = _template_map(self.config.get("template_map_json"))
-        template_id = mapping.get(template_key)
+        # Authentication codes use the versioned local contract so hosted templates
+        # cannot omit expiry or render an unrelated password-reset presentation.
+        template_id = None if template_key.startswith("external-provider-") and context.get("code") else mapping.get(template_key)
         variables = _template_variables(context)
         html_body: str | None = None
         text_body: str | None = None

@@ -191,7 +191,7 @@ const MODULES: readonly QmsModuleRoute[] = [
     segment: "external-accounts",
     label: "Vendor Accounts & Access",
     navigationLabel: "Vendor Accounts & Access",
-    permission: "qms.audit.manage",
+    permission: "qms.external.view",
     section: "control",
     defaultView: "register",
     validViews: ["register"],

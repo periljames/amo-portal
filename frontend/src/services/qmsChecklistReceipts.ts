@@ -1,4 +1,5 @@
 import type { ChecklistExecutionGovernanceResponse, ChecklistExecutionGovernanceRow } from "./qmsChecklistExecutionGovernance";
+import { replaceEqualDeep } from "@tanstack/react-query";
 
 export function restoreChecklistReceipts(rows: ChecklistExecutionGovernanceRow[], receipts: Record<string, ChecklistExecutionGovernanceRow>): ChecklistExecutionGovernanceRow[] {
   return rows.map(row => {
@@ -11,10 +12,13 @@ export function restoreChecklistReceipts(rows: ChecklistExecutionGovernanceRow[]
 export function reconcileChecklistExecution(previous: ChecklistExecutionGovernanceResponse | undefined, incoming: ChecklistExecutionGovernanceResponse): ChecklistExecutionGovernanceResponse {
   if (!previous) return incoming;
   const known = new Map(previous.items.map(item => [item.checklist_item_id, item]));
-  return { ...incoming, items: incoming.items.map(item => {
+  const reconciled = { ...incoming, items: incoming.items.map(item => {
     const prior = known.get(item.checklist_item_id);
     return prior?.audit_id === item.audit_id && prior.entity_version > item.entity_version ? prior : item;
   }) };
+  // React Query's custom structuralSharing callback replaces its default deep
+  // sharing. Preserve it here: unchanged reads must not recreate every row.
+  return replaceEqualDeep(previous, reconciled);
 }
 
 export function acceptChecklistReceipt(previous: ChecklistExecutionGovernanceResponse | undefined, row: ChecklistExecutionGovernanceRow): ChecklistExecutionGovernanceResponse | undefined {

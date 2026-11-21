@@ -230,3 +230,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.car-invite-evidence-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:16px 0; }
+.car-invite-evidence-actions > span { font-size:12px; color:var(--text-secondary,#657687); margin-left:auto; }
+.car-invite-editor:has(.response-text-area) { border:0; }
+.car-invite-field > label { font-size:13px; font-weight:600; }
+.car-invite-evidence-actions > label { display:flex; align-items:center; gap:8px; font-size:12px; }
+.car-invite-evidence-actions select { max-width:200px; min-height:36px; padding:5px 8px; border:1px solid var(--border-color,#dbe3ea); border-radius:6px; background:var(--surface-elevated,#fff); color:inherit; }
+@media(min-width:1000px) { .car-invite-evidence-item { grid-template-columns:minmax(180px,.9fr) minmax(160px,.7fr) minmax(0,1fr) auto; } }

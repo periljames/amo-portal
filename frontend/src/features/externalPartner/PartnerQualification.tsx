@@ -46,7 +46,7 @@ export default function PartnerQualification({tenant,csrf,capabilities}:PartnerP
             setAnswers(item.answers_json||{});setNote("");setError("");}}>
             Complete questionnaire</button>}
       </article>)}
-      {!query.value?.items.length&&!query.pending&&<p className="partner-empty">No qualification request is currently assigned.</p>}
+      {query.value&&!query.value.items.length&&<p className="partner-empty">No qualification request is currently assigned.</p>}
     </Section>
     {selected&&<Section title={"Qualification questionnaire — "+selected.category}
       description="You may submit answers. Only the AMO's appointed Quality and technical authorities may verify evidence or approve scope.">
@@ -66,7 +66,7 @@ export default function PartnerQualification({tenant,csrf,capabilities}:PartnerP
         <div><strong>{x.dimension} · {x.target_key}</strong>
           <small>Effective {x.effective_on}{x.ends_on?" through "+x.ends_on:" until authorized release"}</small></div>
         <Status value="RESTRICTED"/></div>)}
-      {!query.value?.restrictions.length&&<p className="partner-empty">No active scoped restrictions recorded.</p>}
+      {query.value&&!query.value.restrictions.length&&<p className="partner-empty">No active scoped restrictions recorded.</p>}
     </Section>
     <ActionNotice value={error} error/><ActionNotice value={notice}/>
   </div>;

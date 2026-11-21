@@ -3,6 +3,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DepartmentLayout from "../components/Layout/DepartmentLayout";
+import QualityAuditsSectionLayout from "./qualityAudits/QualityAuditsSectionLayout";
+import { Filter, History, Plus, RefreshCw, Search, X } from "lucide-react";
+import "./qualityAudits/car-register.css";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
 import CarRecordView from "./qualityAudits/CarRecordView";
@@ -157,6 +160,22 @@ function scopeLabel(scope: QmsCarRegisterScope): string {
   return labels[scope];
 }
 
+const CAR_QUEUES: { path: string; scope: QmsCarRegisterScope; label: string }[] = [
+  { path: "register", scope: "all", label: "All CARs" },
+  { path: "overdue", scope: "overdue", label: "Overdue" },
+  { path: "due-soon", scope: "due_soon", label: "Due soon" },
+  { path: "awaiting-auditee", scope: "awaiting_auditee", label: "Auditee response" },
+  { path: "awaiting-quality-review", scope: "awaiting_quality_review", label: "Quality review" },
+  { path: "awaiting-effectiveness-review", scope: "awaiting_effectiveness_review", label: "Effectiveness" },
+  { path: "closed", scope: "closed", label: "Closed" },
+];
+function CarPageLayout({ detail, amoCode, department, actions, children }: {
+  detail: boolean; amoCode: string; department: string; actions: React.ReactNode; children: React.ReactNode;
+}) {
+  return detail ? <DepartmentLayout amoCode={amoCode} activeDepartment={department}>{children}</DepartmentLayout>
+    : <QualityAuditsSectionLayout title="Corrective action register" subtitle="Corrective actions" toolbar={actions}>{children}</QualityAuditsSectionLayout>;
+}
+
 const AssigneeFields: React.FC<AssigneeFieldsProps> = ({
   assignees,
   departmentId,
@@ -277,6 +296,7 @@ const QualityCarsPage: React.FC = () => {
   const [attachmentBusyId, setAttachmentBusyId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const canManageCars = hasQmsRolePermission("qms.car.manage");
@@ -362,7 +382,6 @@ const QualityCarsPage: React.FC = () => {
   });
 
   const cars = registerQuery.data?.items ?? [];
-  const summary = registerQuery.data?.summary ?? { total: 0, open: 0, overdue: 0, in_review: 0 };
   const total = registerQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -637,106 +656,48 @@ const QualityCarsPage: React.FC = () => {
     navigate(`/maintenance/${amoSlug}/quality/cars/register`);
   };
 
+  const activeFilters = Number(programFilter !== "QUALITY") + Number(statusFilter !== "ALL") + Number(Boolean(ownerFilter));
+  const changeQueue = (path: string) => {
+    setStatusFilter("ALL");
+    const query = new URLSearchParams(searchParams);
+    ["status", "carId", "control", "findingId", "title", "due_date"].forEach(key => query.delete(key));
+    navigate(`/maintenance/${amoSlug}/quality/cars/${path}${query.size ? `?${query}` : ""}`);
+  };
+  const headerActions = <div className="car-register-heading-actions">
+    <button type="button" className="car-register-secondary" aria-expanded={historyOpen} aria-controls="car-register-history" onClick={() => setHistoryOpen(open => !open)}><History size={15} aria-hidden />History</button>
+    {canManageCars && <button type="button" className="car-register-primary" onClick={() => setShowCreateForm(true)}><Plus size={16} aria-hidden />New CAR</button>}
+  </div>;
   return (
-    <DepartmentLayout amoCode={amoSlug} activeDepartment={department}>
-      <div className="qms-surface-root qms-car-ops car-register">
+    <CarPageLayout detail={Boolean(directCarId)} amoCode={amoSlug} department={department} actions={headerActions}>
+      <div className={`qms-surface-root qms-car-ops car-register${directCarId ? "" : " car-register--structured"}`}>
       {localError ? <div className="card card--error" role="alert">{localError}</div> : null}
       {directCarId ? (cars[0] ? <CarRecordView car={cars[0]} amoCode={amoSlug} owner={cars[0].responsible_personnel || assigneeLookup.get(cars[0].assigned_to_user_id || "")?.full_name || "Unassigned"}
         assignees={assignees} canManage={canManageCars && cars[0].can_current_user_modify !== false} canAttach={cars[0].can_current_user_modify ?? canManageCars} canReview={Boolean(hasQmsRolePermission("qms.car.review") && cars[0].can_current_user_review !== false)}
         onEdit={()=>openEdit(cars[0])} onReview={()=>void openReview(cars[0])} onInvite={()=>void handleCopyInvite(cars[0])} onExport={()=>void handleExport(cars[0])}/> : <section className="case-workspace"><button onClick={clearRouteScope}>Back to corrective actions</button><p role={registerQuery.isError?"alert":"status"}>{registerQuery.isError?"This corrective action could not be loaded.":registerQuery.isPending?"Loading corrective action…":"Corrective action not found."}</p>{registerQuery.isError?<button onClick={()=>void registerQuery.refetch()}>Retry</button>:null}</section>) : <>
-      <header className="page-header qms-car-page-heading">
-        <div>
-          <h1 className="page-header__title">Corrective action register</h1>
+      <nav className="car-register-queues" aria-label="CAR queues">
+        {CAR_QUEUES.map(queue => <button type="button" key={queue.path} aria-current={routeRequestedScope === queue.scope ? "page" : undefined} onClick={() => changeQueue(queue.path)}>{queue.label}</button>)}
+      </nav>
+      <section className="car-register-list" aria-label={scopeLabel(effectiveScope)}>
+        <div className="car-register-toolbar">
+          <label className="car-register-search"><Search size={16} aria-hidden /><input aria-label="Search corrective actions" type="search" value={registerSearch} onChange={event => setRegisterSearch(event.target.value)} placeholder="Search CAR, audit or finding…" /></label>
+          <label className="car-register-scope"><span className="sr-only">CAR scope</span><select aria-label="CAR scope" value={actorView} onChange={event => {
+            const query = new URLSearchParams(searchParams);
+            if (event.target.value === "mine") query.set("view", "mine"); else query.delete("view");
+            navigate(`${location.pathname}${query.size ? `?${query}` : ""}`);
+          }}><option value="global">All assignments</option><option value="mine">Assigned to me</option></select></label>
+          <button type="button" className="car-register-secondary" aria-expanded={filtersOpen} aria-controls="car-register-filters" onClick={() => setFiltersOpen(open => !open)}><Filter size={15} aria-hidden />Filters{activeFilters ? <span className="car-register-filter-count">{activeFilters}</span> : null}</button>
+          <button type="button" className="car-register-secondary car-register-refresh" aria-label="Refresh corrective actions" disabled={registerQuery.isFetching} onClick={() => void registerQuery.refetch()}><RefreshCw size={15} aria-hidden /></button>
         </div>
-        <div className="audit-chip-list">
-          <label className="car-personal-scope"><input type="checkbox" checked={actorView==='mine'} onChange={event=>navigate(`${location.pathname}${event.target.checked?'?view=mine':''}`)}/>Assigned to me</label>
-          <button type="button" className="secondary-chip-btn" onClick={() => setHistoryOpen((open) => !open)}>
-            {historyOpen ? "Hide history" : "History"}
-          </button>
-          {canManageCars ? (
-            <button type="button" className="primary-chip-btn" onClick={() => setShowCreateForm(true)}>
-              New CAR
-            </button>
-          ) : null}
-        </div>
-      </header>
-
-
-      <section className="audit-stats-grid" aria-label="Corrective action summary">
-        <div className="audit-stat-card">
-          <div className="audit-stat-card__label">Total in {humanize(programFilter)}</div>
-          <div className="audit-stat-card__value">{summary.total}</div>
-        </div>
-        <div className="audit-stat-card">
-          <div className="audit-stat-card__label">Open / active</div>
-          <div className="audit-stat-card__value">{summary.open}</div>
-        </div>
-        <div className="audit-stat-card">
-          <div className="audit-stat-card__label">Overdue</div>
-          <div className="audit-stat-card__value">{summary.overdue}</div>
-        </div>
-        <div className="audit-stat-card">
-          <div className="audit-stat-card__label">In review</div>
-          <div className="audit-stat-card__value">{summary.in_review}</div>
-        </div>
-      </section>
-
-      <section className="audit-panel" style={{ marginTop: 12 }}>
-        <div className="audit-panel__header">
-          <div>
-            <h2 className="audit-panel__title">{directCarId ? "Corrective action record" : scopeLabel(effectiveScope)}</h2>
-            <p className="audit-panel__subtitle">
-              {directCarId
-                ? "This deep link loads only the requested CAR record."
-                : `${rangeStart}-${rangeEnd} of ${total} matched records${registerQuery.isFetching && !registerQuery.isLoading ? " · refreshing" : ""}.`}
-            </p>
-          </div>
-          {routeRequestedScope !== "all" || directCarId ? (
-            <button type="button" className="secondary-chip-btn" onClick={clearRouteScope}>Open full register</button>
-          ) : null}
-        </div>
-
-        {!directCarId ? (
-          <div className="audit-workspace__toolbar-row" style={{ marginBottom: 12 }}>
-            <label>
-              <span className="text-muted">Programme</span>
-              <select className="input" value={programFilter} onChange={(event) => setProgramFilter(event.target.value as CARProgram)}>
-                {PROGRAM_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="text-muted">Status</span>
-              <select className="input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as CarStatusFilter)}>
-                {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="text-muted">Responsible</span>
-              <select className="input" value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
-                <option value="">All owners</option>
-                {assignees.map((assignee) => (
-                  <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="audit-search" aria-label="Search corrective actions">
-              <input
-                value={registerSearch}
-                onChange={(event) => setRegisterSearch(event.target.value)}
-                placeholder="Search CAR, audit, finding, status, or summary"
-              />
-            </label>
-            <label>
-              <span className="text-muted">Rows</span>
-              <select className="input" value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as CarPageSize)}>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-            </label>
-          </div>
-        ) : null}
-
+        {filtersOpen && <div id="car-register-filters" className="audit-workspace__toolbar-row car-register-filters">
+          <label>Programme<select aria-label="Programme" value={programFilter} onChange={event => setProgramFilter(event.target.value as CARProgram)}>{PROGRAM_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Status<select aria-label="Status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as CarStatusFilter)}>{STATUS_OPTIONS.filter(option => routeRequestedScope === "all" || option.value !== "ACTIVE").map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Responsible<select aria-label="Responsible" value={ownerFilter} onChange={event => setOwnerFilter(event.target.value)}><option value="">All owners</option>{assignees.map(assignee => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}</select></label>
+        </div>}
+        {activeFilters > 0 && <div className="car-register-applied" aria-label="Applied CAR filters">
+          {programFilter !== "QUALITY" && <button type="button" onClick={() => setProgramFilter("QUALITY")} aria-label="Clear programme filter">{humanize(programFilter)}<X size={12} aria-hidden /></button>}
+          {statusFilter !== "ALL" && <button type="button" onClick={() => setStatusFilter("ALL")} aria-label="Clear status filter">{STATUS_OPTIONS.find(option => option.value === statusFilter)?.label}<X size={12} aria-hidden /></button>}
+          {ownerFilter && <button type="button" onClick={() => setOwnerFilter("")} aria-label="Clear responsible filter">{assigneeLookup.get(ownerFilter)?.full_name || "Selected owner"}<X size={12} aria-hidden /></button>}
+        </div>}
         {registerQuery.isError ? (
           <div className="card card--error" role="alert">
             <p>{registerQuery.error instanceof Error ? registerQuery.error.message : "Failed to load corrective actions."}</p>
@@ -744,25 +705,23 @@ const QualityCarsPage: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="table-wrapper">
-          <table className="table table-row--compact">
+        <div className="table-wrapper car-register-table-scroll" role="region" aria-label="Corrective action records" tabIndex={0}>
+          <table className="table table-row--compact car-register-table" aria-label="Corrective action register">
             <thead>
               <tr>
-                <th>CAR</th>
-                <th>Audit / finding</th>
-                <th>Corrective action</th>
-                <th>Workflow</th>
-                <th>Status</th>
-                <th>Due</th>
-                <th>Responsible</th>
-                <th>Actions</th>
+                <th scope="col">Corrective action</th>
+                <th scope="col">Audit / finding</th>
+                <th scope="col">Next step</th>
+                <th scope="col">Due</th>
+                <th scope="col">Responsible</th>
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {registerQuery.isLoading ? (
-                <tr><td colSpan={8}>Loading corrective actions…</td></tr>
+                <tr><td colSpan={6} role="status">Loading corrective actions…</td></tr>
               ) : cars.length === 0 ? (
-                <tr><td colSpan={8}>No corrective actions match the current server-side filters.</td></tr>
+                <tr><td colSpan={6}>{registerQuery.isError ? "Records unavailable. Retry to reload the register." : "No corrective actions match these filters."}</td></tr>
               ) : cars.map((car) => {
                 const assignee = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id) : undefined;
                 const canModify = car.can_current_user_modify ?? canManageCars;
@@ -777,34 +736,21 @@ const QualityCarsPage: React.FC = () => {
                       >
                         <strong>{car.car_number}</strong>
                       </button>
-                      <div className="text-muted">{humanize(car.program)} · <span className="case-priority" data-priority={car.priority}>{humanize(car.priority)}</span></div>
+                      <strong className="car-register-title">{car.title}</strong>
+                      <span className="car-register-priority" data-priority={car.priority}>{humanize(car.priority)}</span>
                     </td>
-                    <td>
-                      <strong>{car.audit_ref || "No audit reference"}</strong>
-                      <div className="text-muted">{car.finding_ref || car.finding_id || "No linked finding"}</div>
-                    </td>
-                    <td>
-                      <strong>{car.title}</strong>
-                      <div className="qms-cell-text car-register-summary text-muted">{car.finding_description || car.summary}</div>
-                    </td>
-                    <td>
-                      <strong>{carNextAction(car)}</strong>
-                      <div className="text-muted">
-                        RC {humanize(car.root_cause_status)} · CAP {humanize(car.capa_status)}
-                      </div>
-                    </td>
-                    <td><span className="case-status" data-tone={car.status === "CLOSED" ? "success" : car.status === "ESCALATED" ? "danger" : "info"}>{humanize(car.status)}</span></td>
-                    <td>
+                    <td className="car-register-source">{car.audit_ref ? <strong>{car.audit_ref}</strong> : null}<span>{car.finding_ref || (car.finding_id ? "Linked finding" : "Standalone action")}</span></td>
+                    <td data-label="Next step"><strong>{carNextAction(car)}</strong><span className="case-status" data-tone={car.status === "CLOSED" ? "success" : car.status === "ESCALATED" ? "danger" : "info"}>{humanize(car.status)}</span></td>
+                    <td data-label="Due">
                       <strong>{dateOnly(car.due_date)}</strong>
-                      <div className="text-muted">Target {dateOnly(car.target_closure_date)}</div>
+                      {car.target_closure_date && car.target_closure_date.slice(0, 10) !== car.due_date?.slice(0, 10) ? <div className="text-muted">Target {dateOnly(car.target_closure_date)}</div> : null}
                     </td>
-                    <td>
+                    <td data-label="Responsible">
                       {car.responsible_personnel || assignee?.full_name || car.submitted_by_name || "Unassigned"}
                       <div className="text-muted">{car.responsible_department || assignee?.department_name || "—"}</div>
                     </td>
                     <td>
                       <div className="car-row-actions">
-                        <button type="button" onClick={() => navigate(`/maintenance/${amoSlug}/quality/cars?carId=${encodeURIComponent(car.id)}`)}>Open</button>
                         <CarActionsMenu label={car.car_number}>
                           {canReview && carHasReview(car) ? <button onClick={() => void openReview(car)}>Review submitted response</button> : null}
                           <button disabled={exportingId === car.id} onClick={() => void handleExport(car)}>Download evidence pack</button>
@@ -822,30 +768,16 @@ const QualityCarsPage: React.FC = () => {
         </div>
 
         {!directCarId ? (
-          <div className="qms-car-pagination" aria-label="Corrective action register pagination">
-            <button
-              type="button"
-              className="secondary-chip-btn"
-              disabled={safePage <= 1 || registerQuery.isFetching}
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-            >
-              Previous
-            </button>
-            <span>Page {safePage} of {totalPages}</span>
-            <button
-              type="button"
-              className="secondary-chip-btn"
-              disabled={!registerQuery.data?.has_more || registerQuery.isFetching}
-              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-            >
-              Next
-            </button>
-          </div>
+          <nav className="car-register-pagination" aria-label="Corrective action register pagination">
+            <span aria-live="polite">{registerQuery.isFetching ? "Updating…" : `${rangeStart}–${rangeEnd} of ${total} CARs`}</span>
+            <label>Rows<select aria-label="Rows" value={pageSize} onChange={event => setPageSize(Number(event.target.value) as CarPageSize)}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+            <div><button type="button" disabled={safePage <= 1 || registerQuery.isFetching} onClick={() => setCurrentPage(page => Math.max(1, page - 1))}>Previous</button><span>Page {safePage} of {totalPages}</span><button type="button" disabled={!registerQuery.data?.has_more || registerQuery.isFetching} onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}>Next</button></div>
+          </nav>
         ) : null}
       </section>
 
       {historyOpen ? (
-        <div style={{ marginTop: 12 }}>
+        <div id="car-register-history" className="car-register-history">
           <AuditHistoryPanel
             title={directCarId ? "Corrective action history" : "Corrective action register history"}
             entityType={directCarId ? "qms_car" : undefined}
@@ -861,12 +793,6 @@ const QualityCarsPage: React.FC = () => {
       ) : null}
 
       </>}
-      {!canManageCars && !directCarId ? (
-        <div className="card card--info" style={{ marginTop: 12 }}>
-          <p style={{ margin: 0 }}>Updates remain available to assigned users through the governed CAR controls; management actions remain limited to Quality Managers, AMO Admins, and superusers.</p>
-        </div>
-      ) : null}
-
       {showCreateForm ? (
         <div className="upsell-modal__backdrop" role="dialog" aria-modal="true" aria-label="Create corrective action">
           <div className="upsell-modal">
@@ -1139,7 +1065,7 @@ const QualityCarsPage: React.FC = () => {
 
 
       </div>
-    </DepartmentLayout>
+    </CarPageLayout>
   );
 };
 

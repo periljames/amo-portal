@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from amodb.security import SECRET_KEY, get_password_hash, verify_password
 
 COOKIE = "amo_external_session"
 SESSION_HOURS = 8
+EMAIL_CODE_MINUTES = 10
 CAPABILITIES = frozenset({
     "profile.read", "document.read", "document.submit", "capa.respond",
     "task.read", "task.respond", "contract.read", "contract.acknowledge",
@@ -97,33 +99,71 @@ def cookie(response: Response, raw: str | None):
         response.delete_cookie(COOKIE, httponly=True, secure=SECURE,
                                samesite="strict", path=COOKIE_PATH)
 
-def token(db, *, tenant_id: str, grant_id: str, identity_id: str, kind: str, hours: int):
-    raw = f"{tenant_id}.{secrets.token_urlsafe(40)}"
+def email_code_hash(amo: str, identity: str, kind: str, code: str):
+    # Six-digit codes must not be recoverable by enumerating a leaked hash table.
+    return hmac.new(SECRET_KEY.encode(), f"external-code:{amo}:{identity}:{kind}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
+def token(db, *, tenant_id: str, grant_id: str, identity_id: str, kind: str,
+          hours: int | None = None, minutes: int = EMAIL_CODE_MINUTES):
+    if hours is not None:
+        raw = f"{tenant_id}.{secrets.token_urlsafe(40)}"
+        hashed = digest(raw)
+        expiry = now()+timedelta(hours=hours)
+    else:
+        # Serialize issuance for an identity and invalidate older codes of this purpose.
+        one("SELECT id FROM external_identities WHERE id=:id FOR UPDATE",db,id=identity_id)
+        for _ in range(20):
+            raw = f"{secrets.randbelow(1000000):06d}"
+            hashed = email_code_hash(tenant_id,identity_id,kind,raw)
+            if not one("SELECT id FROM external_identity_tokens WHERE token_hash=:hash",db,hash=hashed):
+                break
+        else:
+            raise HTTPException(503,"Unable to issue a code. Please try again.")
+        run("""UPDATE external_identity_tokens SET revoked_at=:at
+            WHERE amo_id=:amo AND identity_id=:identity AND kind=:kind
+            AND used_at IS NULL AND revoked_at IS NULL""",db,
+            at=now(),amo=tenant_id,identity=identity_id,kind=kind)
+        expiry = now()+timedelta(minutes=minutes)
     run("""INSERT INTO external_identity_tokens
         (id,amo_id,identity_id,grant_id,kind,token_hash,expires_at)
         VALUES (:id,:amo,:person,:grant,:kind,:hash,:expires)""",
         db,id=new_id(),amo=tenant_id,person=identity_id,grant=grant_id,
-        kind=kind,hash=digest(raw),expires=now()+timedelta(hours=hours))
+        kind=kind,hash=hashed,expires=expiry)
     return raw
 
-def redeem_token(db, raw: str, kind: str):
-    # Transaction is locked around redemption; a consumed code cannot be replayed.
-    tenant_hint, separator, _ = raw.partition(".")
-    if not separator or len(tenant_hint) != 36:
-        raise HTTPException(400,"Invalid or expired verification code")
-    context(db,tenant_hint)
+
+def redeem_token(db, raw: str, kind: str, *, amo_slug: str | None = None, email: str | None = None):
+    raw=raw.strip()
+    if re.fullmatch(r"[0-9]{6}",raw):
+        if not amo_slug or not email:
+            raise HTTPException(400,"Enter your AMO code and invited email address with the six-digit code.")
+        tenant_hint=tenant(db,amo_slug)
+        context(db,tenant_hint)
+        identity=one("SELECT id FROM external_identities WHERE email=:email",db,email=email.strip().lower())
+        if not identity:
+            raise HTTPException(400,"Code not valid. Check the email address and latest code, or request a new one.")
+        hashed=email_code_hash(tenant_hint,str(identity["id"]),kind,raw)
+    else:
+        # Previously emailed tokens remain usable, including non-UUID tenant IDs.
+        tenant_hint, separator, secret = raw.partition(".")
+        if not separator or not re.fullmatch(r"[A-Za-z0-9_-]{1,36}",tenant_hint) or len(secret)<20:
+            raise HTTPException(400,"Invalid or expired verification code")
+        context(db,tenant_hint)
+        hashed=digest(raw)
     row=one("""SELECT tok.*, amo.is_active AS tenant_active
         FROM external_identity_tokens tok
         JOIN amos amo ON amo.id=tok.amo_id
         WHERE tok.amo_id=:amo AND tok.token_hash=:hash AND tok.kind=:kind
-        FOR UPDATE OF tok""",db,amo=tenant_hint,hash=digest(raw),kind=kind)
+        FOR UPDATE OF tok""",db,amo=tenant_hint,hash=hashed,kind=kind)
     if not row or row["used_at"] or row["revoked_at"] or aware(row["expires_at"]) <= now():
-        raise HTTPException(400,"Invalid or expired verification code")
+        raise HTTPException(400,"Code expired, already used or replaced. Use the latest email or request a new code.")
     context(db,str(row["amo_id"]),str(row["identity_id"]))
     if row["tenant_active"] is not True:
         raise HTTPException(403,"The parent AMO tenant is suspended")
     run("UPDATE external_identity_tokens SET used_at=:at WHERE id=:id",db,at=now(),id=row["id"])
     return row
+
 
 def event(db, *, amo: str, identity: str | None, grant: str | None, action: str,
           actor_user: str | None = None, actor_identity: str | None = None, details=None):
@@ -157,7 +197,7 @@ def active_session(db: Session, request: Request, required: str | None = None, w
     if not raw:
         raise HTTPException(401,"Provider login required")
     tenant_hint, separator, _ = raw.partition(".")
-    if not separator or len(tenant_hint) != 36:
+    if not separator or not re.fullmatch(r"[A-Za-z0-9_-]{1,36}",tenant_hint):
         raise HTTPException(401,"Provider session invalid")
     context(db,tenant_hint)
     row=one("""SELECT s.*, g.status grant_state, g.role_code, g.capabilities_json,

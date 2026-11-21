@@ -96,7 +96,12 @@ test("auditor action evidence opens by filename and the review fits a phone view
   await expect(row.getByText("SUBMITTED",{exact:true})).toBeVisible({timeout:15000});
   const evidence=row.getByRole("button",{name:"implementation-evidence.txt",exact:true});
   await expect(evidence).toBeVisible();
-  const downloading=page.waitForEvent("download");await evidence.click();
+  const downloads:string[]=[];page.on("download",event=>downloads.push(event.suggestedFilename()));
+  await evidence.click();
+  const preview=page.getByRole("region",{name:"Evidence preview",exact:true});
+  await expect(preview).toContainText("Synthetic implementation evidence.");
+  expect(downloads).toEqual([]);
+  const downloading=page.waitForEvent("download");await preview.getByRole("button",{name:"Download a copy",exact:true}).click();
   expect((await downloading).suggestedFilename()).toBe("implementation-evidence.txt");
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
   await section.screenshot({path:"../.artifacts/qms-ux-20261028/action-review-mobile.png"});
@@ -162,3 +167,29 @@ test("a new review does not reuse old rejection reasons and validates return not
   await dialog.getByLabel("Corrective action review note",{exact:true}).fill("Link the controlled implementation record.");
   await expect(save).toBeEnabled();
 });
+
+ test("feedback follows response evidence in the sidebar without duplicate histories",async({page})=>{
+ await prepare(page);
+ await page.route('**/quality/cars/*/feedback',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({car_id:carId,status:'OPEN',items:[{id:'feedback-1',actor_name:'Quality Manager',actor_kind:'STAFF',visibility:'SHARED',created_at:'2026-11-21T10:00:00Z',message:'Implementation evidence verified. Confirm effectiveness at the next review.'},{id:'feedback-2',actor_name:'Maintenance Manager',actor_kind:'AUDITEE',visibility:'SHARED',created_at:'2026-11-21T10:30:00Z',message:'Updated records attached for independent review.'}],next_cursor:null})}));
+ await page.route('**/quality/cars/*/investigation',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({...projection,history:[{id:'revision-1',event_type:'DRAFT_SAVED',revision:1}],action_events:[{id:'event-1',previous_state:'SUBMITTED',next_state:'VERIFIED',reason:'Evidence verified'}]})}));
+ await page.setViewportSize({width:1440,height:1000});
+ await page.goto(`/maintenance/tenant-a/quality/cars?carId=${carId}`);
+ const feedback=page.getByRole('region',{name:'CAR feedback and decision history'});
+ await expect(feedback).toBeVisible({timeout:15000});
+ await expect(page.getByText('No structured investigation recorded.',{exact:false})).toBeVisible();
+ await expect(page.getByText(/Attributable action implementation|Attributed investigation revisions/)).toHaveCount(0);
+ expect(await feedback.evaluate(element=>element.parentElement?.tagName)).toBe('ASIDE');
+ const response=page.locator('.case-response');
+ await expect(response.getByRole('heading',{name:'Root cause',exact:true})).toBeVisible();
+ await expect(response.getByRole('heading',{name:'Corrective action plan',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Preventive action',exact:true})).toHaveCount(0);
+ await expect(page.getByText('Revision 0',{exact:false})).toHaveCount(0);
+ await page.getByText('Attach evidence',{exact:true}).click();
+ await expect(page.locator('.case-evidence-upload input[type="file"]')).toBeVisible();
+ const evidence=page.getByRole('heading',{name:'Response evidence',exact:true});
+ expect(await evidence.evaluate((element)=>Boolean(element.closest('aside')?.querySelector('.car-feedback')))).toBe(true);
+ await feedback.screenshot({path:'test-results/car-feedback-timeline.png'});
+ await page.screenshot({path:'test-results/car-record-sidebar.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ });

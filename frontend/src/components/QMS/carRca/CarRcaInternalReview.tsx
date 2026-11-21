@@ -8,7 +8,7 @@ import type { CARAttachmentOut, CARAssignee } from "../../../services/qms";
 import { portalErrorMessage } from "../../../services/portalError";
 import { caseDate } from "../../../pages/qualityAudits/carCaseModel";
 
-export default function CarRcaInternalReview({ amoCode, carId, canReview, attachments = [], assignees = [], onOpenEvidence, openingId }: {
+export default function CarRcaInternalReview({ amoCode, carId, canReview, attachments = [], assignees = [], onOpenEvidence, openingId, onProjectionChange }: {
   amoCode: string;
   carId: string;
   canReview: boolean;
@@ -16,8 +16,10 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
   assignees?: CARAssignee[];
   onOpenEvidence?: (id: string, filename: string) => Promise<void>;
   openingId?: string | null;
+  onProjectionChange?: (projection: CarRcaProjection | null) => void;
 }) {
   const [data, setData] = useState<CarRcaProjection | null>(null);
+  useEffect(()=>onProjectionChange?.(data),[data,onProjectionChange]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -96,26 +98,21 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
   const causes = (investigation?.investigations ?? []).flatMap(method => method.nodes ?? [])
     .filter(node => node.entry_type === "CAUSAL_CONCLUSION");
   const actions = data?.actions ?? [];
-  const retained = data?.retained_responses ?? [];
-  const events = data?.action_events ?? [];
-  const revisions = data?.history ?? [];
 
   return <section className="case-section car-rca car-rca-internal" aria-label="Structured CAR investigation and Quality action review">
-    <h3>Investigation & action review</h3>
+    <h3>Investigation & actions</h3>
     {loading && <p role="status">Loading documented investigation…</p>}
     {busy && <p role="status">Recording Quality decision…</p>}
     {notice && <p className="car-rca-confirmation" role="status">{notice}</p>}
     {error && <p role="alert">{error} <button type="button" onClick={() => void load()}>Retry</button></p>}
     {data && <>
-      <p>Revision {data.revision} · {data.submitted_revision == null ? "Not submitted" : `Submitted revision ${data.submitted_revision}`}
-        {data.submitted_at ? ` · ${new Date(data.submitted_at).toLocaleString()}` : ""}</p>
       {data.revision && investigation ? <details>
-        <summary>View structured investigation · revision {data.submitted_revision ?? data.revision}</summary>
+        <summary>View investigation</summary>
         <CarRcaWorkbench
         value={investigation}
         disabled onChange={() => undefined} onSave={() => undefined}
         saveState="Controlled record — reviewer read only" /></details> :
-        <p>No structured investigation recorded. Existing narrative responses remain above.</p>}
+        <p>No structured investigation recorded.</p>}
       {hasQmsRolePermission("qms.reports.view") && <details>
         <summary>Source frequency analysis</summary>
         <CarRcaParetoSource amoCode={amoCode} carId={carId}
@@ -124,8 +121,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
       {canReview && hasQmsRolePermission("qms.car.manage") && <details>
         <summary>Add a Quality-managed action</summary>
         <div className="car-rca" aria-label="Create an internal governed corrective action">
-        <h4>Record a Quality-managed corrective action</h4>
-        <p>This supplements the auditee's plan and retains an individual owner, deadline, causal linkage and independent review trail.</p>
+        <p>Assign an owner and deadline for this action.</p>
         <div className="car-rca-grid">
           <label>Type<select value={newAction.kind} onChange={event => setNewAction(current => ({ ...current, kind: event.target.value as CarRcaActionCreate["kind"] }))}>
             <option value="CORRECTIVE">Corrective</option><option value="PREVENTIVE">Preventive</option><option value="CONTAINMENT">Containment</option>
@@ -153,7 +149,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
           onClick={() => void submitInternalAction()}>{creating ? "Recording…" : "Create governed action"}</button>
       </div></details>}
       {actions.length > 0 ? <div className="car-rca-table-scroll"><table className="car-rca-review-list" role="table">
-        <caption>Individually governed corrective and preventive actions — {actions.length}</caption>
+        <caption>Actions ({actions.length})</caption>
         <thead><tr><th>Action</th><th>Owner / due</th><th>Status</th><th>Evidence</th><th>Quality decision</th></tr></thead>
         <tbody>{actions.map(action => <tr key={action.id}>
           <td><strong>{action.action_number} · {action.kind}</strong><p>{action.description}</p></td>
@@ -163,8 +159,8 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
             const file = attachments.find(item => source === `CAR-ATTACHMENT:${item.id}`);
             return <li key={index}>{file && onOpenEvidence ? <button type="button" disabled={openingId === file.id} onClick={() => void onOpenEvidence(file.id, file.filename)}>{openingId === file.id ? "Opening…" : file.filename}</button> : source}</li>;
           })}</ul> : "No evidence referenced"}</td>
-          <td data-label="Quality decision">{action.quality_review_note && <p>Last decision: {action.quality_review_note}</p>}
-            {!action.quality_review_note && !(canReview && ["PROPOSED","SUBMITTED"].includes(action.state)) && <p className="case-muted">{["PROPOSED","SUBMITTED"].includes(action.state) ? "Awaiting independent Quality review." : "No review note recorded."}</p>}
+          <td data-label="Quality decision">{action.quality_review_note && <p>{action.quality_review_note}</p>}
+            {!action.quality_review_note && !(canReview && ["PROPOSED","SUBMITTED"].includes(action.state)) && <p className="case-muted">{["PROPOSED","SUBMITTED"].includes(action.state) ? "Awaiting independent Quality review." : "—"}</p>}
             {canReview && (action.state === "PROPOSED" || action.state === "SUBMITTED") && <div className="car-rca-analysis">
               <label className="car-rca-field">Independent Quality rationale
                 <textarea rows={2} maxLength={8000} value={notes[action.id] || ""} disabled={Boolean(busy)}
@@ -178,32 +174,7 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
                 onClick={() => void review(action, "REJECTED")}>Return for rework</button>
             </div>}
           </td></tr>)}</tbody>
-      </table></div> : <p>No individual actions recorded.</p>}
-      {retained.length > 0 && <details>
-        <summary>Retained recalled CAR responses ({retained.length})</summary>
-        <p>These revisions remain in the audit history but are excluded from the active Quality review queue.</p>
-        <ol>{retained.map(record => <li key={record.id}>
-          <strong>Original submission: {record.submitted_at ? new Date(record.submitted_at).toLocaleString() : "Unknown date"}</strong>
-          <p>{record.reason}</p>
-          <details><summary>View retained original fields</summary>
-            <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{JSON.stringify(record.snapshot, null, 2)}</pre>
-          </details>
-        </li>)}</ol>
-      </details>}
-      {events.length > 0 && <details>
-        <summary>Attributable action implementation and Quality decisions ({events.length})</summary>
-        <ol>{events.map(event => <li key={event.id}>
-          <strong>{event.previous_state || "NEW"} → {event.next_state}</strong>
-          <p>{event.actor_kind}: {event.actor_ref || "Unattributed"} · {new Date(event.created_at).toLocaleString()}</p>
-          <p>{event.reason}</p>
-        </li>)}</ol>
-      </details>}
-      {revisions.length > 0 && <details>
-        <summary>Attributed investigation revisions ({revisions.length})</summary>
-        <ol>{revisions.map(event => <li key={event.id}><strong>{event.event_type} · r{event.revision}</strong>
-          <p>{event.actor_kind}: {event.actor_ref || "unattributed"} · {new Date(event.created_at).toLocaleString()}</p>
-          <p>{event.reason}</p></li>)}</ol>
-      </details>}
+      </table></div> : null}
     </>}
   </section>;
 }

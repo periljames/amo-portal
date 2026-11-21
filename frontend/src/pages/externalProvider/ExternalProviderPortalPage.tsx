@@ -7,6 +7,7 @@ import {
   serializeRegistrationCredential, serializeAssertionCredential,
 } from "../../lib/webauthn";
 import "./external-provider-portal.css";
+import { invitationNotice, type DeliveryReceipt } from "./invitationDelivery";
 
 type Account = {
   csrf: string; identity_id: string; amo_id: string; supplier_id: number;
@@ -51,11 +52,11 @@ async function vendorFetch<T>(path: string, data?: object, csrf?: string, method
 
 const Field: React.FC<{
   title: string; type?: string; value: string; onChange: (v: string) => void;
-  required?: boolean; autoComplete?: string;
-}> = ({ title, type = "text", value, onChange, required, autoComplete }) => (
+  required?: boolean; autoComplete?: string; inputMode?: "text" | "numeric";
+}> = ({ title, type = "text", value, onChange, required, autoComplete, inputMode }) => (
   <label className="vendor-field"><span>{title}</span>
     <input aria-label={title} type={type} value={value} required={required}
-      autoComplete={autoComplete} onChange={(event) => onChange(event.target.value)} />
+      autoComplete={autoComplete} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} />
   </label>
 );
 export default function ExternalProviderPortalPage() {
@@ -113,10 +114,14 @@ export default function ExternalProviderPortalPage() {
   async function perform(action: () => Promise<unknown>, success: string, logout = false) {
     setBusy(true); setError(""); setNotice("");
     try {
-      await action();
-      setNotice(success);
+      const result = await action() as { delivery?: DeliveryReceipt } | undefined;
+      if (result?.delivery) {
+        const delivery = invitationNotice(result.delivery);
+        if (delivery.tone === "success") setNotice(delivery.message + " Quality approval is still required.");
+        else setError(delivery.message);
+      } else setNotice(success);
       setPassword(""); setNewPassword(""); setCode(""); setTotpCode("");
-      if (logout) { setAccount(null); navigate(pathFor("login")); }
+      if (logout) { setAccount(null); navigate(`${pathFor("login")}${amoSlug ? `?amo=${encodeURIComponent(amoSlug)}` : ""}`); }
       else await reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to complete action.");
@@ -178,16 +183,16 @@ export default function ExternalProviderPortalPage() {
       }, "Signed in.");
     } else if (mode === "invite") {
       void perform(() => vendorFetch("/invitations/accept", {
-        code, password: newPassword || null, display_name: name || null,
+        code: code.replace(/\s+/g, ""), amo_slug: amoSlug.trim(), email: email.trim(), password: newPassword || null, display_name: name || null,
       }), "Email verified. Your tenant administrator must activate your access.", true);
     } else if (mode === "forgot") {
       void perform(() => vendorFetch("/password/forgot", { amo_slug: amoSlug, email }),
         "If the account exists, a recovery code will be sent.");
     } else if (mode === "reset") {
-      void perform(() => vendorFetch("/password/reset", { code, password: newPassword }),
+      void perform(() => vendorFetch("/password/reset", { code: code.replace(/\s+/g, ""), amo_slug: amoSlug.trim(), email: email.trim(), password: newPassword }),
         "Password changed. Sign in with your new credentials.", true);
     } else if (mode === "verify") {
-      void perform(() => vendorFetch("/verification/confirm", { code }),
+      void perform(() => vendorFetch("/verification/confirm", { code: code.replace(/\s+/g, ""), amo_slug: amoSlug.trim(), email: email.trim() }),
         "Email verified. Quality must approve reactivation.", true);
     }
   };
@@ -199,7 +204,7 @@ export default function ExternalProviderPortalPage() {
       <header className="vendor-header">
         <div><span className="vendor-eyebrow">AMO PORTAL · EXTERNAL PROVIDERS</span>
           <h1>Vendor access</h1>
-          <p>Managed access to assigned work only. Vendor keys identify organizations, not passwords.</p>
+          <p>Sign in to your provider account or accept an invitation from your AMO.</p>
         </div>
         <nav aria-label="Vendor account navigation">
           {authenticated ? <>
@@ -217,8 +222,11 @@ export default function ExternalProviderPortalPage() {
         <h2>{mode === "login" ? "Sign in" : mode === "invite" ? "Accept invitation" :
           mode === "forgot" ? "Recover account" : mode === "verify" ? "Verify your account" : "Reset password"}</h2>
         {mode === "login" && <p>Use the AMO code and email address from your invitation. Your AMO Quality Manager issues and activates vendor accounts.</p>}
+        {mode === "invite" && <p>Enter the one-time code emailed to your invited address. After verification, your AMO Quality team must approve account access.</p>}
+        {mode === "verify" && <p>Use the latest verification code sent by your AMO. Request a replacement from the Quality team if it has expired.</p>}
+        {mode === "reset" && <p>Enter your recovery code and choose a new password to regain access.</p>}
         <form onSubmit={submit}>
-          {["login", "forgot"].includes(mode) && <>
+          {["login", "forgot", "invite", "reset", "verify"].includes(mode) && <>
             <Field title="AMO tenant code" value={amoSlug} onChange={setAmoSlug} required />
             <Field title="Email address" type="email" value={email} onChange={setEmail} required autoComplete="email" />
           </>}
@@ -227,17 +235,18 @@ export default function ExternalProviderPortalPage() {
             <Field title="Password" type="password" value={password} onChange={setPassword} required autoComplete="current-password" />
             <Field title="MFA code (when enrolled)" value={totpCode} onChange={setTotpCode} />
           </>}
-          {["invite", "reset", "verify"].includes(mode) && <Field title="One-time email code" value={code} onChange={setCode} required />}
-          {["invite", "reset"].includes(mode) && <Field title="New password (invited existing users may leave blank)" type="password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" required={mode === "reset"} />}
+          {["invite", "reset", "verify"].includes(mode) && <><Field title="One-time email code" value={code} onChange={setCode} required autoComplete="one-time-code" inputMode="numeric" /><p className="vendor-code-help">Enter the six-digit code from your latest email. It expires after 10 minutes.</p></>}
+          {["invite", "reset"].includes(mode) && <Field title="Password (required for a new account)" type="password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" required={mode === "reset"} />}
           <button className="vendor-primary" type="submit" disabled={busy}>{busy ? "Processing…" :
             mode === "login" ? "Secure sign in" : mode === "invite" ? "Accept invitation" :
               mode === "forgot" ? "Send recovery code" : mode === "verify" ? "Verify" : "Reset password"}</button>
         </form>
+        {mode === "invite" && <div className="vendor-code-resend"><span>Code expired or missing?</span><button type="button" disabled={busy || !amoSlug.trim() || !email.trim()} onClick={() => void perform(() => vendorFetch("/invitations/request-code", {amo_slug:amoSlug.trim(),email:email.trim()}), "If a pending invitation matches, a new code will be emailed. Check the latest email; the code expires in 10 minutes. Wait a minute before requesting another.")}>Send a new code</button></div>}
         <div className="vendor-links">
-          <Link to={pathFor("invite")}>Invitation</Link>
-          <Link to={pathFor("forgot")}>Forgot password</Link>
-          <Link to={pathFor("reset")}>Enter recovery code</Link>
-          <Link to={pathFor("verify")}>Re-verification</Link>
+          <Link to={`${pathFor("invite")}${amoSlug ? `?amo=${encodeURIComponent(amoSlug)}` : ""}`}>Invitation</Link>
+          <Link to={`${pathFor("forgot")}${amoSlug ? `?amo=${encodeURIComponent(amoSlug)}` : ""}`}>Forgot password</Link>
+          <Link to={`${pathFor("reset")}${amoSlug ? `?amo=${encodeURIComponent(amoSlug)}` : ""}`}>Enter recovery code</Link>
+          <Link to={`${pathFor("verify")}${amoSlug ? `?amo=${encodeURIComponent(amoSlug)}` : ""}`}>Re-verification</Link>
         </div>
       </section>}
       {["denied","revoked"].includes(mode) && !authenticated && <section className="vendor-card vendor-auth" role="alert">

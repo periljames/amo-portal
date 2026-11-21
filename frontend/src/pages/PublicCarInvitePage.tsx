@@ -1,5 +1,5 @@
 import InlineLoading from "../components/shared/InlineLoading";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -41,6 +41,8 @@ import {
 import { getApiBaseUrl } from "../services/config";
 import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
 import { emptyCarRca, getCarRcaInvite, saveCarRcaInvite, type CarRcaDocument, type CarRcaAction } from "../services/qmsCarRca";
+import { RESPONSE_SECTIONS, type ResponseSection } from "./qualityAudits/carResponseEvidence";
+import ResponseTextArea, { ResponseText } from "../components/QMS/carRca/ResponseTextArea";
 import CarRcaWorkbench from "../components/QMS/carRca/CarRcaWorkbench";
 import CarRcaActions from "../components/QMS/carRca/CarRcaActions";
 import CarFeedbackPanel from "../components/QMS/carRca/CarFeedbackPanel";
@@ -162,6 +164,7 @@ type CameraState = {
   stream: MediaStream | null;
   error: string | null;
   opening: boolean;
+  ready?: boolean;
 };
 
 type StructuredTextFieldProps = {
@@ -297,15 +300,9 @@ const isInviteEvidenceFileAllowed = (file: File): { ok: true } | { ok: false; re
   return { ok: false, reason: `${file.name} is not an accepted evidence type.` };
 };
 
-const inviteShareUrl = (invite: CARInviteOut, tokenValue: string): string => {
-  if (invite.invite_url) return invite.invite_url;
-  if (typeof window !== "undefined") return `${window.location.origin}/car-invite?token=${encodeURIComponent(tokenValue)}`;
-  return `/car-invite?token=${encodeURIComponent(tokenValue)}`;
-};
-
-const insertAtSelection = (source: string, insertText: string, start: number, end: number): { value: string; cursor: number } => {
-  const next = clampResponseText(`${source.slice(0, start)}${insertText}${source.slice(end)}`);
-  return { value: next, cursor: Math.min(start + insertText.length, next.length) };
+const inviteShareUrl = (_invite: CARInviteOut, tokenValue: string): string => {
+  const path = `/qms/car-access/${encodeURIComponent(tokenValue)}?capture=1`;
+  return typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
 };
 
 const isInviteEditable = (invite: CARInviteOut | null): boolean => {
@@ -321,121 +318,16 @@ const canSubmitInvite = (invite: CARInviteOut | null): boolean => {
 
 const fieldHasValue = (value: string): boolean => Boolean(value.trim());
 
-const romanValues: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-const romanToNumber = (value: string): number => {
-  const letters = value.toLowerCase();
-  let total = 0;
-  for (let index = 0; index < letters.length; index += 1) {
-    const current = romanValues[letters[index]] ?? 0;
-    const next = romanValues[letters[index + 1]] ?? 0;
-    total += current < next ? -current : current;
-  }
-  return Math.max(1, total);
-};
-
-const numberToRoman = (value: number): string => {
-  const pairs: Array<[number, string]> = [
-    [1000, "m"],
-    [900, "cm"],
-    [500, "d"],
-    [400, "cd"],
-    [100, "c"],
-    [90, "xc"],
-    [50, "l"],
-    [40, "xl"],
-    [10, "x"],
-    [9, "ix"],
-    [5, "v"],
-    [4, "iv"],
-    [1, "i"],
-  ];
-  let remaining = Math.max(1, Math.min(value, 99));
-  let output = "";
-  pairs.forEach(([amount, letter]) => {
-    while (remaining >= amount) {
-      output += letter;
-      remaining -= amount;
-    }
-  });
-  return output;
-};
-
-const nextListPrefix = (line: string): string | null => {
-  const bullet = line.match(/^(\s*)([-•*])\s+/);
-  if (bullet) return `${bullet[1]}${bullet[2]} `;
-  const numeric = line.match(/^(\s*)(\d+)([.)])\s+/);
-  if (numeric) return `${numeric[1]}${Number(numeric[2]) + 1}${numeric[3]} `;
-  const roman = line.match(/^(\s*)([ivxlcdm]+)([.)])\s+/i);
-  if (roman) return `${roman[1]}${numberToRoman(romanToNumber(roman[2]) + 1)}${roman[3]} `;
-  return null;
-};
-
 const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value, required, disabled, placeholder, onChange, note, toolbarActions, maxChars = MAX_RESPONSE_CHARS }) => {
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-  const remaining = maxChars - value.length;
-
-  const insertListMarker = (marker: "• " | "1. " | "i. ") => {
-    if (disabled) return;
-    const textarea = ref.current;
-    const start = textarea?.selectionStart ?? value.length;
-    const end = textarea?.selectionEnd ?? value.length;
-    const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    const prefix = start === lineStart || value.slice(lineStart, start).trim() === "" ? marker : `\n${marker}`;
-    const { value: next, cursor } = insertAtSelection(value, prefix, start, end);
-    const bounded = next.slice(0, maxChars);
-    onChange(bounded);
-    window.setTimeout(() => {
-      textarea?.focus();
-      const boundedCursor = Math.min(cursor, bounded.length);
-      textarea?.setSelectionRange(boundedCursor, boundedCursor);
-    }, 0);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || disabled) return;
-    const textarea = event.currentTarget;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const beforeCursor = value.slice(0, start);
-    const currentLine = beforeCursor.split("\n").pop() ?? "";
-    const prefix = nextListPrefix(currentLine);
-    if (!prefix) return;
-    event.preventDefault();
-    const { value: next, cursor } = insertAtSelection(value, `\n${prefix}`, start, end);
-    const bounded = next.slice(0, maxChars);
-    onChange(bounded);
-    window.setTimeout(() => {
-      const boundedCursor = Math.min(cursor, bounded.length);
-      textarea.setSelectionRange(boundedCursor, boundedCursor);
-    }, 0);
-  };
-
-  return (
-    <label className="car-invite-field car-invite-field--full">
-      <span>{label}{required && <em aria-hidden="true">*</em>}</span>
-      <div className="car-invite-editor" aria-label={`${label} structured editor`}>
-        <div className="car-invite-editor__toolbar">
-          <button type="button" disabled={disabled} onClick={() => insertListMarker("• ")} title="Start bullet list"><List size={15} /><span>Bullets</span></button>
-          <button type="button" disabled={disabled} onClick={() => insertListMarker("1. ")} title="Start numbered list"><ListOrdered size={15} /><span>Numbers</span></button>
-          <button type="button" disabled={disabled} onClick={() => insertListMarker("i. ")} title="Start roman numeral list"><span>i. ii.</span></button>
-          <span className={`car-invite-editor__count ${remaining < 50 ? "is-low" : ""}`}>{remaining} characters left</span>
-          {toolbarActions ? <span className="car-invite-editor__actions">{toolbarActions}</span> : null}
-        </div>
-        <textarea
-          ref={ref}
-          className="car-invite-textarea"
-          value={value}
-          disabled={disabled}
-          maxLength={maxChars}
-          onChange={(event) => onChange(event.target.value.slice(0, maxChars))}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          required={required}
-        />
-      </div>
-      {note && <small className="car-invite-auditor-note">Auditor guidance: {note}</small>}
-    </label>
-  );
+  const id=useId();
+  return <div className="car-invite-field car-invite-field--full">
+    <label htmlFor={id}>{label}{required&&<em aria-hidden="true">*</em>}</label>
+    <div className="car-invite-editor" aria-label={`${label} structured editor`}>
+      {toolbarActions&&<div className="car-invite-editor__toolbar">{toolbarActions}</div>}
+      <ResponseTextArea id={id} aria-label={label} value={value} onValueChange={onChange} disabled={disabled} maxLength={maxChars} placeholder={placeholder} required={required}/>
+    </div>
+    {note&&<small className="car-invite-auditor-note">Quality guidance: {note}</small>}
+  </div>;
 };
 
 const InviteQr: React.FC<{ value: string }> = ({ value }) => {
@@ -499,7 +391,7 @@ const SubmissionPreview: React.FC<{
           {rows.map(([label, text]) => (
             <div key={label}>
               <span>{label}</span>
-              <strong>{text}</strong>
+              <div className="response-text-area__preview"><ResponseText value={text}/></div>
             </div>
           ))}
         </div>
@@ -518,6 +410,9 @@ const SubmissionPreview: React.FC<{
 const PublicCarInvitePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
+  const captureMode = searchParams.get("capture") === "1";
+  const [evidenceSections,setEvidenceSections]=useState<Record<string,ResponseSection|"">>({});
+  const [evidenceMetadataBusy,setEvidenceMetadataBusy]=useState<string|null>(null);
   const [entries, setEntries] = useState<InviteEntry[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<SelectedPreview | null>(null);
   const [submissionPreviewToken, setSubmissionPreviewToken] = useState<string | null>(null);
@@ -530,6 +425,7 @@ const PublicCarInvitePage: React.FC = () => {
   const pendingUploads = useRef(new Set<string>());
   const knownTokens = useRef(new Set<string>());
   const loadGeneration = useRef(0);
+  const cameraRequest = useRef(0);
   const activeCameraStream = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -570,10 +466,11 @@ const PublicCarInvitePage: React.FC = () => {
   useEffect(() => {
     if (!camera?.stream || !videoRef.current) return;
     videoRef.current.srcObject = camera.stream;
-    void videoRef.current.play().catch(() => undefined);
+    void videoRef.current.play().catch(() => setCamera(current => current ? {...current, error:"Camera preview could not start. Use Take photo or Upload files instead."} : null));
   }, [camera?.stream]);
 
   const stopCamera = () => {
+    cameraRequest.current++;
     activeCameraStream.current?.getTracks().forEach((track) => track.stop());
     activeCameraStream.current = null;
     setCamera(null);
@@ -604,7 +501,7 @@ const PublicCarInvitePage: React.FC = () => {
     }
     const current = latestEntries.current.find(item => item.token === tokenValue);
     if (!current?.rcaLoaded || !current.invite || !isInviteEditable(current.invite)) return false;
-    if (!current.invite.structured_rca_required && !current.rca.investigations.length && !current.rca.supported_cause_ids.length) return true;
+    if (!force && !current.invite.structured_rca_required && !current.rca.investigations.length && !current.rca.supported_cause_ids.length && !current.rca.conclusion_evidence_references.length) return true;
     const saved = JSON.stringify({ form: current.form, investigation: current.rca });
     if (saved === current.rcaSavedSignature) return true;
     if (current.rcaError && !force) return false;
@@ -639,7 +536,7 @@ const PublicCarInvitePage: React.FC = () => {
   useEffect(() => {
     const unsaved = entries.filter(entry =>
       entry.state === "ready" && entry.rcaLoaded && !entry.rcaSaving && !entry.rcaError &&
-      (entry.invite?.structured_rca_required || entry.rca.investigations.length > 0 || entry.rca.supported_cause_ids.length > 0) &&
+      (entry.invite?.structured_rca_required || entry.rca.investigations.length > 0 || entry.rca.supported_cause_ids.length > 0 || entry.rca.conclusion_evidence_references.length > 0) &&
       !entry.submitting && !entry.recalling && entry.invite && isInviteEditable(entry.invite) &&
       JSON.stringify({ form: entry.form, investigation: entry.rca }) !== entry.rcaSavedSignature
     );
@@ -713,6 +610,7 @@ const PublicCarInvitePage: React.FC = () => {
   const stepIndex = (stepId: InviteStepId): number => INVITE_STEPS.findIndex((step) => step.id === stepId);
 
   const isStepUnlocked = (entry: InviteEntry, stepId: InviteStepId): boolean => {
+    if (captureMode && stepId === "evidence") return true;
     if (entry.invite && !isInviteEditable(entry.invite)) return true;
     const index = stepIndex(stepId);
     if (index <= 0) return true;
@@ -720,6 +618,7 @@ const PublicCarInvitePage: React.FC = () => {
   };
 
   const getActiveStep = (entry: InviteEntry): InviteStepId => {
+    if (captureMode && entry.invite && isInviteEditable(entry.invite)) return "evidence";
     const preferred = activeSteps[entry.token];
     if (preferred && isStepUnlocked(entry, preferred)) return preferred;
     if (entry.invite && !isInviteEditable(entry.invite)) return "review";
@@ -798,6 +697,7 @@ const PublicCarInvitePage: React.FC = () => {
           ? savedRca.submitted_snapshot.investigation
           : savedRca?.draft.investigation
       ) || emptyCarRca(data.value.summary);
+      if (!investigation.conclusion && selectedForm.root_cause) investigation.conclusion = selectedForm.root_cause;
       if (investigation.conclusion && !localRecovery) selectedForm.root_cause = investigation.conclusion;
       const nextEntry: InviteEntry = {
           ...createEntry(tokenValue),
@@ -995,7 +895,7 @@ const PublicCarInvitePage: React.FC = () => {
           ...entry, uploadProgress: { total: uploads.length, completed: results.length + failures.length, current: upload.name },
         }));
         try {
-          const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload);
+          const uploaded = await qmsUploadCarInviteAttachment(tokenValue, upload, undefined, evidenceSections[tokenValue] || undefined);
           results.push(uploaded);
           updateEntry(tokenValue, entry => ({
             ...entry, attachments: [...entry.attachments.filter(item => item.id !== uploaded.id), uploaded],
@@ -1015,9 +915,10 @@ const PublicCarInvitePage: React.FC = () => {
   };
 
   const handleUpload = (tokenValue: string) => async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles: File[] = event.target.files ? Array.from(event.target.files) : [];
+    const input = event.currentTarget;
+    const selectedFiles = Array.from(input.files || []);
+    input.value = "";
     await uploadFiles(tokenValue, selectedFiles);
-    event.target.value = "";
   };
 
   const refreshEvidence = async (tokenValue: string) => {
@@ -1041,6 +942,12 @@ const PublicCarInvitePage: React.FC = () => {
     }
   };
 
+  const updateEvidenceSection = async(tokenValue:string,attachmentId:string,section:ResponseSection|"")=>{
+    setEvidenceMetadataBusy(attachmentId);
+    try {const result=await qmsUpdateCarInviteAttachment(tokenValue,attachmentId,{response_section:section||null});updateEntry(tokenValue,entry=>({...entry,attachments:entry.attachments.map(file=>file.id===attachmentId?result:file),attachmentsError:null}));}
+    catch(cause){updateEntry(tokenValue,entry=>({...entry,attachmentsError:getErrorMessage(cause,"Evidence section was not saved. Try again.")}));}
+    finally{setEvidenceMetadataBusy(null);}
+  };
   const updateAttachmentDescription = async (tokenValue: string, attachmentId: string, description: string) => {
     const current = entries.find((entry) => entry.token === tokenValue);
     if (!current?.invite || !isInviteEditable(current.invite)) return;
@@ -1101,21 +1008,21 @@ const PublicCarInvitePage: React.FC = () => {
       updateEntry(tokenValue, (entry) => ({ ...entry, attachmentsError: current?.invite?.locked_reason || "This CAR is not editable." }));
       return;
     }
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       if (!triggerCaptureInput(tokenValue)) {
         updateEntry(tokenValue, (entry) => ({ ...entry, attachmentsError: "Camera requires HTTPS or localhost. Use Upload files from this device." }));
       }
       return;
     }
-    setCamera({ token: tokenValue, stream: null, error: null, opening: true });
+    const requestId = ++cameraRequest.current;
+    setCamera({ token: tokenValue, stream: null, error: null, opening: true, ready:false });
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-      setCamera({ token: tokenValue, stream, error: null, opening: false });
+      if (requestId !== cameraRequest.current) { stream.getTracks().forEach(track=>track.stop()); return; }
+      setCamera({ token: tokenValue, stream, error: null, opening: false, ready:false });
     } catch (error: unknown) {
-      setCamera(null);
-      if (!triggerCaptureInput(tokenValue)) {
-        updateEntry(tokenValue, (entry) => ({ ...entry, attachmentsError: getErrorMessage(error, "Camera permission was denied or unavailable.") }));
-      }
+      if (requestId !== cameraRequest.current) return;
+      setCamera({token:tokenValue,stream:null,opening:false,error:getErrorMessage(error,"Camera unavailable. Use Take photo or Upload files below.")});
     }
   };
 
@@ -1123,8 +1030,11 @@ const PublicCarInvitePage: React.FC = () => {
     if (!camera?.token || !videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    if (!camera.ready || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      setCamera(current=>current?{...current,error:"Wait for the camera preview before capturing."}:null); return;
+    }
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const context = canvas.getContext("2d");
     if (!context) return;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -1202,7 +1112,7 @@ const PublicCarInvitePage: React.FC = () => {
               const dueCountdown = countdownText(invite?.due_date || invite?.target_closure_date, now);
               const locked = !isInviteEditable(invite) || entry.submitting;
               const canSubmit = canSubmitInvite(invite);
-              const shareUrl = invite ? inviteShareUrl(invite, entry.token) : "";
+              const shareUrl = `${window.location.origin}/qms/car-access/${encodeURIComponent(entry.token)}?capture=1`;
               const activeStep = getActiveStep(entry);
 
               return (
@@ -1248,6 +1158,13 @@ const PublicCarInvitePage: React.FC = () => {
                         </dl>
                       </section>
 
+                      <input hidden id={`evidence-${entry.token}`} type="file" multiple disabled={locked || entry.uploading} onChange={handleUpload(entry.token)} accept={INVITE_EVIDENCE_ACCEPT}/>
+                      <input hidden id={`camera-file-${entry.token}`} type="file" capture="environment" disabled={locked || entry.uploading} onChange={handleUpload(entry.token)} accept="image/*"/>
+                      {!locked&&<div className="car-invite-evidence-actions" aria-label="Add CAR evidence">
+                        <button type="button" className="car-invite-btn" disabled={entry.uploading} onClick={()=>document.getElementById(`evidence-${entry.token}`)?.click()}><Paperclip size={16}/>Upload files</button>
+                        <button type="button" className="car-invite-btn" disabled={entry.uploading} onClick={()=>void openCamera(entry.token)}><Camera size={16}/>Take photo</button>
+                        <label>Evidence for<select aria-label="Evidence response section" value={evidenceSections[entry.token]||""} disabled={entry.uploading} onChange={event=>setEvidenceSections(current=>({...current,[entry.token]:event.target.value as ResponseSection|""}))}><option value="">General evidence</option>{RESPONSE_SECTIONS.map(section=><option key={section.value} value={section.value}>{section.label}</option>)}</select></label><span>{entry.attachments.length} attached</span>
+                      </div>}
                       <form className="car-invite-form" onSubmit={handleSubmit(entry.token)}>
                         <div className="car-invite-flow-shell">
                           <aside className="car-invite-stage-rail" aria-label="Corrective action response progress">
@@ -1334,14 +1251,6 @@ const PublicCarInvitePage: React.FC = () => {
                                       }))}>Keep server version</button>
                                     </div>}
                                     {entry.rcaError && <div className="car-invite-error" role="alert">{entry.rcaError}<button type="button" onClick={() => void loadInvite(entry.token)}>Reload investigation</button></div>}
-                                    {!invite.structured_rca_required && <StructuredTextField
-                                      label="Root cause analysis (legacy narrative response)"
-                                      required value={entry.form.root_cause} disabled={locked}
-                                      onChange={(value) => updateFormField(entry.token, "root_cause", value)}
-                                      placeholder="Describe the cause, contributing factors and the evidence supporting your conclusion."
-                                      note={invite.root_cause_review_note}
-                                    />}
-                                    {!invite.structured_rca_required && <p className="car-invite-subtitle">This CAR predates controlled structured RCA. The existing response remains valid. You may optionally adopt the guided methods below; doing so requires completing and saving their supporting evidence before final submission.</p>}
                                     <CarRcaWorkbench value={entry.rca} attachments={entry.attachments.map(file => ({ id: file.id, filename: file.filename }))} disabled={locked || !entry.rcaLoaded}
                                       onChange={(investigation) => updateEntry(entry.token, (current) => ({
                                         ...current, rca: investigation,
@@ -1402,8 +1311,6 @@ const PublicCarInvitePage: React.FC = () => {
 
                                 {active && step.id === "evidence" && (
                                   <div className="car-invite-stage__body car-invite-evidence-compact">
-                                    <input id={`evidence-${entry.token}`} type="file" multiple disabled={locked || entry.uploading} onChange={handleUpload(entry.token)} accept={INVITE_EVIDENCE_ACCEPT} />
-                                    <input id={`camera-file-${entry.token}`} type="file" capture="environment" disabled={locked || entry.uploading} onChange={handleUpload(entry.token)} accept="image/*,video/*" />
                                     <StructuredTextField
                                       label="Evidence reference"
                                       value={entry.form.evidence_ref}
@@ -1414,7 +1321,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       toolbarActions={
                                         <>
                                           <button type="button" className="car-invite-icon-btn" disabled={locked || entry.uploading} onClick={() => openCamera(entry.token)} title="Open camera" aria-label="Open camera"><Camera size={16} /></button>
-                                          <label className="car-invite-icon-btn" htmlFor={`evidence-${entry.token}`} title="Attach evidence" aria-label="Attach evidence"><Paperclip size={16} /></label>
+                                          <button type="button" className="car-invite-icon-btn" disabled={locked || entry.uploading} onClick={()=>document.getElementById(`evidence-${entry.token}`)?.click()} title="Attach evidence" aria-label="Attach evidence"><Paperclip size={16}/></button>
                                         </>
                                       }
                                     />
@@ -1422,7 +1329,7 @@ const PublicCarInvitePage: React.FC = () => {
                                       <summary><QrCodeIcon size={15} /> Use phone camera</summary>
                                       <div>
                                         <p>Scan this QR on a phone to capture field photos or video directly against this CAR.</p>
-                                        <InviteQr value={shareUrl} />
+                                        <InviteQr value={shareUrl} /><a href={shareUrl} className="car-invite-btn">Open phone capture page</a>
                                       </div>
                                     </details>
                                     {entry.uploading && <div className="car-invite-notice" role="status">
@@ -1450,6 +1357,7 @@ const PublicCarInvitePage: React.FC = () => {
                                                 </span>
                                                 <strong>{attachment.filename}</strong>
                                               </button>
+                                              <label className="car-invite-field">Response section<select aria-label={`Response section for ${attachment.filename}`} value={attachment.response_section||""} disabled={locked||evidenceMetadataBusy===attachment.id} onChange={event=>void updateEvidenceSection(entry.token,attachment.id,event.target.value as ResponseSection|"")}><option value="">General evidence</option>{RESPONSE_SECTIONS.map(section=><option key={section.value} value={section.value}>{section.label}</option>)}</select></label>
                                               <label className="car-invite-field car-invite-field--evidence-note">
                                                 <span>Short description for auditor</span>
                                                 <input
@@ -1645,11 +1553,11 @@ const PublicCarInvitePage: React.FC = () => {
             </div>
             {camera.opening && <div className="car-invite-notice"><Camera size={18} /> Opening camera…</div>}
             {camera.error && <div className="car-invite-error"><AlertTriangle size={18} /> {camera.error}</div>}
-            {camera.stream && <video ref={videoRef} className="car-invite-camera-video" playsInline muted />}
+            {camera.stream && <video ref={videoRef} className="car-invite-camera-video" autoPlay playsInline muted onLoadedData={()=>setCamera(current=>current?{...current,ready:true,error:null}:null)} />}
             <canvas ref={canvasRef} hidden />
             <div className="car-invite-submit-row">
-              <button type="button" className="car-invite-btn" onClick={stopCamera}>Cancel</button>
-              <button type="button" className="car-invite-btn car-invite-btn--primary" disabled={!camera.stream} onClick={capturePhoto}><Camera size={16} /> Capture and upload</button>
+              <button type="button" className="car-invite-btn" onClick={stopCamera}>Cancel</button><button type="button" className="car-invite-btn" onClick={()=>{const key=camera.token;stopCamera();triggerCaptureInput(key);}}>Use device camera</button><button type="button" className="car-invite-btn" onClick={()=>{const key=camera.token;stopCamera();document.getElementById(`evidence-${key}`)?.click();}}>Upload files instead</button>
+              <button type="button" className="car-invite-btn car-invite-btn--primary" disabled={!camera.stream || !camera.ready} onClick={capturePhoto}><Camera size={16} /> Capture and upload</button>
             </div>
           </div>
         </div>

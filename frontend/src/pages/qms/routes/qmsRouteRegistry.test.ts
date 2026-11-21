@@ -20,7 +20,7 @@ describe("QMS route registry", () => {
       expect(route.id.trim()).not.toBe("");
       expect(route.label.trim()).not.toBe("");
       expect(route.navigationLabel.trim()).not.toBe("");
-      if (route.id === "provider-access") expect(route.permission).toBe("qms.audit.manage");
+      if (route.id === "provider-access") expect(route.permission).toBe("qms.external.view");
       else expect(route.permission).toMatch(/^qms\.[a-z0-9_-]+\.view$/);
       expect(route.validViews.length).toBeGreaterThan(0);
       expect(route.validViews).toContain(route.defaultView);

@@ -1,8 +1,10 @@
-import React,{useCallback,useEffect,useMemo,useState} from "react";
+import React,{useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {Link,useLocation,useParams} from "react-router-dom";
 import {apiRequest} from "../../services/apiClient";
 import {getCachedUser} from "../../services/auth";
 import {isTenantAdmin} from "../../utils/tenantAccess";
+import "./contracted-work.css";
+import WorkLifecycle from "../../features/externalPartner/WorkLifecycle";
 import ProviderAlertSettingsPanel from "../../components/notifications/ProviderAlertSettingsPanel";
 
 type Provider={id:string;supplier_id:number;legal_name:string};
@@ -30,13 +32,18 @@ const EVIDENCE=["INSPECTION_REPORT","STRIP_REPORT","TEST_RESULT","MAINTENANCE_RE
 const CUSTODY=["COMPONENT","EXCHANGE","LOAN","TOOL","EQUIPMENT","CUSTOMER_PROPERTY","MATERIAL","CONSUMABLE"];
 
 export default function ContractedWorkModule(){
-  const {amoCode=""}=useParams();
+  const {amoCode:routeAmoCode}=useParams();
   const location=useLocation();
+  // The workspace router also mounts this module directly, outside a Route.
+  const amoCode=routeAmoCode||decodeURIComponent(location.pathname.split("/")[2]||"");
   const deepLinkedWork=new URLSearchParams(location.search).get("work")||"";
   const notificationRole=String(getCachedUser()?.role||"").toUpperCase();
   const canConfigureAlerts=isTenantAdmin(getCachedUser()) || ["BASE_MAINTENANCE_MANAGER","LINE_MAINTENANCE_MANAGER",
     "WORKSHOP_MANAGER","ADMIN","TENANT_ADMIN","ACCOUNTABLE_EXECUTIVE","SUPERADMIN","ADMINISTRATOR"].includes(notificationRole);
   const root="/api/maintenance/"+encodeURIComponent(amoCode)+"/contracted-work";
+  const detailSequence=useRef(0);
+  const [detailLoading,setDetailLoading]=useState(false);
+  const [queueSearch,setQueueSearch]=useState("");
   const [items,setItems]=useState<WorkList[]>([]);
   const [options,setOptions]=useState<Options|null>(null);
   const [selected,setSelected]=useState("");
@@ -102,21 +109,27 @@ export default function ContractedWorkModule(){
     finally{setLoading(false);}
   },[root,deepLinkedWork]);
   const reloadDetail=useCallback(async()=>{
-    if(!selected){setDetail(null);return;}
+    const requestId=++detailSequence.current;
+    setDetail(null);setCandidates([]);setGrants([]);
+    if(!selected){setDetailLoading(false);return;}
+    setDetailLoading(true);
     try{const [value,evidence,assigned]=await Promise.all([
       apiRequest<Detail>(root+"/"+encodeURIComponent(selected),{cacheTtlMs:0}),
       apiRequest<{items:Candidate[]}>(root+"/"+encodeURIComponent(selected)+"/available-evidence",{cacheTtlMs:0}),
       apiRequest<{items:Grant[]}>(root+"/"+encodeURIComponent(selected)+"/grants",{cacheTtlMs:0}).catch(()=>({items:[]})),
     ]);
+      if(requestId!==detailSequence.current)return;
       setDetail(value);setCandidates(evidence.items);setGrants(assigned.items);
-    }catch(e){setError(e instanceof Error?e.message:"The selected work record is unavailable");}
+    }catch(e){if(requestId===detailSequence.current)setError(e instanceof Error?e.message:"The selected work record is unavailable");}
+    finally{if(requestId===detailSequence.current)setDetailLoading(false);}
   },[root,selected]);
   useEffect(()=>{void load();},[load]);
   useEffect(()=>{void reloadDetail();},[reloadDetail]);
   const provider=options?.providers.find(p=>String(p.supplier_id)===supplier);
   const scopes=useMemo(()=>options?.scopes.filter(x=>String(x.supplier_id)===supplier)||[],[options,supplier]);
   const contracts=useMemo(()=>options?.contracts.filter(x=>String(x.supplier_id)===supplier)||[],[options,supplier]);
-  const work=detail?.work;
+  const work=detail?.work.id===selected?detail.work:undefined;
+  const visibleItems=items.filter(item=>`${item.work_number} ${item.work_title} ${item.site_code} ${item.status}`.toLowerCase().includes(queueSearch.toLowerCase()));
   useEffect(()=>{
     setExpectedAt(String(work?.requirements_json?.expected_completion_at||""));
     setAckDueAt(String(work?.requirements_json?.provider_ack_due_at||""));
@@ -185,7 +198,7 @@ export default function ContractedWorkModule(){
       }
     },"Technical work order drafted. It cannot be dispatched until Maintenance and Quality approvals are recorded.");
   }
-  return <main className="proc-section" style={{padding:"1.5rem",maxWidth:1400,margin:"auto"}}>
+  return <main className="proc-section contracted-workspace">
     <header className="proc-section__head"><div><h1>Contracted Maintenance</h1>
       <p>MOPM §2.23: controlled technical authorization, external AMO execution, Stores custody and Safarilink acceptance. Commercial POs never authorize maintenance or release.</p>
       <Link to={`/maintenance/${encodeURIComponent(amoCode)}/procurement`}>Related Procurement</Link>
@@ -195,9 +208,10 @@ export default function ContractedWorkModule(){
     </header>
     {canConfigureAlerts&&<ProviderAlertSettingsPanel amoCode={amoCode} department="MAINTENANCE" />}
     {loading&&<p role="status">Loading contracted work and approved sources…</p>}
-    {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
-    {newOpen&&canCreate&&<form className="partner-form" onSubmit={submitNew} style={{marginBlock:"1rem"}}>
-      <h2>Initiate technical contracted work</h2>
+    {error&&<p className="contracted-notice is-error" role="alert">{error}</p>}{notice&&<p className="contracted-notice" role="status">{notice}</p>}
+    {newOpen&&canCreate&&<form className="partner-form contracted-create-form" onSubmit={submitNew}>
+      <h2>Initiate technical contracted work</h2><p>Prepare the provider, scope and technical instructions below. Saving creates a draft for the existing authorization workflow.</p>
+      <fieldset><legend>1. Provider and agreement</legend>
       <label>Contractor<select required value={supplier} onChange={e=>{setSupplier(e.target.value);setForm(v=>({...v,scope_id:"",contract_id:"",site_code:""}));}}>
         <option value="">Choose Quality-managed provider</option>
         {options?.providers.map(x=><option key={x.id} value={x.supplier_id}>{x.legal_name}</option>)}
@@ -209,6 +223,7 @@ export default function ContractedWorkModule(){
       <label>Executed maintenance agreement<select required value={form.contract_id} onChange={field("contract_id")}><option value="">Choose governing agreement</option>
         {contracts.map(x=><option key={x.id} value={x.id}>{x.contract_number} · {x.title}</option>)}</select></label>
       <label>Work type<select value={form.work_type} onChange={field("work_type")}>{["BASE","LINE","WORKSHOP","SPECIALISED"].map(x=><option key={x}>{x}</option>)}</select></label>
+      </fieldset><fieldset><legend>2. Work identity and responsibility</legend>
       <label>Unique repair/work order<input required minLength={3} value={form.work_number} onChange={field("work_number")}/></label>
       <label>Work title<input required minLength={5} value={form.work_title} onChange={field("work_title")}/></label>
       <label>Defined contracted maintenance function<input required minLength={8} value={form.function} onChange={field("function")}/></label>
@@ -218,12 +233,14 @@ export default function ContractedWorkModule(){
       <label>Responsible technical coordinator<select required value={form.technical_coordinator_id} onChange={field("technical_coordinator_id")}>
         <option value="">Select appointed person</option>{options?.coordinators.map(x=><option key={x.id} value={x.id}>{x.full_name} · {x.role}</option>)}
       </select></label>
+      </fieldset><fieldset><legend>3. Aircraft or component</legend>
       <label>Aircraft or equipment type<select value={form.asset_kind} onChange={field("asset_kind")}>
         {["AIRCRAFT","ENGINE","COMPONENT","PROPELLER","APU","SERVICE"].map(x=><option key={x}>{x}</option>)}</select></label>
       <label>Registration<input value={form.registration} onChange={field("registration")}/></label>
       <label>Part number<input value={form.part_number} onChange={field("part_number")}/></label>
       <label>Serial number<input value={form.serial_number} onChange={field("serial_number")}/></label>
       <label>Article or service description<input value={form.asset_description} onChange={field("asset_description")}/></label>
+      </fieldset><fieldset><legend>4. Scope and technical instructions</legend>
       <label>Defect / reason for contracted maintenance<textarea required minLength={8} value={form.defect} onChange={field("defect")}/></label>
       <label>Authorized scope<textarea required minLength={12} value={form.scope_text} onChange={field("scope_text")}/></label>
       <label>AMO approved scope / capability reference<input required value={form.own_approved_scope_reference} onChange={field("own_approved_scope_reference")}/></label>
@@ -237,11 +254,13 @@ export default function ContractedWorkModule(){
       <label>Governed MOPM 2.20 repair-order reference (where no internal work_orders record exists)<input value={form.governed_repair_order_reference} onChange={field("governed_repair_order_reference")}/></label>
       <label>Required inspections/tests/hold points, one per line<textarea required value={form.inspections} onChange={field("inspections")}/></label>
       <label>Required release/certification and approval reference<input required value={form.required_release} onChange={field("required_release")}/></label>
+      </fieldset><fieldset><legend>5. Schedule and commercial reference</legend>
       <label>Expected technical completion (tenant local time)<input type="datetime-local"
         value={form.expected_completion_at} onChange={field("expected_completion_at")}/></label>
       <label>Provider acknowledgement due (tenant local time)<input type="datetime-local"
         value={form.provider_ack_due_at} onChange={field("provider_ack_due_at")}/></label>
       <label>Related approved commercial PO ID (optional; not technical authorization)<input type="number" min={1} value={form.purchase_order_id} onChange={field("purchase_order_id")}/></label>
+      </fieldset><fieldset><legend>6. Additional approval conditions</legend>
       <label><input type="checkbox" checked={foreign} onChange={e=>setForeign(e.target.checked)}/> Foreign/State-of-Registry requirements apply</label>
       {foreign&&<>
         <label>State of Registry<input required value={form.state_of_registry} onChange={field("state_of_registry")}/></label>
@@ -260,20 +279,22 @@ export default function ContractedWorkModule(){
       <label><input type="checkbox" checked={safetyRequired} onChange={e=>setSafetyRequired(e.target.checked)}/> Safety assessment required</label>
       {safetyRequired&&<label>Safety assessment reference<input required value={form.safety_assessment_reference} onChange={field("safety_assessment_reference")}/></label>}
       <label>Restriction review reference (if scope limitations apply)<input value={form.restriction_review_reference} onChange={field("restriction_review_reference")}/></label>
-      <button disabled={busy||!supplier||!form.scope_id||!form.contract_id}>{busy?"Saving…":"Save draft technical order"}</button>
+      </fieldset><button className="contracted-primary" disabled={busy||!supplier||!form.scope_id||!form.contract_id}>{busy?"Saving…":"Save draft technical order"}</button>
     </form>}
-    <div style={{display:"grid",gridTemplateColumns:"minmax(240px,0.32fr) minmax(0,1fr)",gap:"1rem"}}>
-      <section><h2>Work queue ({items.length})</h2>
+    <div className="contracted-layout">
+      <section className="contracted-queue"><h2>Work queue ({items.length})</h2>
+        <label className="contracted-search">Find a work order<input type="search" value={queueSearch} onChange={event=>setQueueSearch(event.target.value)} placeholder="Number, title, site or status"/></label>
         {!items.length&&!loading&&<p>No contracted maintenance jobs created.</p>}
-        {items.map(x=><button type="button" key={x.id} onClick={()=>{setSelected(x.id);setTab("scope");setNotice("");}}
-          aria-pressed={selected===x.id} style={{display:"block",width:"100%",textAlign:"left",padding:12,marginBlock:6}}>
+        {visibleItems.map(x=><button type="button" disabled={busy} key={x.id} onClick={()=>{setSelected(x.id);setTab("scope");setNotice("");setError("");setDecision("");setReason("");setVariationId("");setCustodyItem("");setInspectionIndex(null);}}
+          aria-pressed={selected===x.id} className="contracted-queue-item">
           <strong>{x.work_number}</strong><div>{x.work_title}</div><small>{x.status} · {x.site_code}</small>
         </button>)}
       </section>
-      <section>{!work?<p>Select a work order to inspect its controls.</p>:<>
+      <section className="contracted-detail" aria-busy={detailLoading}>{!work?<p role="status" className="contracted-empty">{detailLoading?"Loading selected work order...":"Select a work order to inspect its controls."}</p>:<>
         <header><h2>{work.work_number} · {work.work_title}</h2><p>{work.status} · Version {work.version}</p></header>
-        <nav aria-label="Contracted maintenance workspaces" style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {(["scope","communications","additional","custody","evidence","history"] as const).map(x=><button key={x} type="button" aria-pressed={tab===x} onClick={()=>setTab(x)}>{x.toUpperCase()}</button>)}
+        <WorkLifecycle status={work.status}/>
+        <nav className="contracted-tabs" aria-label="Contracted maintenance workspaces">
+          {(["scope","communications","additional","custody","evidence","history"] as const).map(x=><button key={x} type="button" aria-pressed={tab===x} onClick={()=>setTab(x)}>{({scope:"Scope & authorization",communications:"Communications",additional:"Additional work",custody:"Property & custody",evidence:"Controlled evidence",history:"History & access"})[x]}</button>)}
         </nav>
         {tab==="scope"&&<div>
           <h3>Controlled scope and authorization</h3><p>{work.scope_text}</p>
@@ -381,9 +402,9 @@ export default function ContractedWorkModule(){
         </div>}
         {tab==="custody"&&<div><h3>Safarilink property / tools / components</h3>
           {!detail?.custody.length&&<p>No company property registered for this work order.</p>}
-          <table><thead><tr><th>Item</th><th>Reference</th><th>Qty</th><th>Custody</th><th>Action</th></tr></thead>
+          <div className="contracted-table-wrap" role="region" aria-label="Property custody records" tabIndex={0}><table><thead><tr><th>Item</th><th>Reference</th><th>Qty</th><th>Custody</th><th>Action</th></tr></thead>
             <tbody>{detail?.custody.map(x=><tr key={x.id}><td>{x.item_type} · {x.description}</td><td>{x.stores_reference} / {x.serial_batch||"—"}</td><td>{x.quantity} {x.uom}</td><td>{x.state}</td>
-              <td><button onClick={()=>setCustodyItem(x.id)}>Update custody</button></td></tr>)}</tbody></table>
+              <td><button onClick={()=>setCustodyItem(x.id)}>Update custody</button></td></tr>)}</tbody></table></div>
           <form className="partner-form" onSubmit={e=>{e.preventDefault();void mutate("/"+encodeURIComponent(work.id)+"/custody",
             {item_type:custodyType,description:custodyDescription,part_number:custodyPart||null,
               serial_batch:custodySerial||null,quantity:Number(custodyQty),uom:custodyUom,stores_reference:storesRef},

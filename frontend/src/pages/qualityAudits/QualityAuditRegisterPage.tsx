@@ -18,6 +18,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  X,
 } from "lucide-react";
 
 import { hasQmsRolePermission } from "../../app/routeGuards";
@@ -45,6 +46,7 @@ import {
   type FindingLifecycleView,
 } from "./findingLifecycle";
 import "./quality-audits-list-workspace.css";
+import "../qms/finding-analysis.css";
 import { caseDate } from "./carCaseModel";
 
 type RegisterPageSize = 25 | 50 | 100;
@@ -333,7 +335,10 @@ const QualityAuditRegisterPage: React.FC = () => {
       subtitle="Register of findings and linked corrective actions."
     >
       {findingSubview && <QmsSectionTabs amoCode={amoCode} />}
-      {(process || processUnmapped) && <p>Process classification: <strong>{processUnmapped ? "No current verified process mapping" : process}</strong>. Based on verified links to approved active controls.</p>}
+      {(process || processUnmapped || severity) && <div className="qa-register-active-facets" aria-label="Applied finding filters">
+        {(process || processUnmapped) && <button type="button" aria-label="Clear process filter" onClick={() => patchFilters({ process: null, processUnmapped: null, page: null })}><span>{processUnmapped ? "No current verified process mapping" : `Process: ${process}`}</span><X size={13} aria-hidden /></button>}
+        {severity && <button type="button" aria-label="Clear severity filter" onClick={() => updateFilter("severity", "")}><span>Severity: {humanize(severity)}</span><X size={13} aria-hidden /></button>}
+      </div>}
       <section className="qa-register-grid-page" aria-label="Findings register">
         <header className="qa-register-grid-page__toolbar">
           <div className="qa-register-grid-page__primary">
@@ -495,6 +500,9 @@ const QualityAuditRegisterPage: React.FC = () => {
                 <label>Status<select aria-label="Status" value={findingStatus} onChange={(event) => updateFilter("status", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
                 <label>Level<select aria-label="Level" value={level} onChange={(event) => updateFilter("level", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{[1, 2, 3, 4].map((number) => <option key={number} value={`LEVEL_${number}`}>Level {number}</option>)}</select></label>
                 <label>Severity<select aria-label="Severity" value={severity} onChange={event => updateFilter("severity", event.target.value)} tabIndex={filtersOpen ? 0 : -1}><option value="">All</option>{["MINOR", "MAJOR", "CRITICAL"].map(value => <option key={value} value={value}>{humanize(value)}</option>)}</select></label>
+                <label className="qa-register-grid-page__process-filter">Process<input key={process} aria-label="Process area" type="search" defaultValue={process} placeholder="Exact process area" tabIndex={filtersOpen ? 0 : -1}
+                  onBlur={event => { const value = event.currentTarget.value.trim(); if (value !== process) patchFilters({ process: value || null, processUnmapped: null, page: null }); }}
+                  onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
                 <label>Stage<select aria-label="Stage" value={stage} onChange={(event) => updateFilter("stage", event.target.value)} tabIndex={filtersOpen ? 0 : -1}>
                     {FINDING_LIFECYCLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>

@@ -1,3 +1,4 @@
+import ResponseTextArea from "./ResponseTextArea";
 import { useRef, useState } from "react";
 import type { CarRcaDocument, CarRcaInvestigation, CarRcaMethod, CarRcaNode, CauseEntryType, CarRcaEffectivenessProposal } from "../../../services/qmsCarRca";
 
@@ -79,6 +80,7 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
   saveState: string;
   attachments?: Array<{ id: string; filename: string }>;
 }) {
+  const toolsDrawer = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState<CarRcaMethod>("FIVE_WHYS");
   const [category, setCategory] = useState("Process");
   const [parentId, setParentId] = useState("");
@@ -225,15 +227,16 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       <div><h4>Root cause workbench</h4><p>Choose a method. Record observations, explore possible causes and submit only evidence-backed conclusions.</p></div>
       <div className="car-rca-save"><span role="status">{saveState}</span><button type="button" onClick={onSave} disabled={disabled}>Save investigation</button></div>
     </div>
-    <label className="car-rca-field">Problem statement from this CAR
-      <textarea rows={2} value={value.problem_statement} onChange={e => onChange({ ...value, problem_statement: e.target.value })} disabled={disabled} maxLength={8000} />
-    </label>
-    <div className="car-rca-methods" aria-label="Investigation methods">
-      {METHOD_GUIDE.map(item =>
-        <button type="button" key={item.id} aria-pressed={selected === item.id} className={selected === item.id ? "is-selected" : ""}
-          onClick={() => selectMethod(item.id)}>{item.title}{value.investigations.some(m => m.method === item.id) ? " •" : ""}</button>
-      )}
+    <div className="car-rca-field"><span>Problem statement from this CAR</span>
+<ResponseTextArea aria-label="Problem statement from this CAR" rows={2} value={value.problem_statement} onValueChange={text => onChange({ ...value, problem_statement: text })} disabled={disabled} maxLength={8000} />
     </div>
+    <div className="car-rca-tool-picker"><strong>{labelFor(selected)}</strong><button type="button" onClick={()=>toolsDrawer.current?.showModal()}>Choose analysis tool</button></div>
+    <dialog ref={toolsDrawer} className="car-rca-tool-drawer" aria-label="Choose analysis tool">
+      <header><h3>Analysis tools</h3><button type="button" aria-label="Close analysis tools" onClick={()=>toolsDrawer.current?.close()}>Close</button></header>
+      <div className="car-rca-methods" aria-label="Investigation methods">
+        {METHOD_GUIDE.map(item=><button type="button" key={item.id} aria-pressed={selected===item.id} onClick={()=>{selectMethod(item.id);toolsDrawer.current?.close();}}><strong>{item.title}</strong><span>{item.description}</span>{value.investigations.some(method=>method.method===item.id)&&<small>In this investigation</small>}</button>)}
+      </div>
+    </dialog>
     <p className="car-rca-note">{METHOD_GUIDE.find(m => m.id === selected)?.description}</p>
 
     {selected === "ISHIKAWA" && <div className="car-rca-fishbone">
@@ -308,13 +311,12 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
     </div> : <div className="car-rca-analysis">
       {METHOD_FIELDS[selected] && <div className="car-rca-analysis">
         <h4>Guided {labelFor(selected)} record</h4>
-        {METHOD_FIELDS[selected]?.map(field => <label key={field.key} className="car-rca-field">
-          {field.label}
-          <textarea rows={2} maxLength={4000} disabled={disabled}
+        {METHOD_FIELDS[selected]?.map(field => <div key={field.key} className="car-rca-field"><span>{field.label}</span>
+<ResponseTextArea aria-label={field.label} rows={2} maxLength={4000} disabled={disabled}
             value={valueOf(current?.context?.[field.key])}
             placeholder={field.help}
-            onChange={e => changeContext({ [field.key]: e.target.value })}/>
-        </label>)}
+            onValueChange={text => changeContext({ [field.key]: text })}/>
+        </div>)}
       </div>}
       {selected === "FMEA" && <div className="car-rca-grid">
         <label>Severity (1–10)<input type="number" min={1} max={10} value={scoreS} disabled={disabled} onChange={e => setScoreS(Math.min(10, Math.max(1, Number(e.target.value))))}/></label>
@@ -352,9 +354,9 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
           </select>
         </label>
       </div>
-      <label className="car-rca-field">{selected === "FIVE_WHYS" ? "Why did the preceding condition occur?" : selected === "BARRIER_ANALYSIS" ? "Which safeguard failed or was missing?" : selected === "CHANGE_ANALYSIS" ? "What changed, compared with the previous state?" : selected === "HUMAN_ORGANIZATIONAL" ? "Which work-system factor contributed?" : selected === "FMEA" ? "Failure mode and effect" : "Causal observation / explanation"}
-        <textarea value={statement} onChange={e => setStatement(e.target.value)} disabled={disabled} rows={3} maxLength={4000} />
-      </label>
+      <div className="car-rca-field"><span>{selected === "FIVE_WHYS" ? "Why did the preceding condition occur?" : selected === "BARRIER_ANALYSIS" ? "Which safeguard failed or was missing?" : selected === "CHANGE_ANALYSIS" ? "What changed, compared with the previous state?" : selected === "HUMAN_ORGANIZATIONAL" ? "Which work-system factor contributed?" : selected === "FMEA" ? "Failure mode and effect" : "Causal observation / explanation"}</span>
+<ResponseTextArea aria-label="Cause statement" value={statement} onValueChange={setStatement} disabled={disabled} rows={3} maxLength={4000} />
+      </div>
       <label className="car-rca-field">Evidence references (one record per line)
         <textarea value={evidence} onChange={e => setEvidence(e.target.value)} disabled={disabled} rows={2} placeholder="CAR attachment ID, controlled record ID, interview record..." />
         {attachments.length > 0 && <select aria-label="Link uploaded CAR evidence to this cause" disabled={disabled} value=""
@@ -366,9 +368,9 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
           {attachments.map(file => <option key={file.id} value={`CAR-ATTACHMENT:${file.id}`}>{file.filename}</option>)}
         </select>}
       </label>
-      <label className="car-rca-field">Evidence interpretation / why this cause is supported
-        <textarea value={rationale} onChange={e => setRationale(e.target.value)} disabled={disabled} rows={2} maxLength={4000}/>
-      </label>
+      <div className="car-rca-field"><span>Evidence interpretation / why this cause is supported</span>
+<ResponseTextArea aria-label="Supporting rationale" value={rationale} onValueChange={setRationale} disabled={disabled} rows={2} maxLength={4000}/>
+      </div>
       {kind === "CAUSAL_CONCLUSION" && !csv(evidence).length && <p role="alert">Record supporting evidence before classifying an entry as a proposed causal conclusion.</p>}
       <div className="car-rca-row">
         <button type="button" disabled={disabled || statement.trim().length < 2 || (kind === "CAUSAL_CONCLUSION" && !csv(evidence).length)}
@@ -386,10 +388,10 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
           onChange={e => onChange({ ...value, supported_cause_ids: e.target.checked ? [...value.supported_cause_ids, node.id] : value.supported_cause_ids.filter(id => id !== node.id) })}/>
         {node.statement} ({node.evidence_references.length} references)
       </label>)}
-      <label className="car-rca-field">Final root cause explanation
-        <textarea value={value.conclusion} disabled={disabled} rows={4} maxLength={8000}
-          onChange={e => onChange({ ...value, conclusion: e.target.value })} />
-      </label>
+      <div className="car-rca-field"><span>Final root cause explanation</span>
+<ResponseTextArea aria-label="Final root cause explanation" value={value.conclusion} disabled={disabled} rows={4} maxLength={8000}
+          onValueChange={text => onChange({ ...value, conclusion: text })} />
+      </div>
       <label className="car-rca-field">Evidence supporting the consolidated conclusion (one per line)
         <textarea value={value.conclusion_evidence_references.join("\n")} disabled={disabled} rows={2}
           onChange={e => onChange({ ...value, conclusion_evidence_references: csv(e.target.value) })}/>
@@ -407,9 +409,12 @@ export default function CarRcaWorkbench({ value, disabled, onChange, onSave, sav
       <h4>Propose an effectiveness check</h4>
       <p>Suggest how Quality can check that the solution prevents recurrence. This is a proposal only; the responsible Quality reviewer independently sets and concludes the formal plan.</p>
       <div className="car-rca-grid">
-        <label>Expected result<textarea rows={2} value={proposal.expected_result} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ expected_result: e.target.value })}/></label>
-        <label>Measurable success criterion<textarea rows={2} value={proposal.measurable_success_criterion} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ measurable_success_criterion: e.target.value })}/></label>
-        <label>Verification method<textarea rows={2} value={proposal.verification_method} maxLength={8000} disabled={disabled} onChange={e => patchProposal({ verification_method: e.target.value })}/></label>
+        <div className="car-rca-field"><span>Expected result</span>
+<ResponseTextArea aria-label="Expected result" rows={2} value={proposal.expected_result} maxLength={8000} disabled={disabled} onValueChange={text => patchProposal({ expected_result: text })}/></div>
+        <div className="car-rca-field"><span>Measurable success criterion</span>
+<ResponseTextArea aria-label="Measurable success criterion" rows={2} value={proposal.measurable_success_criterion} maxLength={8000} disabled={disabled} onValueChange={text => patchProposal({ measurable_success_criterion: text })}/></div>
+        <div className="car-rca-field"><span>Verification method</span>
+<ResponseTextArea aria-label="Verification method" rows={2} value={proposal.verification_method} maxLength={8000} disabled={disabled} onValueChange={text => patchProposal({ verification_method: text })}/></div>
         <label>Observation period<input value={proposal.observation_period} maxLength={255} disabled={disabled} onChange={e => patchProposal({ observation_period: e.target.value })} placeholder="e.g. next three scheduled inspections"/></label>
         <label>Proposed independent review date<input type="date" value={proposal.proposed_review_date || ""} disabled={disabled} onChange={e => patchProposal({ proposed_review_date: e.target.value || null })}/></label>
       </div>

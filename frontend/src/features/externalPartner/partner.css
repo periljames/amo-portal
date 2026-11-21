@@ -15,3 +15,34 @@
 @media(max-width:1050px){.partner-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.partner-shortcuts{grid-template-columns:1fr}}
 @media(max-width:780px){.partner-layout{display:block}.partner-sidebar{padding:.7rem;gap:.4rem;position:static}.partner-sidebar__intro,.partner-sidebar__foot{display:none}.partner-sidebar nav{display:flex;overflow-x:auto;gap:.3rem;scrollbar-width:thin}.partner-sidebar nav a{flex-shrink:0;padding:.65rem}.partner-main{padding:1rem}.partner-topbar{align-items:flex-start;flex-direction:column}.partner-columns{grid-template-columns:1fr}}
 @media(max-width:520px){.partner-kpi-grid{grid-template-columns:1fr 1fr;gap:.6rem}.partner-kpi{min-height:100px;padding:.8rem}.partner-kpi strong{font-size:1.1rem}.partner-panel{padding:.9rem}.partner-panel__head{flex-direction:column}.partner-page-title{flex-direction:column}.partner-row{flex-direction:column;gap:.45rem}.partner-pager{justify-content:space-between}}
+/* Keep all partner workspaces readable without viewport overflow. */
+.partner-shell,.partner-shell *{box-sizing:border-box}
+.partner-main{line-height:1.6}
+.partner-main :is(p,dd,code,a){overflow-wrap:anywhere}
+.partner-panel__head{padding-bottom:14px;border-bottom:1px solid #e4ecf1}
+.partner-panel__head h2{font-size:1.12rem;line-height:1.4}
+.partner-page-title p{font-size:.94rem;max-width:75ch}
+.partner-sidebar nav a{min-height:44px;display:flex;align-items:center}
+.partner-status{white-space:normal;overflow-wrap:anywhere;flex-shrink:1;line-height:1.5}
+.partner-state{line-height:1.65;padding:18px}
+.partner-loading{display:grid;place-items:center;padding:32px;text-align:center}
+.partner-row:last-child,.partner-action:last-child{border-bottom:0}
+@media(min-width:1100px){.partner-sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;align-self:start}}
+@media(max-width:780px){.partner-sidebar nav a{white-space:nowrap}.partner-inline{flex-wrap:wrap}.partner-shortcuts a{min-height:44px}.partner-panel :is(input,select,textarea){max-width:100%}}
+@media(max-width:520px){.partner-topbar-actions{gap:.6rem;width:100%}.partner-topbar-actions a{flex:1;text-align:center}.partner-kpi-grid{grid-template-columns:1fr}.partner-record>summary{flex-direction:column;gap:.5rem}}
+.partner-skip-link{position:absolute;left:16px;top:-80px;padding:12px 18px;background:#fff;color:#075b92;z-index:1000;border-radius:6px;font-weight:700}
+.partner-skip-link:focus{top:12px}
+/* Shared transactional workspaces: RFQs, deliveries, evidence and subcontract work. */
+.partner-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.partner-work-picker{margin-top:18px}.partner-work-picker>button{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;text-align:left;padding:16px;border:1px solid #cedde7;border-radius:10px;min-width:0}
+.partner-work-picker>button>span:first-child{display:grid;gap:8px;min-width:0}.partner-work-picker small{font-size:12px;line-height:1.6;color:#526e83;display:block}
+.partner-work-picker>button[aria-pressed=true]{background:#edf7fd;border-color:#1483b4;box-shadow:inset 3px 0 #1483b4}
+.partner-work-facts>div{padding:18px;border:1px solid #dce5ed;border-radius:9px;background:#f8fafc;min-width:0;overflow-wrap:anywhere}.partner-work-facts small{display:block;margin-top:8px;color:#526e83}
+.partner-work-search{display:grid;gap:8px;max-width:480px;font-size:13px;font-weight:600}
+.partner-table-wrap{overflow:auto;max-width:100%;border:1px solid #dce5ed;border-radius:8px;margin:16px 0}
+.partner-table-wrap table{border-collapse:collapse;width:100%;min-width:560px;text-align:left;font-size:13px}.partner-table-wrap :is(th,td){padding:13px;vertical-align:top;border-bottom:1px solid #e0e8ee;line-height:1.6}.partner-table-wrap th{background:#f2f6f9;color:#415e72}.partner-table-wrap td button{margin-top:8px}
+.partner-form{max-width:960px;margin-top:22px;padding:20px;border:1px solid #dce5ed;border-radius:10px;background:#f8fafc}.partner-form>h3{margin:0;font-size:17px}.partner-form label{font-size:13px;line-height:1.6;min-width:0}.partner-form :is(input,select,textarea){width:100%;font-size:14px}.partner-form input[type=checkbox]{width:18px;min-height:18px}.partner-form fieldset{border:1px solid #cddde7;border-radius:9px;min-width:0;padding:18px;background:#fff}.partner-form legend{font-size:13px;font-weight:700;padding:0 8px}.partner-form .partner-buttons>label{flex:1 1 180px}.partner-form>.partner-buttons{align-items:end}.partner-form textarea{min-height:96px}
+.partner-buttons button[aria-pressed=true]{background:#e5f3fc;border-color:#86bad8;color:#075b8e}.partner-shell button{min-height:42px}.partner-form>.partner-primary{justify-self:start}.partner-form .partner-primary:hover:not(:disabled){background:#07517c}.partner-message{font-size:14px;line-height:1.65;overflow-wrap:anywhere}.partner-panel details>summary{min-height:44px;align-items:center}.partner-notification{min-width:0}.partner-notification>div{min-width:0;overflow-wrap:anywhere}
+@media(max-width:780px){.partner-grid{grid-template-columns:1fr}.partner-work-picker>button{width:100%}.partner-form{padding:16px}.partner-form fieldset{padding:14px}.partner-form>.partner-primary{justify-self:stretch}}
+@media(max-width:520px){.partner-notification{flex-direction:column}.partner-form .partner-buttons{align-items:stretch}.partner-form .partner-buttons>button{flex:1 1 100%}}
+.partner-context-note{padding:14px 18px;border-left:3px solid #0876a5;background:#edf7fc;border-radius:7px;font-size:14px;line-height:1.6}

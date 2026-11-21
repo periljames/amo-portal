@@ -1,0 +1,102 @@
+.finding-analysis, .finding-analysis__actions {
+  --finding-ink: var(--qms-text, var(--text, #172c3d));
+  --finding-muted: var(--text-secondary, #657687);
+  --finding-line: var(--surface-border, var(--border, #dbe3ea));
+  --finding-surface: var(--surface, #fff);
+  --finding-accent: var(--accent-primary, #2367a5);
+  --finding-open: #bd6b18;
+  --finding-resolved: #b8c8d6;
+  --finding-raised: #277f8b;
+  --finding-closed: #6573b6;
+  color: var(--finding-ink);
+}
+.finding-analysis { display: flex; flex-direction: column; gap: 20px; padding-block: 12px 24px; min-width: 0; }
+.qa-workspace-current-page-heading:has(.finding-analysis__actions) { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.finding-analysis__actions, .finding-analysis__actions form { display: flex; align-items: center; gap: 8px; }
+.finding-analysis__actions label { font-size: 12px; color: var(--finding-muted); }
+.finding-analysis__actions input { width: 83px; }
+.finding-analysis__actions :is(input, button), .finding-analysis__filters :is(input, select), .finding-analysis__state button {
+  min-height: 36px; padding: 7px 10px; border: 1px solid var(--finding-line); border-radius: 6px; background: var(--finding-surface); color: inherit; font: inherit; font-size: 12px;
+}
+.finding-analysis__actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.finding-analysis__actions button:disabled { opacity: .5; cursor: default; }
+.finding-analysis :is(a, button, input, select, summary):focus-visible, .finding-analysis__actions :is(button, input):focus-visible { outline: 2px solid var(--finding-accent); outline-offset: 3px; }
+.finding-analysis__metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--finding-line); padding-bottom: 20px; }
+.finding-analysis__metrics > :is(a, div) { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 0 24px; color: inherit; text-decoration: none; border-left: 1px solid var(--finding-line); }
+.finding-analysis__metrics > :first-child { padding-left: 0; border: 0; }
+.finding-analysis__metrics span { font-size: 12px; color: var(--finding-muted); }
+.finding-analysis__metrics strong { font-size: clamp(25px, 3vw, 34px); font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.finding-analysis__metrics small { color: var(--finding-muted); font-size: 11px; }
+.finding-analysis__metrics a:hover strong { color: var(--finding-accent); }
+.finding-analysis__panel { background: var(--finding-surface); border: 1px solid var(--finding-line); border-radius: 10px; padding: 22px 24px; min-width: 0; }
+.finding-analysis__panel-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.finding-analysis__panel-header h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
+.finding-analysis__panel-header p { margin: 5px 0 0; color: var(--finding-muted); font-size: 12px; }
+.finding-analysis__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finding-analysis__filters label { margin: 0; }
+.finding-analysis__search { position: relative; display: flex; align-items: center; }
+.finding-analysis__search svg { position: absolute; left: 10px; color: var(--finding-muted); pointer-events: none; }
+.finding-analysis__search input { padding-left: 32px !important; max-width: 220px; width: 100%; }
+.finding-analysis__legend { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-block: 24px 12px; color: var(--finding-muted); font-size: 11px; }
+.finding-analysis__legend span { display: inline-flex; align-items: center; gap: 6px; }
+.finding-analysis__legend i { width: 9px; height: 9px; border-radius: 2px; }
+.finding-analysis__legend small { margin-left: auto; font-size: inherit; }
+.finding-analysis__open { background: var(--finding-open); }
+.finding-analysis__resolved { background: var(--finding-resolved); }
+.finding-analysis__raised { background: var(--finding-raised); fill: var(--finding-raised); }
+.finding-analysis__closed-event { background: var(--finding-closed); fill: var(--finding-closed); }
+.finding-analysis__groups { list-style: none; padding: 0; margin: 0; max-height: 560px; overflow: auto; }
+.finding-analysis__groups li + li { border-top: 1px solid var(--finding-line); }
+.finding-analysis__groups :is(a, .finding-analysis__unclassified) { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(140px, 2fr) 90px 18px; gap: 20px; align-items: center; padding: 17px 4px; color: inherit; text-decoration: none; }
+.finding-analysis__groups a:hover { background: color-mix(in srgb, var(--finding-accent) 4%, transparent); }
+.finding-analysis__group-name { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.finding-analysis__group-name[data-severity] { display: flex; align-items: center; gap: 9px; }
+.finding-analysis__group-name[data-severity]::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--finding-muted); }
+.finding-analysis__group-name[data-severity=critical]::before { background: #c74444; }
+.finding-analysis__group-name[data-severity=major]::before { background: #bd6b18; }
+.finding-analysis__group-name[data-severity=minor]::before { background: #277f8b; }
+.finding-analysis__bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--finding-muted) 7%, transparent); }
+.finding-analysis__bar i { display: block; flex-shrink: 0; }
+.finding-analysis__count { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; font-variant-numeric: tabular-nums; }
+.finding-analysis__count strong { font-size: 16px; font-weight: 650; }
+.finding-analysis__count small { font-size: 11px; color: var(--finding-muted); }
+.finding-analysis__groups svg { color: var(--finding-muted); }
+.finding-analysis__coverage { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--finding-line); font-size: 12px; color: var(--finding-muted); }
+.finding-analysis__coverage a { display: inline-flex; align-items: center; gap: 4px; color: var(--finding-accent); }
+.finding-analysis__note { max-width: 850px; margin: 16px 0 0; font-size: 11px; line-height: 1.7; color: var(--finding-muted); }
+.finding-analysis__trend-scroll { overflow-x: auto; }
+.finding-analysis__trend { display: block; width: 100%; min-width: 540px; max-height: 340px; margin: 8px auto 0; }
+.finding-analysis__trend text { fill: var(--finding-muted); font: 11px system-ui, sans-serif; }
+.finding-analysis__gridline { stroke: var(--finding-line); stroke-width: 1; stroke-dasharray: 3 4; }
+.finding-analysis__figures { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--finding-line); font-size: 12px; }
+.finding-analysis__figures summary { cursor: pointer; color: var(--finding-muted); width: fit-content; }
+.finding-analysis__figures > div { max-height: 270px; overflow: auto; margin-top: 14px; }
+.finding-analysis__figures table { width: 100%; border-collapse: collapse; text-align: right; font-variant-numeric: tabular-nums; }
+.finding-analysis__figures th:first-child { text-align: left; }
+.finding-analysis__figures :is(th, td) { padding: 9px 12px; border-bottom: 1px solid var(--finding-line); }
+.finding-analysis__state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 48px 18px; text-align: center; color: var(--finding-muted); font-size: 13px; }
+.finding-analysis__state p { margin: 0; }
+.qa-register-active-facets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.qa-register-active-facets button { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--surface-border, #dbe3ea); border-radius: 6px; color: inherit; background: var(--surface, #fff); font: inherit; font-size: 12px; cursor: pointer; max-width: 100%; text-align: left; }
+.qa-register-active-facets button span { overflow-wrap: anywhere; }
+.qa-register-active-facets button svg { flex-shrink: 0; }
+.qa-register-grid-page__process-filter input { padding: 8px; border: 1px solid var(--surface-border, #dbe3ea); background: var(--surface, #fff); color: inherit; border-radius: 5px; min-height: 36px; max-width: 210px; font: inherit; font-size: 12px; }
+@media (max-width: 650px) {
+  .finding-analysis { gap: 16px; }
+  .finding-analysis__actions { flex-wrap: wrap; width: 100%; }
+  .finding-analysis__actions input { width: 72px; }
+  .finding-analysis__actions > button { width: 36px; padding: 8px; }
+  .finding-analysis__actions > button span { display: none; }
+  .finding-analysis__panel { padding: 18px 14px; }
+  .finding-analysis__metrics > :is(a, div) { padding-inline: 12px; }
+  .finding-analysis__metrics > :first-child { padding-left: 0; }
+  .finding-analysis__metrics span { font-size: 11px; line-height: 1.5; }
+  .finding-analysis__metrics small { font-size: 10px; }
+  .finding-analysis__filters { width: 100%; }
+  .finding-analysis__search { flex: 1; min-width: 130px; }
+  .finding-analysis__legend { gap: 12px; margin-top: 18px; }
+  .finding-analysis__legend small { flex-basis: 100%; margin: 0; }
+  .finding-analysis__groups :is(a, .finding-analysis__unclassified) { grid-template-columns: minmax(0, 1fr) 82px 14px; gap: 10px; padding-block: 14px; }
+  .finding-analysis__bar { grid-column: 1 / -1; grid-row: 2; height: 9px; }
+  .finding-analysis__group-name { font-size: 12px; }
+}

@@ -1,0 +1,69 @@
+.qa-workspace-current-page-heading:has(.car-register-heading-actions) { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.car-register-heading-actions { display:flex; gap:8px; }
+.car-register-heading-actions button, .car-register--structured button, .car-register--structured select, .car-register--structured input { font:inherit; }
+.car-register-heading-actions button, .car-register--structured .car-register-secondary, .car-register-pagination button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:7px 11px; border:1px solid var(--surface-border,var(--border,#dbe3ea)); border-radius:6px; background:var(--surface,#fff); color:var(--qms-text,var(--text,#172c3d)); cursor:pointer; font-size:12px; }
+.car-register-heading-actions .car-register-primary { background:var(--accent-primary,#2367a5); color:white; border-color:transparent; }
+.car-register--structured { min-width:0; padding-block:10px 24px; }
+.car-register--structured :is(button,input,select):focus-visible, .car-register-heading-actions button:focus-visible { outline:2px solid var(--accent-primary,#2367a5); outline-offset:3px; }
+.car-register--structured button:disabled { opacity:.5; cursor:default; }
+.car-register-queues { display:flex; gap:22px; overflow-x:auto; border-bottom:1px solid var(--surface-border,var(--border,#dbe3ea)); margin-bottom:20px; }
+.car-register-queues button { flex:none; padding:12px 0; border:0; border-bottom:2px solid transparent; background:none; color:var(--text-secondary,#657687); font-size:13px; cursor:pointer; white-space:nowrap; }
+.car-register-queues button[aria-current] { border-bottom-color:var(--accent-primary,#2367a5); color:var(--accent-primary,#2367a5); font-weight:650; }
+.car-register-list { border:1px solid var(--surface-border,var(--border,#dbe3ea)); background:var(--surface,#fff); border-radius:9px; overflow:hidden; }
+.car-register-toolbar { display:flex; align-items:center; gap:8px; padding:16px; }
+.car-register-search { display:flex; align-items:center; position:relative; flex:1; margin:0; }
+.car-register-search svg { position:absolute; left:11px; color:var(--text-secondary,#657687); pointer-events:none; }
+.car-register--structured .car-register-search input { width:100%; padding:8px 12px 8px 34px; }
+.car-register--structured :is(input,select) { min-height:36px; border:1px solid var(--surface-border,var(--border,#dbe3ea)); background:var(--surface,#fff); color:inherit; border-radius:6px; font-size:12px; padding:7px 10px; }
+.car-register-scope { margin:0; }
+.car-register--structured .car-register-filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:0 16px 16px; }
+.car-register-filters label { display:flex; flex-direction:column; gap:5px; margin:0; font-size:12px; color:var(--text-secondary,#657687); }
+.car-register-filter-count { border-radius:10px; background:var(--accent-primary,#2367a5); color:white; padding:1px 5px; font-size:10px; }
+.car-register-applied { display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 14px; }
+.car-register-applied button { display:inline-flex; gap:6px; align-items:center; border:0; border-radius:4px; padding:5px 8px; background:color-mix(in srgb,var(--accent-primary,#2367a5) 9%,transparent); color:var(--accent-primary,#2367a5); font-size:11px; cursor:pointer; }
+.car-register--structured .car-register-table-scroll { overflow:auto; margin:0; border-radius:0; }
+.car-register--structured .car-register-table { width:100%; min-width:850px; table-layout:fixed; margin:0; }
+.car-register-table th:nth-child(1) { width:30%; }
+.car-register-table th:nth-child(2) { width:17%; }
+.car-register-table th:nth-child(3) { width:18%; }
+.car-register-table th:nth-child(4) { width:14%; }
+.car-register-table th:last-child { width:48px; }
+.car-register--structured .car-register-table th { background:var(--surface-muted,var(--surface-alt,#f5f7fa)); padding:10px 16px; color:var(--text-secondary,#657687); font-size:11px; font-weight:600; border-block:1px solid var(--surface-border,var(--border,#dbe3ea)); }
+.car-register--structured .car-register-table td { padding:16px; vertical-align:top; border-bottom:1px solid var(--surface-border,var(--border,#dbe3ea)); overflow-wrap:anywhere; font-size:12px; line-height:1.5; }
+.car-register-table td > strong, .car-register-source > span { display:block; }
+.car-register-table .link-button { padding:0; text-align:left; font-size:11px; color:var(--accent-primary,#2367a5); }
+.car-register-title { margin:5px 0 7px; font-size:13px; font-weight:600; }
+.car-register-source strong { font-weight:500; }
+.car-register-source span, .car-register-table .text-muted { color:var(--text-secondary,#657687); font-size:11px; }
+.car-register-table .case-status { margin-top:6px; font-size:10px; }
+.car-register-priority { display:inline-block; font-size:10px; color:var(--text-secondary,#657687); }
+.car-register-priority[data-priority="HIGH"], .car-register-priority[data-priority="CRITICAL"] { color:var(--danger-text,#b44833); font-weight:600; }
+.car-register-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:18px; padding:12px 16px; color:var(--text-secondary,#657687); font-size:11px; }
+.car-register-pagination > span { margin-right:auto; }
+.car-register-pagination label, .car-register-pagination > div { display:flex; align-items:center; gap:8px; margin:0; }
+.car-register-pagination select { min-height:30px; padding:4px 7px; }
+.car-register-pagination button { min-height:30px; padding:4px 8px; font-size:11px; }
+.car-register-history { margin-top:20px; }
+@media(max-width:760px) {
+ .car-register-queues { gap:18px; margin-bottom:14px; }
+ .car-register-toolbar { flex-wrap:wrap; padding:12px; }
+ .car-register-search { flex-basis:100%; }
+ .car-register-scope { flex:1; }
+ .car-register-scope select { width:100%; }
+ .car-register--structured .car-register-filters { grid-template-columns:1fr; padding:0 12px 12px; }
+ .car-register--structured .car-register-table { min-width:0; }
+ .car-register-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ .car-register--structured .car-register-table, .car-register-table tbody { display:block; width:100%; }
+ .car-register-table tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 14px; border-top:1px solid var(--surface-border,var(--border,#dbe3ea)); padding:16px; }
+ .car-register--structured .car-register-table td { display:block; padding:0; border:0; min-width:0; }
+ .car-register-table td:is(:first-child,:nth-child(2)), .car-register-table td[colspan] { grid-column:1/-1; }
+ .car-register-table td[data-label]::before { content:attr(data-label); display:block; color:var(--text-secondary,#657687); font-size:10px; margin-bottom:3px; }
+ .car-register-table td:last-child:not([colspan]) { justify-self:end; align-self:end; }
+ .car-register-source { display:flex!important; flex-wrap:wrap; gap:8px; }
+ .car-register-pagination { gap:12px; padding:12px; }
+ .car-register-pagination > div { width:100%; justify-content:space-between; }
+}
+.car-register--structured .car-register-table th:last-child { width:56px; }
+.car-register--structured .car-register-table td:last-child:not([colspan]) { padding-inline:8px; }
+.car-register--structured .car-row-actions { display:flex; justify-content:center; }
+@media(max-width:760px) { .car-register--structured .car-register-table td:last-child:not([colspan]) { padding:0; } }

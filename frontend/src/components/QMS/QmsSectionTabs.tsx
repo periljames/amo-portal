@@ -5,7 +5,7 @@ import { qmsViewLabel } from "../../pages/qms/qmsWorkspaceCopy";
 import "./qms-section-tabs.css";
 
 export default function QmsSectionTabs({ amoCode }: { amoCode: string }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const tabs = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = tabs.current;
@@ -29,7 +29,9 @@ export default function QmsSectionTabs({ amoCode }: { amoCode: string }) {
   const view = relativePath?.split("/")[1] || module.defaultView;
   if (!module.validViews.includes(view)) return null;
   const reportLabels: Record<string, string> = { "executive-dashboard": "Executive summary", "car-performance": "CAR performance", "training-compliance": "Training validity" };
+  const period = new URLSearchParams(search).get("period");
+  const findingsQuery = module.id === "findings" && period ? `?${new URLSearchParams({ period })}` : "";
   return <nav ref={tabs} className="qms-section-tabs" aria-label={`${module.navigationLabel} views`}>
-    {module.validViews.filter(item => item !== "new").map(item => <Link key={item} to={qmsModulePath(amoCode, module.id, item)} aria-current={view === item ? "page" : undefined}>{module.id === "reports" ? reportLabels[item] || qmsViewLabel(item) : qmsViewLabel(item)}</Link>)}
+    {module.validViews.filter(item => item !== "new").map(item => <Link key={item} to={`${qmsModulePath(amoCode, module.id, item)}${findingsQuery}`} aria-current={view === item ? "page" : undefined}>{module.id === "reports" ? reportLabels[item] || qmsViewLabel(item) : qmsViewLabel(item)}</Link>)}
   </nav>;
 }

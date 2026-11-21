@@ -3,6 +3,7 @@ import {Link,useLocation} from "react-router-dom";
 import type {PartnerProps} from "./ExternalPartnerPage";
 import {friendlyDate,partnerRequest,partnerUrl} from "./partnerApi";
 import {ActionNotice,Section,State,Status} from "./PartnerPrimitives";
+import WorkLifecycle from "./WorkLifecycle";
 import { usePartnerLoad } from "./usePartnerLoad";
 
 type WorkRow={id:string;work_number:string;work_title:string;site_code:string;status:string;work_type:string;updated_at:string};
@@ -25,6 +26,7 @@ const key=()=>crypto.randomUUID().replace(/-/g,"");
 export default function PartnerContractedWork({tenant,csrf,capabilities}:PartnerProps){
   const location=useLocation();
   const assignedFromLink=new URLSearchParams(location.search).get("work")||"";
+  const [search,setSearch]=useState("");
   const [selected,setSelected]=useState("");
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
@@ -55,7 +57,7 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
       await partnerRequest(tenant,"maintenance-work/"+encodeURIComponent(selected)+path,{
         method:"POST",csrf,body,
       });
-      setNotice(success);setReason("");setNote("");setAdditional("");refresh();
+      setNotice(success);setReason("");setNote("");setAdditional("");setAdditionalData("");setCommercial("");setAction("");refresh();
     }catch(e){setError(e instanceof Error?e.message:"Technical transaction was refused");}
     finally{setBusy(false);}
   }
@@ -78,9 +80,10 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
   return <div className="partner-stack">
     <Section title="Assigned contracted maintenance" description="Technical work orders are distinct from purchase orders. Contractor releases are issued only under the contractor's own aviation approval.">
       <State pending={listing.pending} error={listing.error} retry={listing.reload} empty={!listing.value?.items.length}/>
-      <div className="partner-grid">
-        {listing.value?.items.map(w=><button type="button" key={w.id} aria-pressed={selected===w.id}
-          onClick={()=>{setSelected(w.id);setAction("");setNotice("");setError("");}}
+      <label className="partner-search partner-work-search">Find assigned work<input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Work number, title or site"/></label>
+      <div className="partner-grid partner-work-picker">
+        {listing.value?.items.filter(w=>`${w.work_number} ${w.work_title} ${w.site_code}`.toLowerCase().includes(search.toLowerCase())).map(w=><button type="button" disabled={busy} key={w.id} aria-pressed={selected===w.id}
+          onClick={()=>{setSelected(w.id);setAction("");setReason("");setNote("");setAdditional("");setAdditionalData("");setCommercial("");setCustodyReceipt("");setNotice("");setError("");}}
           className={selected===w.id?"partner-row is-selected":"partner-row"}>
           <span><strong>{w.work_number} · {w.work_title}</strong><small>{w.work_type} · {w.site_code} · {friendlyDate(w.updated_at)}</small></span><Status value={w.status}/>
         </button>)}
@@ -91,7 +94,8 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
       <ActionNotice value={error} error/><ActionNotice value={notice}/>
       {work&&<>
         <div className="partner-row"><div><strong>{work.work_number} · {work.work_title}</strong><p>{work.function}</p></div><Status value={work.status}/></div>
-        <div className="partner-grid">
+        <WorkLifecycle status={work.status}/>
+        <div className="partner-grid partner-work-facts">
           <div><strong>Authorized scope</strong><p>{work.scope_text}</p><small>Internal work package: {work.internal_work_reference}</small><small>Agreement: {work.contract_id}</small>{work.purchase_order_id&&<small>Related commercial PO: {work.purchase_order_id}</small>}</div>
           <div><strong>Aircraft / component identity</strong><p>{[work.registration,work.part_number,work.serial_number].filter(Boolean).join(" · ")||"See work package"}</p><small>Location: {work.site_code}</small><small>Defect/requirement: {work.defect}</small></div>
           <div><strong>Controlled technical data</strong><p>{work.data_reference} · revision {work.data_revision}</p>
@@ -132,11 +136,11 @@ export default function PartnerContractedWork({tenant,csrf,capabilities}:Partner
         </form>}
         <h3>Controlled supporting evidence</h3>
         <p>Upload inspection/strip reports, test results, release certificates and shipping documents as <strong>Contracted work</strong> originals. They must pass DMS retention and independent Quality review before the internal team may count them toward closure.</p>
-        <Link to={`/partner/${encodeURIComponent(tenant)}/documents`}>Open governed work-document uploads</Link>
+        <Link to={`/partner/${encodeURIComponent(tenant)}/documents?work=${encodeURIComponent(selected)}`}>Open governed work-document uploads</Link>
         {!detail.value?.evidence.length?<p>No accepted technical originals linked yet.</p>:<ul>{detail.value.evidence.map(x=><li key={x.id}>{x.category}: {x.filename} · {x.status} / {x.retention_status||"unregistered"}</li>)}</ul>}
         <h3>Safarilink property and custody</h3>
-        {!detail.value?.custody.length?<p>No Stores-controlled property transferred.</p>:<table><thead><tr><th>Item</th><th>Reference</th><th>Quantity</th><th>Custody</th><th>Receipt</th></tr></thead>
-          <tbody>{detail.value.custody.map(x=><tr key={x.id}><td>{x.item_type}: {x.description}</td><td>{x.serial_batch||"—"}</td><td>{x.quantity} {x.uom}</td><td>{x.state}</td><td>{canRespond&&x.state==="DISPATCHED"?<button disabled={busy} onClick={()=>setCustodyReceipt(x.id)}>Acknowledge physical receipt</button>:null}</td></tr>)}</tbody></table>}
+        {!detail.value?.custody.length?<p>No Stores-controlled property transferred.</p>:<div className="partner-table-wrap" role="region" aria-label="Property custody records" tabIndex={0}><table><thead><tr><th>Item</th><th>Reference</th><th>Quantity</th><th>Custody</th><th>Receipt</th></tr></thead>
+          <tbody>{detail.value.custody.map(x=><tr key={x.id}><td>{x.item_type}: {x.description}</td><td>{x.serial_batch||"—"}</td><td>{x.quantity} {x.uom}</td><td>{x.state}</td><td>{canRespond&&x.state==="DISPATCHED"?<button disabled={busy} onClick={()=>setCustodyReceipt(x.id)}>Acknowledge physical receipt</button>:null}</td></tr>)}</tbody></table></div>}
         {custodyReceipt&&work&&<form className="partner-form" onSubmit={e=>{e.preventDefault();
           void run("/custody/"+encodeURIComponent(custodyReceipt)+"/acknowledge",
             {kind:"PROGRESS",message:reason,expected_version:work.version,idempotency_key:key()},

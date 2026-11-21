@@ -1,11 +1,12 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import type { Page } from "./partnerApi";
 
 export function Section({title,description,children,action}:{
   title:string;description?:string;children:ReactNode;action?:ReactNode;
 }){
-  return <section className="partner-panel">
-    <header className="partner-panel__head"><div><h2>{title}</h2>{description&&<p>{description}</p>}</div>{action}</header>
+  const headingId=useId();
+  return <section className="partner-panel" aria-labelledby={headingId}>
+    <header className="partner-panel__head"><div><h2 id={headingId}>{title}</h2>{description&&<p>{description}</p>}</div>{action}</header>
     {children}
   </section>;
 }
@@ -23,9 +24,9 @@ export function Pager({value,onChange}:{
   value:Page<unknown>;onChange:(offset:number)=>void;
 }){
   return <nav className="partner-pager" aria-label="Results pages">
-    <span>Showing {value.items.length?value.offset+1:0}–{value.offset+value.items.length}</span>
-    <button disabled={value.offset===0} onClick={()=>onChange(Math.max(0,value.offset-value.limit))}>Previous</button>
-    <button disabled={!value.has_more} onClick={()=>onChange(value.next_offset??value.offset+value.limit)}>Next</button>
+    <span>Showing {value.items.length?value.offset+1:0}–{value.items.length?value.offset+value.items.length:0}</span>
+    <button type="button" disabled={value.offset===0} onClick={()=>onChange(Math.max(0,value.offset-value.limit))}>Previous</button>
+    <button type="button" disabled={!value.has_more} onClick={()=>onChange(value.next_offset??value.offset+value.limit)}>Next</button>
   </nav>;
 }
 export function Status({value}:{value:string|null|undefined}){

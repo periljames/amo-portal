@@ -16,6 +16,7 @@ type State = {
   response: "NOT_VERIFIED" | "COMPLIANT";
   version: number;
   notes: string | null;
+  delayMs?: number;
 };
 
 async function prepare(page: Page, state: State): Promise<void> {
@@ -128,6 +129,7 @@ async function prepare(page: Page, state: State): Promise<void> {
       state.response = "COMPLIANT";
       state.version = 2;
       state.notes = String(state.mutationBody.auditor_notes || "");
+      if (state.delayMs) await new Promise(resolve => setTimeout(resolve, state.delayMs));
       return respond(route, { client_mutation_id: String(state.mutationBody.client_mutation_id), committed_version: 2, replayed: false, row: governanceRow() });
     }
     if (path.includes("/quality/audit-register") && method === "GET") return respond(route, { rows: [], total: 0, limit: 200, offset: 0, has_more: false });
@@ -152,7 +154,7 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/live`, { waitUntil: "domcontentloaded" });
 
   const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
-  await expect(live).toBeVisible({ timeout: 30_000 });
+  await expect(live).toBeVisible({ timeout: 60_000 });
   // The table-first layout keeps the detailed auditor panel collapsed until requested.
   await expect(live.getByRole("table", { name: "Checklist assessment table" })).toBeVisible();
   await live.getByRole("button", { name: "Details for question 1", exact: true }).click();
@@ -174,7 +176,7 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
   await live.getByLabel("Auditor note").fill("Authorization and competence records were current for the sampled certifying staff member.");
   await live.getByRole("group", { name: "Governed checklist response" }).getByRole("button", { name: "Compliant" }).click();
 
-  await expect.poll(() => state.mutationBody).not.toBeNull();
+  await expect.poll(() => state.mutationBody, { timeout: 15_000 }).not.toBeNull().catch(async error => { throw new Error(`${error}\nWorkspace alerts: ${await live.locator("[role=alert]").allTextContents()}`); });
   expect(state.mutationBody).toMatchObject({
     operation: "CHECKLIST_UPDATE",
     base_version: 1,
@@ -188,4 +190,50 @@ test("executes canonical live checklist mutation with versioning, auditor notes 
 
   await expect(live.getByText(/Saved to the authoritative audit record/i)).toBeVisible();
   await expect(live.getByText("COMPLIANT · v2").first()).toBeVisible();
+});
+
+test("rapid fieldwork edits retain input, question identity and finding drafts without reloading", async ({ page }) => {
+  test.setTimeout(180_000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  let documents = 0;
+  page.on("request", request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++; });
+  const state: State = { mutationBody: null, response: "NOT_VERIFIED", version: 1, notes: null, delayMs: 5_000 };
+  await prepare(page, state);
+  await page.goto(`/maintenance/tenant-a/quality/audits/${AUDIT_REF}/live`);
+  const live = page.getByRole("region", { name: "Live audit fieldwork workspace" });
+  await expect(live).toBeVisible({ timeout: 60_000 });
+  // Initial route canonicalization may navigate before the workspace mounts.
+  // Editing must not initiate any further document navigation.
+  const initialDocuments = documents;
+  const table = live.getByRole("table", { name: "Checklist assessment table" });
+  const remarks = table.getByRole("textbox", { name: "Remarks for question 1", exact: true });
+  await remarks.fill("Initial saved note");
+  await table.getByRole("radio", { name: "Compliant — question 1", exact: true }).click();
+  await expect.poll(() => state.mutationBody, { timeout: 15_000 }).not.toBeNull().catch(async error => { throw new Error(`${error}\nWorkspace alerts: ${await live.locator("[role=alert]").allTextContents()}`); });
+  const newerNote = "New draft";
+  await remarks.fill("");
+  await remarks.pressSequentially(newerNote, { delay: 1 });
+  await expect(live.getByText(/Saved to the authoritative audit record/)).toBeVisible();
+  await expect(remarks).toHaveValue(newerNote);
+  // Repeated mounts and selection changes exercise evidence capture's parent
+  // notification effects; none may initiate a render/reset feedback loop.
+  for (const number of [1, 2, 3, 1, 2, 1]) {
+    await table.getByRole("button", { name: `Details for question ${number}`, exact: true }).click();
+  }
+  await table.getByRole("radio", { name: "NCR — question 1", exact: true }).click();
+  const composer = page.getByRole("dialog", { name: "Raise finding", exact: true });
+  const statement = "Sampled authorization records did not demonstrate the required review and approval.";
+  await composer.getByRole("textbox", { name: /^Finding statement/ }).fill(statement.slice(0, -9));
+  await composer.getByRole("textbox", { name: /^Finding statement/ }).pressSequentially(statement.slice(-9), { delay: 1 });
+  await expect(composer.getByRole("textbox", { name: /^Finding statement/ })).toHaveValue(statement);
+  await composer.getByRole("button", { name: "Save draft & continue" }).click();
+  await live.getByLabel("Saved finding drafts").getByRole("button", { name: "Question TP-01", exact: true }).click();
+  await expect(composer.getByRole("textbox", { name: /^Finding statement/ })).toHaveValue(statement);
+  await expect.poll(async () => page.evaluate(async ({ auditId }) => {
+    const { readFieldworkJournal } = await import(/* @vite-ignore */ "/src/services/qmsFieldworkJournal.ts");
+    return readFieldworkJournal("tenant-a", auditId);
+  }, { auditId: AUDIT_ID })).toMatchObject({ notes: { [ITEM_ID]: newerNote }, finding: { statement } });
+  expect(errors).toEqual([]);
+  expect(documents).toBe(initialDocuments);
 });

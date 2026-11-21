@@ -1326,6 +1326,7 @@ class CARReviewUpdate(BaseModel):
 
 
 class CARAttachmentUpdate(BaseModel):
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = None
     description: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -1335,6 +1336,7 @@ class CARAttachmentOut(BaseModel):
     id: UUID
     car_id: UUID
     filename: str
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = None
     description: Optional[str] = None
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None

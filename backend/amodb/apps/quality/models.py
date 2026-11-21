@@ -1016,6 +1016,7 @@ class CARAttachment(Base):
         index=True,
     )
     filename = Column(String(255), nullable=False)
+    response_section = Column(String(32), nullable=True)
     description = Column(String(500), nullable=True)
     file_ref = Column(String(512), nullable=False)
     content_type = Column(String(128), nullable=True)

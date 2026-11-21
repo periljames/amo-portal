@@ -9,7 +9,7 @@ import { isTenantAdmin } from "./utils/tenantAccess";
 // - Uses RequireAuth wrapper to redirect unauthenticated users back to login.
 
 import React, { Suspense, lazy, useEffect, useState } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
 
 import {
   fetchOnboardingStatus,
@@ -242,6 +242,16 @@ const RequireQmsPermission: React.FC<RequireQmsPermissionProps> = ({ permission,
     return <Navigate to="/platform/control" replace />;
   }
   if (!hasQmsRolePermission(permission)) {
+    if (permission === "qms.external.view") {
+      const amo = window.location.pathname.split("/")[2] || "";
+      return <main style={{maxWidth:640,margin:"48px auto",padding:28,border:"1px solid #d9e2ea",borderRadius:12,lineHeight:1.6}}>
+        <h1>Vendor account administration</h1>
+        <p>This page is for the AMO Quality team. Your current staff account does not have access.</p>
+        <p>Provider representatives should use the vendor portal to accept an invitation or sign in.</p>
+        <p><Link to={`/vendor/login?amo=${encodeURIComponent(amo)}`}>Open vendor portal</Link></p>
+        <p><Link to={`/maintenance/${encodeURIComponent(amo)}/login`}>Sign in with an authorized staff account</Link></p>
+      </main>;
+    }
     return (
       <div style={{ padding: "2rem" }}>
         You do not have permission to access this QMS page.
@@ -467,7 +477,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/vendor/*" element={<ExternalProviderPortalPage />} />
       <Route path="/partner/:tenant/*" element={<ExternalPartnerPage />} />
       <Route path="/maintenance/:amoCode/quality/external-accounts/*"
-        element={<RequireAuth><RequireQmsPermission permission="qms.audit.manage"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
+        element={<RequireAuth><RequireQmsPermission permission="qms.external.view"><ExternalProviderQualityPage /></RequireQmsPermission></RequireAuth>} />
 
       {/* Document Control retains authority for external originals, legal hold,
           and disposition; this route is not subject to unrelated QMS audit roles. */}

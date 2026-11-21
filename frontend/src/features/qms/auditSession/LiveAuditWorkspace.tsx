@@ -75,22 +75,25 @@ const DEFAULT_RESPONSE_OPTIONS: ChecklistResponseOption[] = [
   { value: "NOT_APPLICABLE", label: "N/A", canonical_status: "NOT_APPLICABLE" },
   { value: "NOT_VERIFIED", label: "Not verified", canonical_status: "NOT_VERIFIED" },
 ];
+const YES_NO_OPTIONS: ChecklistResponseOption[] = [
+  { value: "YES", label: "Yes", canonical_status: "COMPLIANT" },
+  { value: "NO", label: "No", canonical_status: "NONCOMPLIANT" },
+  { value: "N/A", label: "N/A", canonical_status: "NOT_APPLICABLE" },
+];
+const COMPLIANCE_NA_OPTIONS = DEFAULT_RESPONSE_OPTIONS.filter((item) => ["COMPLIANT", "NONCOMPLIANT", "NOT_APPLICABLE"].includes(item.canonical_status));
+const NO_RESPONSE_OPTIONS: ChecklistResponseOption[] = [];
 
 function fallbackResponseOptions(responseType?: string | null): ChecklistResponseOption[] {
   switch ((responseType || "COMPLIANCE").toUpperCase()) {
     case "YES_NO_NA":
-      return [
-        { value: "YES", label: "Yes", canonical_status: "COMPLIANT" },
-        { value: "NO", label: "No", canonical_status: "NONCOMPLIANT" },
-        { value: "N/A", label: "N/A", canonical_status: "NOT_APPLICABLE" },
-      ];
+      return YES_NO_OPTIONS;
     case "COMPLIANT_NONCOMPLIANT_NA":
-      return DEFAULT_RESPONSE_OPTIONS.filter((item) => ["COMPLIANT", "NONCOMPLIANT", "NOT_APPLICABLE"].includes(item.canonical_status));
+      return COMPLIANCE_NA_OPTIONS;
     case "COMPLIANCE":
     case "COMPLIANT_NONCOMPLIANT_OBSERVATION_NA_NOT_VERIFIED":
       return DEFAULT_RESPONSE_OPTIONS;
     default:
-      return [];
+      return NO_RESPONSE_OPTIONS;
   }
 }
 
@@ -271,6 +274,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const auditId = auditQuery.data?.id || "";
   const journalWrites = useRef<Promise<void>>(Promise.resolve());
+  const journalRevision = useRef(new Map<string, number>());
   type Journal = { notes: typeof noteDrafts; samples: typeof sampleDrafts; assessments: typeof assessmentDrafts; choices: typeof pendingChoices; finding: FindingDraft | null; parkedFindings?: Record<string, FindingDraft>; acceptedRows?: Record<string, ChecklistExecutionGovernanceRow>; completion?: { requestedAt: string; checks: string[] } | null };
   const [journalReady, setJournalReady] = useState("");
   const [journalSaved, setJournalSaved] = useState(false);
@@ -294,9 +298,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     if (!auditId || journalReady !== auditId) return;
     let active = true;
     setJournalSaved(false);
-    // Serialize writes in this page; older encryption operations cannot overwrite newer edits.
+    // Coalesce typing bursts before encrypting the entire audit journal. Keep
+    // the final queued write alive on unmount and serialize it behind any save
+    // already in progress, so an older snapshot cannot overwrite newer work.
     const value: Journal = { notes: noteDrafts, samples: sampleDrafts, assessments: assessmentDrafts, choices: pendingChoices, finding: findingDraft, parkedFindings, acceptedRows, completion: completionRequest };
-    journalWrites.current = journalWrites.current.catch(() => undefined).then(() => saveFieldworkJournal(amoCode, auditId, value));
+    const journalKey = `${amoCode}:${auditId}`;
+    const revision = (journalRevision.current.get(journalKey) || 0) + 1;
+    journalRevision.current.set(journalKey, revision);
+    journalWrites.current = journalWrites.current.catch(() => undefined).then(async () => {
+      if (revision !== journalRevision.current.get(journalKey)) return;
+      await new Promise(resolve => window.setTimeout(resolve, 150));
+      if (revision === journalRevision.current.get(journalKey)) await saveFieldworkJournal(amoCode, auditId, value);
+    });
     void journalWrites.current.then(() => { if (active) setJournalSaved(true); }).catch((error) => { if (active) setLocalError(error instanceof Error ? error.message : "Work could not be saved on this device."); });
     return () => { active = false; };
   }, [amoCode, auditId, journalReady, noteDrafts, sampleDrafts, assessmentDrafts, pendingChoices, findingDraft, parkedFindings, acceptedRows, completionRequest]);
@@ -527,7 +540,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     return () => cancelAnimationFrame(frame);
   }, [detailOpen, effectiveSelectedId]);
   const onEvidenceCaptureChange = useCallback((state: { busy: boolean; hasDraft: boolean }) => {
-    setEvidenceCapture(state);
+    setEvidenceCapture(current => current.busy === state.busy && current.hasDraft === state.hasDraft ? current : state);
     if ((state.busy || state.hasDraft) && effectiveSelectedId) setSelectedId(effectiveSelectedId);
   }, [effectiveSelectedId]);
   const selectedSource = selected ? sourceContextByItemId.get(selected.checklist_item_id) || null : null;
@@ -659,14 +672,23 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setLocalError(null);
       setSyncNotice("Saved to the authoritative audit record.");
       setPendingChoices((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
-      setNoteDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
-      setSampleDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
-      setAssessmentDrafts((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
-      // The committed row is already displayed. Reconcile this resource in the
-      // background instead of blocking every answer on eight unrelated reads.
-      if (document.documentElement.dataset.qmsRealtimeState !== "connected") {
-        void queryClient.invalidateQueries({ queryKey: ["qms", "live-audit-checklist", amoCode, auditId] });
-      }
+      setNoteDrafts((current) => {
+        const id = variables.item.checklist_item_id;
+        if (!(id in current) || current[id].trim() !== variables.auditorNotes.trim()) return current;
+        const next = { ...current }; delete next[id]; return next;
+      });
+      setSampleDrafts((current) => {
+        const id = variables.item.checklist_item_id;
+        if (!(id in current) || current[id].trim() !== variables.sampledItemInformation.trim()) return current;
+        const next = { ...current }; delete next[id]; return next;
+      });
+      setAssessmentDrafts((current) => {
+        const id = variables.item.checklist_item_id;
+        if (!(id in current) || current[id] !== variables.assessment) return current;
+        const next = { ...current }; delete next[id]; return next;
+      });
+      // The mutation returns the authoritative row. Keep the checklist mounted
+      // and update that row in place; realtime/focus refresh handles other edits.
       if (!auditQuery.data?.actual_start) void queryClient.invalidateQueries({ queryKey: auditOccurrenceQueryKey(amoCode, auditKey) });
       void outboxQuery.refetch();
     },
@@ -678,9 +700,18 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
         // mistaken for unsaved in-memory notes when the auditor moves on.
         const id = variables.item.checklist_item_id;
         setPendingChoices((current) => { const next = { ...current }; delete next[id]; return next; });
-        setNoteDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
-        setSampleDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
-        setAssessmentDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
+        setNoteDrafts((current) => {
+          if (!(id in current) || current[id].trim() !== variables.auditorNotes.trim()) return current;
+          const next = { ...current }; delete next[id]; return next;
+        });
+        setSampleDrafts((current) => {
+          if (!(id in current) || current[id].trim() !== variables.sampledItemInformation.trim()) return current;
+          const next = { ...current }; delete next[id]; return next;
+        });
+        setAssessmentDrafts((current) => {
+          if (!(id in current) || current[id] !== variables.assessment) return current;
+          const next = { ...current }; delete next[id]; return next;
+        });
         void outboxQuery.refetch();
         return;
       }
@@ -949,7 +980,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const selectResponse = (item: ChecklistExecutionGovernanceRow, option: ChecklistResponseOption) => {
-    if (!canExecute) return;
+    if (!canExecute || !selectItem(item.checklist_item_id)) return;
     // Keep the answered question in view; only explicit Save & next changes selection.
     // Without a pinned id the NOT_VERIFIED-first fallback jumps to a different item
     // as soon as the successful mutation changes the checklist response.
@@ -986,6 +1017,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setLocalError("N/A requires an explicit governed applicability basis. Expand Compliance intelligence below before recording N/A.");
       return;
     }
+    setPendingChoices(current => ({ ...current, [item.checklist_item_id]: option }));
     updateMutation.mutate({
       item,
       response,

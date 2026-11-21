@@ -74,6 +74,7 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
     }).catch(e=>setError(e instanceof Error?e.message:"The CAR submission was not accepted")).finally(()=>setBusy(false));
   };
   return <div className="partner-stack">
+    <ActionNotice value={error} error/><ActionNotice value={notice}/>
     {assignedAudit&&<div className="partner-record" role="status">
       <strong>Assigned audit workspace</strong>
       <p className="partner-muted">Showing released notices, documents, findings and CARs only for your currently authorized audit assignment.</p>
@@ -115,7 +116,7 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
             <button type="button" disabled={busy} onClick={()=>setActiveRequest(null)}>Cancel</button>
             {busy&&<button type="button" onClick={()=>abortRef.current?.abort()}>Cancel upload</button>}
           </div>
-          <ActionNotice value={error} error/><ActionNotice value={notice}/>
+
         </form>}
       </Section>
       <Section title="Audit findings" description="The audit team retains finding classification and closure authority.">
@@ -171,9 +172,9 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
           <div className="partner-buttons"><button type="submit" disabled={busy||!file||!carRequirement}>Upload for separate Quality acceptance</button>
             {busy&&<button type="button" onClick={()=>abortRef.current?.abort()}>Cancel upload</button>}</div>
         </form>}
-        <ActionNotice value={error} error/><ActionNotice value={notice}/>
+
       </Section>}
-      {!activeCar&&<ActionNotice value={notice}/>}
+
       <div className="partner-pager"><button disabled={offset===0} onClick={()=>updateOffset(offset-15)}>Previous</button>
         <button disabled={!data.value.cars.items.length&&!data.value.findings.items.length&&!data.value.notices.items.length} onClick={()=>updateOffset(offset+15)}>Next</button></div>
     </>}

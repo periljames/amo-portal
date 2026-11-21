@@ -15,7 +15,7 @@ import re
 import shutil
 import io
 import zipfile
-from typing import Optional, List, Iterator, Any
+from typing import Optional, List, Iterator, Any, Literal
 from uuid import UUID
 import uuid
 from urllib.parse import quote
@@ -469,6 +469,7 @@ def _serialize_attachment(invite_token: str, attachment: models.CARAttachment) -
         car_id=attachment.car_id,
         filename=attachment.filename,
         description=getattr(attachment, "description", None),
+        response_section=getattr(attachment, "response_section", None),
         content_type=attachment.content_type,
         size_bytes=attachment.size_bytes,
         sha256=attachment.sha256,
@@ -7109,6 +7110,7 @@ def upload_car_invite_attachment(
     invite_token: str,
     file: UploadFile = File(...),
     description: Optional[str] = Form(default=None),
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = Form(default=None),
     db: Session = Depends(get_db),
 ):
     car = (
@@ -7129,6 +7131,7 @@ def upload_car_invite_attachment(
         car_id=car.id,
         filename=original_name,
         description=clean_description,
+        response_section=response_section if isinstance(response_section, str) else None,
         file_ref=str(target_path),
         content_type=file.content_type,
         size_bytes=size_bytes,
@@ -7168,7 +7171,10 @@ def update_car_invite_attachment(
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    attachment.description = (payload.description or "").strip()[:500] or None
+    if "description" in payload.model_fields_set:
+        attachment.description = (payload.description or "").strip()[:500] or None
+    if "response_section" in payload.model_fields_set:
+        attachment.response_section = payload.response_section
     db.commit()
     db.refresh(attachment)
     return _serialize_attachment(invite_token, attachment)
@@ -7311,6 +7317,7 @@ def list_car_attachments(
             car_id=a.car_id,
             filename=a.filename,
             description=getattr(a, "description", None),
+            response_section=getattr(a, "response_section", None),
             content_type=a.content_type,
             size_bytes=a.size_bytes,
             sha256=a.sha256,
@@ -7338,6 +7345,7 @@ def list_car_attachments_bulk(
             car_id=str(car.id),
             filename=a.filename,
             description=getattr(a, "description", None),
+            response_section=getattr(a, "response_section", None),
             content_type=a.content_type,
             size_bytes=a.size_bytes,
             sha256=a.sha256,
@@ -7354,6 +7362,7 @@ def upload_car_attachment(
     car_id: UUID,
     file: UploadFile = File(...),
     description: Optional[str] = Form(default=None),
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = Form(default=None),
     request: Request = None,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -7369,6 +7378,7 @@ def upload_car_attachment(
         car_id=car.id,
         filename=original_name,
         description=clean_description,
+        response_section=response_section if isinstance(response_section, str) else None,
         file_ref=str(target_path),
         content_type=file.content_type,
         size_bytes=size_bytes,
@@ -7393,6 +7403,7 @@ def upload_car_attachment(
         car_id=attachment.car_id,
         filename=attachment.filename,
         description=getattr(attachment, "description", None),
+        response_section=getattr(attachment, "response_section", None),
         content_type=attachment.content_type,
         size_bytes=attachment.size_bytes,
         sha256=attachment.sha256,
