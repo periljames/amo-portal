@@ -50,7 +50,14 @@ def public_feedback_events(invite_token: str):
         finally:
             broker.unsubscribe_async(queue)
     return StreamingResponse(updates(), media_type="text/event-stream",
-        headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+            "X-Accel-Buffering": "no",
+        })
 
 
 class FeedbackCreate(BaseModel):
