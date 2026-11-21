@@ -149,10 +149,11 @@ jobs:
           amodb/apps/quality/tests/test_car_control_loop.py
           amodb/apps/quality/tests/test_car_control_loop_governance.py
           amodb/apps/quality/tests/test_public_invite_extensions.py
-           amodb/apps/quality/tests/test_public_invite_security.py
-           amodb/apps/quality/tests/test_car_invite_link_contract.py
-           amodb/apps/quality/tests/test_audit_external_access_contract.py
+          amodb/apps/quality/tests/test_public_invite_security.py
+          amodb/apps/quality/tests/test_car_invite_link_contract.py
+          amodb/apps/quality/tests/test_audit_external_access_contract.py
           amodb/apps/quality/tests/test_car_rca_phase3_contract.py
+          ../scripts/test_portal_gateway.py
 
   postgres-contract:
     runs-on: ubuntu-24.04
