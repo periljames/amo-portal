@@ -189,7 +189,7 @@ test("original CAR form download sends the invitation bearer in the header", asy
   let authorization = "";
   await page.route("**/quality/cars/invite/current/form", async route => {
     authorization = route.request().headers()["authorization"] || "";
-    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4 synthetic CAR form") });
+    await route.fulfill({ status: 200, contentType: "application/pdf", headers: { "Content-Disposition": 'attachment; filename="QA-CAR-001_CAR_form.pdf"' }, body: Buffer.from("%PDF-1.4 synthetic CAR form") });
   });
   await page.goto("/qms/car-access#token=synthetic-token");
   const button = page.getByRole("button", { name: /Download original CAR form/ });
@@ -206,7 +206,7 @@ test("issued audit report download sends the invitation bearer in the header", a
   let authorization = "";
   await page.route("**/quality/cars/invite/current/audit-report", async route => {
     authorization = route.request().headers()["authorization"] || "";
-    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.4 synthetic issued report") });
+    await route.fulfill({ status: 200, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers: { "Content-Disposition": 'attachment; filename="AUDIT-26_issued-audit-report.docx"' }, body: Buffer.from("synthetic DOCX report") });
   });
   await page.goto("/qms/car-access#token=synthetic-token");
   const button = page.getByRole("button", { name: "View / download issued report", exact: true });
@@ -215,7 +215,7 @@ test("issued audit report download sends the invitation bearer in the header", a
   await button.click();
   const download = await downloadPromise;
   expect(authorization).toBe("Bearer synthetic-token");
-  expect(download.suggestedFilename()).toBe("QA-CAR-001-issued-audit-report.pdf");
+  expect(download.suggestedFilename()).toBe("AUDIT-26_issued-audit-report.docx");
 });
 
 test("evidence preview downloads through the bearer-protected endpoint", async ({ page }) => {
