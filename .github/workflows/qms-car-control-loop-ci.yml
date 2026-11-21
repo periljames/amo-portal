@@ -10,7 +10,15 @@ on:
       - "backend/amodb/apps/quality/tests/test_car_control_loop*.py"
       - "backend/amodb/apps/quality/tests/test_car_rca_phase3_contract.py"
       - "backend/amodb/apps/quality/tests/test_public_invite_extensions.py"
+      - "backend/amodb/apps/quality/tests/test_public_invite_security.py"
+      - "backend/amodb/apps/quality/tests/test_car_invite_link_contract.py"
+      - "backend/amodb/apps/quality/tests/test_audit_external_access_contract.py"
       - "backend/amodb/apps/quality/car_rca_router.py"
+      - "backend/amodb/apps/quality/public_invite_security.py"
+      - "backend/amodb/apps/quality/car_feedback_router.py"
+      - "backend/amodb/apps/quality/audit_public_collaboration_scope_router.py"
+      - "backend/amodb/apps/quality/service.py"
+      - "backend/amodb/apps/quality/router.py"
       - "backend/amodb/apps/quality/car_closure_guards.py"
       - "backend/amodb/apps/quality/transitions.py"
       - "backend/amodb/apps/quality/__init__.py"
@@ -24,6 +32,16 @@ on:
       - "frontend/src/pages/qms/QmsCarControlOperations.tsx"
       - "frontend/src/pages/qms/QmsCarPerformanceReportPage.tsx"
       - "frontend/src/pages/PublicCarInvitePage.tsx"
+      - "frontend/src/pages/CanonicalPublicCarAccessPage.tsx"
+      - "frontend/src/services/qmsCore.ts"
+      - "frontend/src/services/qmsCarRca.ts"
+      - "frontend/src/components/QMS/carRca/CarFeedbackPanel.tsx"
+      - "frontend/src/App.tsx"
+      - "frontend/src/utils/carInviteUrl.ts"
+      - "frontend/src/utils/carInviteUrl.test.ts"
+      - "frontend/src/services/devProxyRouting.ts"
+      - "frontend/src/services/devProxyRouting.test.ts"
+      - "frontend/src/app/portalRouteManifest.ts"
       - "frontend/src/app/routeGuards.ts"
       - "frontend/src/pages/qms/routes/qmsWorkspaceRegistry.ts"
       - "frontend/src/pages/qms/routes/qmsRouteRegistry.ts"
@@ -31,6 +49,10 @@ on:
       - "frontend/src/components/panels/ActionPanel.tsx"
       - "frontend/tests/e2e/qms-car-control-loop.spec.ts"
       - "frontend/tests/e2e/qms-car-performance-report.spec.ts"
+      - "frontend/tests/e2e/public-car-response.spec.ts"
+      - "frontend/tests/e2e/qms-car-draft-coordination.spec.ts"
+      - "scripts/portal_gateway.py"
+      - "scripts/test_portal_gateway.py"
       - ".github/workflows/qms-car-control-loop-ci.yml"
   workflow_dispatch:
 
@@ -43,7 +65,7 @@ concurrency:
 
 jobs:
   backend-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -113,6 +135,11 @@ jobs:
             amodb/apps/quality/car_control_loop_evidence_guard.py \
             amodb/apps/quality/car_control_loop_route_order.py \
             amodb/apps/quality/public_invite_extensions.py \
+            amodb/apps/quality/public_invite_security.py \
+            amodb/apps/quality/car_feedback_router.py \
+            amodb/apps/quality/audit_public_collaboration_scope_router.py \
+            amodb/apps/quality/service.py \
+            amodb/apps/quality/router.py \
             amodb/apps/quality/schemas.py \
             amodb/alembic/versions/quality_260811_car_loop.py
           python -c "from sqlalchemy.orm import configure_mappers; import amodb.main; import amodb.quality_main; configure_mappers(); print('CAR control-loop mappers configured')"
@@ -122,10 +149,13 @@ jobs:
           amodb/apps/quality/tests/test_car_control_loop.py
           amodb/apps/quality/tests/test_car_control_loop_governance.py
           amodb/apps/quality/tests/test_public_invite_extensions.py
+           amodb/apps/quality/tests/test_public_invite_security.py
+           amodb/apps/quality/tests/test_car_invite_link_contract.py
+           amodb/apps/quality/tests/test_audit_external_access_contract.py
           amodb/apps/quality/tests/test_car_rca_phase3_contract.py
 
   postgres-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
@@ -168,7 +198,7 @@ jobs:
         run: python -m amodb.apps.quality.tests.postgres_car_control_loop_probe
 
   frontend-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
       run:
@@ -205,6 +235,8 @@ jobs:
           src/components/panels/ActionPanel.tsx
           tests/e2e/qms-car-control-loop.spec.ts
           tests/e2e/qms-car-performance-report.spec.ts
+           tests/e2e/public-car-response.spec.ts
+           tests/e2e/qms-car-draft-coordination.spec.ts
       - name: Verify public CAR response length contract
         run: |
           python - <<'PY'
@@ -238,6 +270,8 @@ jobs:
           assert 'qmsDownloadCarAttachmentBlob' in service
           PY
       - name: Typecheck and production build
+       - name: Verify public CAR URL and SPA gateway contracts
+         run: npm exec -- vitest run src/utils/carInviteUrl.test.ts src/services/devProxyRouting.test.ts
         run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -263,11 +297,11 @@ jobs:
           done
           cat /tmp/qms-car-preview.log
           exit 1
-      - name: Browser - staged CAR control loop and live CAR performance report
+      - name: Browser - public CAR guest flow, staged control loop and live performance report
         shell: bash
         run: |
           set +e
-          npx playwright test tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-car-playwright.log
+          npx playwright test tests/e2e/public-car-response.spec.ts tests/e2e/qms-car-draft-coordination.spec.ts tests/e2e/qms-car-control-loop.spec.ts tests/e2e/qms-car-performance-report.spec.ts --workers=1 --reporter=github,line --trace=retain-on-failure 2>&1 | tee /tmp/qms-car-playwright.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             summary=$(tail -n 120 /tmp/qms-car-playwright.log | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-7000)
