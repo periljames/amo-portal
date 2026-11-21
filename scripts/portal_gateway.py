@@ -49,7 +49,7 @@ def forwarded_headers(raw_headers):
 def spa_navigation(request: Request) -> bool:
     if request.method not in {"GET", "HEAD"} or "text/html" not in request.headers.get("accept", "").lower():
         return False
-    return bool(re.match(r"^/(?:platform(?:/|$)|qms/(?:audit-access|car-access)(?:/|$)|verify/[^/]+(?:/|$))", request.url.path, re.I))
+    return bool(re.match(r"^/(?:platform(?:/|$)|car-invite(?:/|$)|qms/(?:audit-access|car-access)(?:/|$)|verify/[^/]+(?:/|$))", request.url.path, re.I))
 
 
 def create_app(root: Path, api_target="http://127.0.0.1:8080", ops_target="http://127.0.0.1:8090", *, transport=None, allowed_hosts=None):
