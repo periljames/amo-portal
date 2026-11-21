@@ -32,8 +32,8 @@ import {
   qmsUpdateCarInviteAttachment,
   qmsDeleteCarInviteAttachment,
   qmsDownloadCarInviteAttachmentBlob,
-  qmsDownloadCarInviteAuditReportBlob,
-  qmsDownloadCarInviteFormBlob,
+  qmsDownloadCarInviteAuditReport,
+  qmsDownloadCarInviteForm,
   type CARActionOut,
   type CARAttachmentOut,
   type CARInviteOut,
@@ -906,8 +906,8 @@ const PublicCarInvitePage: React.FC = () => {
     setReportDownloadingToken(entry.token);
     updateEntry(entry.token, current => ({ ...current, error: null }));
     try {
-      const blob = await qmsDownloadCarInviteAuditReportBlob(entry.token);
-      downloadBlob(blob, `${entry.invite.car_number || "CAR"}-issued-audit-report.pdf`);
+      const file = await qmsDownloadCarInviteAuditReport(entry.token);
+      downloadBlob(file.blob, file.filename || `${entry.invite.car_number || "CAR"}-issued-audit-report.pdf`);
     } catch (error) {
       updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The issued audit report could not be downloaded.") }));
     } finally {
@@ -920,8 +920,8 @@ const PublicCarInvitePage: React.FC = () => {
     setFormDownloadingToken(entry.token);
     updateEntry(entry.token, current => ({ ...current, error: null }));
     try {
-      const blob = await qmsDownloadCarInviteFormBlob(entry.token);
-      downloadBlob(blob, `${entry.invite.car_number || "CAR"}_CAR_form.pdf`);
+      const file = await qmsDownloadCarInviteForm(entry.token);
+      downloadBlob(file.blob, file.filename || `${entry.invite.car_number || "CAR"}_CAR_form.pdf`);
     } catch (error) {
       updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The original CAR form could not be downloaded.") }));
     } finally {
