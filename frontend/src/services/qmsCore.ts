@@ -557,31 +557,30 @@ async function publicFetchJson<T>(path: string, inviteToken: string): Promise<T>
   try {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), 20000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: "GET",
-      headers: { Accept: "application/json", Authorization: `Bearer ${inviteToken}` },
-      cache: "no-store",
-      referrerPolicy: "no-referrer",
-      credentials: "omit",
-      signal: controller.signal,
-    });
-    window.clearTimeout(timeout);
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(
-        "This invite is not available. Check that the link is correct and still active.",
-      );
+    try {
+      const res = await fetch(`${getApiBaseUrl()}${path}`, {
+        method: "GET",
+        headers: { Accept: "application/json", Authorization: `Bearer ${inviteToken}` },
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("This invite is not available. Check that the link is correct and still active.");
+      }
+      if (res.status === 503) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || "Service unavailable. Please retry or contact support.");
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+      }
+      return (await res.json()) as T;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        text || "Service unavailable. Please retry or contact support.",
-      );
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-    }
-    return (await res.json()) as T;
   } finally {
     endBackgroundLoading();
   }
@@ -597,39 +596,36 @@ async function publicSendJson<T>(
   try {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), 45000);
-    const res = await fetch(`${getApiBaseUrl()}${path}`, {
-      method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${inviteToken}`,
-      },
-      body: JSON.stringify(body ?? {}),
-      cache: "no-store",
-      referrerPolicy: "no-referrer",
-      credentials: "omit",
-      signal: controller.signal,
-    });
-    window.clearTimeout(timeout);
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(
-        "This invite is not available. Check that the link is correct and still active.",
-      );
+    try {
+      const res = await fetch(`${getApiBaseUrl()}${path}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${inviteToken}`,
+        },
+        body: JSON.stringify(body ?? {}),
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("This invite is not available. Check that the link is correct and still active.");
+      }
+      if (res.status === 503) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || "Service unavailable. Please retry or contact support.");
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
+      }
+      if (res.status === 204) return undefined as T;
+      return (await res.json()) as T;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    if (res.status === 503) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        text || "Service unavailable. Please retry or contact support.",
-      );
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`QMS API ${res.status}: ${text || res.statusText}`);
-    }
-    if (res.status === 204) {
-      return undefined as T;
-    }
-    return (await res.json()) as T;
   } finally {
     endLoading();
   }
@@ -2380,6 +2376,7 @@ export async function qmsUploadCarInviteAttachment(
       cache: "no-store",
       referrerPolicy: "no-referrer",
       credentials: "omit",
+      signal: AbortSignal.timeout(300_000),
     },
   );
 
