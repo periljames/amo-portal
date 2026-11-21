@@ -33,6 +33,7 @@ import {
   qmsDeleteCarInviteAttachment,
   qmsDownloadCarInviteAttachmentBlob,
   qmsDownloadCarInviteAuditReportBlob,
+  qmsDownloadCarInviteFormBlob,
   type CARActionOut,
   type CARAttachmentOut,
   type CARInviteOut,
@@ -417,6 +418,7 @@ const PublicCarInvitePage: React.FC = () => {
   const [selectedPreviewLoading, setSelectedPreviewLoading] = useState(false);
   const [selectedPreviewError, setSelectedPreviewError] = useState<string | null>(null);
   const [reportDownloadingToken, setReportDownloadingToken] = useState<string | null>(null);
+  const [formDownloadingToken, setFormDownloadingToken] = useState<string | null>(null);
   const [submissionPreviewToken, setSubmissionPreviewToken] = useState<string | null>(null);
   const [camera, setCamera] = useState<CameraState | null>(null);
   const [activeSteps, setActiveSteps] = useState<Record<string, InviteStepId>>({});
@@ -910,6 +912,20 @@ const PublicCarInvitePage: React.FC = () => {
       updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The issued audit report could not be downloaded.") }));
     } finally {
       setReportDownloadingToken(null);
+    }
+  };
+
+  const downloadOriginalCarForm = async (entry: InviteEntry) => {
+    if (formDownloadingToken || !entry.invite?.car_form_download_url) return;
+    setFormDownloadingToken(entry.token);
+    updateEntry(entry.token, current => ({ ...current, error: null }));
+    try {
+      const blob = await qmsDownloadCarInviteFormBlob(entry.token);
+      downloadBlob(blob, `${entry.invite.car_number || "CAR"}_CAR_form.pdf`);
+    } catch (error) {
+      updateEntry(entry.token, current => ({ ...current, error: getErrorMessage(error, "The original CAR form could not be downloaded.") }));
+    } finally {
+      setFormDownloadingToken(null);
     }
   };
 
@@ -1530,6 +1546,16 @@ const PublicCarInvitePage: React.FC = () => {
                   <FileText size={16} /> {reportDownloadingToken === reportEntry.token ? "Preparing report…" : "View / download issued report"}
                 </button>;
               })() : <p className="car-invite-subtitle">The auditor has not issued the report yet.</p>}
+            </details>
+
+            <details className="car-invite-panel" open>
+              <summary><span>Original CAR form</span><FileText size={16} /></summary>
+              {readyEntries.filter((entry) => entry.invite?.car_form_download_url).map((entry) => (
+                <button key={entry.token} className="car-invite-btn car-invite-btn--wide" type="button" disabled={formDownloadingToken === entry.token} onClick={() => void downloadOriginalCarForm(entry)}>
+                  <FileText size={16} /> {formDownloadingToken === entry.token ? "Preparing original form…" : `Download original CAR form · ${entry.invite?.car_number || "CAR"}`}
+                </button>
+              ))}
+              {readyEntries.length > 0 && !readyEntries.some((entry) => entry.invite?.car_form_download_url) && <p className="car-invite-subtitle">The original CAR form is not available.</p>}
             </details>
 
             <details className="car-invite-panel" open>
