@@ -1,3 +1,4 @@
+import CollapsibleFilters from "../../components/shared/CollapsibleFilters";
 import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
 import "./qms-reports.css";
 import Pagination from "../../components/shared/Pagination";
@@ -285,8 +286,8 @@ const QMS_MODULES: ModuleMeta[] = [
   {
     key: "cars",
     route: "cars",
-    title: "CAR and CAPA",
-    shortTitle: "CAR / CAPA",
+    title: "CAR and CAP",
+    shortTitle: "CAR / CAP",
     subtitle: "Corrective action requests, auditee responses, root cause, implementation evidence, review, effectiveness, and closure.",
     category: "assurance",
     mode: "workflow",
@@ -1575,9 +1576,9 @@ function WorkspacePanel({
         </div>
         <div className="qms-ops-filter-bar">
           <label className="qms-ops-search"><Search size={16} /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search this QMS view" /></label>
-          <label><span>Status</span><select value={statusFilter} onChange={(event) => onStatusChange(event.target.value)}><option value="">All</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label>
+          <CollapsibleFilters active={statusFilter ? 1 : 0}><label><span>Status</span><select value={statusFilter} onChange={(event) => onStatusChange(event.target.value)}><option value="">All</option><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING_REVIEW">Pending review</option><option value="CLOSED">Closed</option><option value="REJECTED">Rejected</option></select></label>
           <label><span>Rows</span><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>{PAGE_SIZE_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          <span className="qms-ops-pill">Page {currentPage}</span>
+          </CollapsibleFilters><span className="qms-ops-pill">Page {currentPage}</span>
         </div>
         {data?.warning ? <div className="qms-ops-warning"><AlertTriangle size={16} /> {data.warning}</div> : null}
         <SourceErrorsNotice errors={data?.source_errors} />

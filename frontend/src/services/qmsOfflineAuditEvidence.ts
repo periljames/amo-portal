@@ -575,6 +575,18 @@ export async function replayOfflineAuditEvidence(
   return { uploaded, failed, conflicts, deferred };
 }
 
-export async function discardOfflineAuditEvidence(id: string): Promise<void> {
-  await deleteStored(id);
+export async function discardOfflineAuditEvidence(id: string, amoCode?:string, auditId?:string): Promise<void> {
+  const remove = async () => {
+    if(amoCode && auditId){const row=(await scopedRows(amoCode,auditId)).find(entry=>entry.id===id);
+      if(!row)throw new Error("This file has already synchronized. Remove it from saved evidence instead.");
+      if(row.state==='UPLOADING' && !navigator.locks)throw new Error("Upload is in progress. Wait for it to finish, then remove the saved attachment.");}
+    await deleteStored(id);
+  };
+  if(amoCode && auditId && navigator.locks)await navigator.locks.request(`amo:qms:evidence:${currentOfflineScope()}:${auditId}`,remove);else await remove();
+}
+export async function retryOfflineAuditEvidence(id:string,amoCode:string,auditId:string):Promise<void>{
+ const retry=async()=>{const row=(await scopedRows(amoCode,auditId)).find(entry=>entry.id===id);if(!row)return;
+ if(row.state==='CORRUPT')throw new Error('This local file cannot be read. Remove it and attach the original again.');
+ if(row.state==='UPLOADING')return;await updateState(row,'QUEUED',null);};
+ if(navigator.locks)await navigator.locks.request(`amo:qms:evidence:${currentOfflineScope()}:${auditId}`,retry);else await retry();
 }

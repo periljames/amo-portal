@@ -1,3 +1,4 @@
+import { usePhoneLayout } from "../hooks/usePhoneLayout";
 import InlineLoading from "../components/shared/InlineLoading";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -39,7 +40,7 @@ import {
   type CARStatus,
 } from "../services/qms";
 import { getApiBaseUrl } from "../services/config";
-import { readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
+import { consolidateCarInviteForm, readCarInviteDraft, removeCarInviteDraft, saveCarInviteDraft, type CarInviteDraftForm } from "../services/qmsCarInviteDraft";
 import { emptyCarRca, getCarRcaInvite, saveCarRcaInvite, type CarRcaDocument, type CarRcaAction } from "../services/qmsCarRca";
 import { RESPONSE_SECTIONS, type ResponseSection } from "./qualityAudits/carResponseEvidence";
 import ResponseTextArea, { ResponseText } from "../components/QMS/carRca/ResponseTextArea";
@@ -200,7 +201,7 @@ const INVITE_STEPS: Array<{ id: InviteStepId; label: string; help: string }> = [
   { id: "identity", label: "Responder", help: "Confirm who is submitting this response." },
   { id: "containment", label: "Containment", help: "State the immediate action taken to control the issue." },
   { id: "analysis", label: "Root cause", help: "Explain what, how and why the deficiency occurred. Address causal/contributing factors and relevant human, process, procedure, supervision, training, equipment, environment, resource or management-control factors." },
-  { id: "corrective", label: "Corrective action", help: "Separate immediate correction/containment from the long-term corrective or preventive/systemic action. State what changes, who owns it, when it will be complete, and what evidence will prove implementation." },
+  { id: "corrective", label: "Corrective action", help: "Describe the action that addresses the root cause and prevents recurrence, its owner, deadline, and implementation evidence." },
   { id: "evidence", label: "Evidence", help: "Attach proof and reference supporting records." },
   { id: "review", label: "Preview", help: "Check the response before final submission." },
 ];
@@ -211,13 +212,12 @@ const emptyForm = (): InviteForm => ({
   containment_action: "",
   root_cause: "",
   corrective_action: "",
-  preventive_action: "",
   evidence_ref: "",
   due_date: "",
   target_closure_date: "",
 });
 
-const clampResponseText = (value: string): string => value.slice(0, MAX_RESPONSE_CHARS);
+const clampResponseText = (value: string, limit = MAX_RESPONSE_CHARS): string => value.slice(0, limit);
 const clampEvidenceReference = (value: string): string => value.slice(0, MAX_EVIDENCE_REFERENCE_CHARS);
 
 const toForm = (invite: CARInviteOut): InviteForm => ({
@@ -225,8 +225,7 @@ const toForm = (invite: CARInviteOut): InviteForm => ({
   submitted_by_email: invite.submitted_by_email ?? invite.auditee_email ?? "",
   containment_action: clampResponseText(invite.containment_action ?? ""),
   root_cause: clampResponseText(invite.root_cause ?? ""),
-  corrective_action: clampResponseText(invite.corrective_action ?? ""),
-  preventive_action: clampResponseText(invite.preventive_action ?? ""),
+  corrective_action: clampResponseText(invite.corrective_action ?? "", 20000),
   evidence_ref: clampEvidenceReference(invite.evidence_ref ?? ""),
   due_date: invite.due_date ?? "",
   target_closure_date: invite.target_closure_date ?? "",
@@ -333,7 +332,7 @@ const StructuredTextField: React.FC<StructuredTextFieldProps> = ({ label, value,
 const InviteQr: React.FC<{ value: string }> = ({ value }) => {
   const qr = useMemo(() => {
     try {
-      const matrix = new QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 180, 180) as {
+      const matrix = new QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 180, 180, new Map()) as {
         get: (x: number, y: number) => boolean;
         getWidth: () => number;
         getHeight: () => number;
@@ -374,7 +373,6 @@ const SubmissionPreview: React.FC<{
     ["Immediate containment", entry.form.containment_action || "Not stated"],
     ["Root cause", entry.form.root_cause],
     ["Corrective action", entry.form.corrective_action],
-    ["Preventive control", entry.form.preventive_action || "Not stated"],
     ["Evidence", entry.form.evidence_ref || `${entry.attachments.length} uploaded file(s)`],
   ];
   return (
@@ -550,8 +548,8 @@ const PublicCarInvitePage: React.FC = () => {
   const updateFormField = (tokenValue: string, field: keyof InviteForm, value: string) => {
     const nextValue = field === "evidence_ref"
       ? clampEvidenceReference(value)
-      : (["containment_action", "root_cause", "corrective_action", "preventive_action"] as string[]).includes(field)
-        ? clampResponseText(value)
+      : (["containment_action", "root_cause", "corrective_action"] as string[]).includes(field)
+        ? clampResponseText(value, field === "corrective_action" ? 20000 : MAX_RESPONSE_CHARS)
         : value;
     updateEntry(tokenValue, (entry) => ({ ...entry, form: { ...entry.form, [field]: nextValue } }));
   };
@@ -641,7 +639,7 @@ const PublicCarInvitePage: React.FC = () => {
       return "Immediate containment is required. Enter N/A if no containment was required.";
     }
     if (stepId === "analysis" && !fieldHasValue(entry.form.root_cause)) return "Root cause is required.";
-    if (stepId === "corrective" && !fieldHasValue(entry.form.corrective_action)) return "Corrective action plan is required.";
+    if (stepId === "corrective" && !fieldHasValue(entry.form.corrective_action)) return "Corrective Action (CAP) is required.";
     if (stepId === "evidence" && entry.invite.evidence_required && !fieldHasValue(entry.form.evidence_ref) && entry.attachments.length === 0 && !entry.invite.evidence_received_at) {
       return "Evidence is required before submission.";
     }
@@ -688,7 +686,7 @@ const PublicCarInvitePage: React.FC = () => {
       // Never overwrite a newer server revision with stale sessionStorage on
       // initial load. The local backup can be deliberately restored by the user.
       const hasServerDraft = Boolean(savedRca && savedRca.revision > 0);
-      const serverSelectedForm = { ...fallbackForm, ...(serverForm || {}) };
+      const serverSelectedForm = consolidateCarInviteForm({ ...fallbackForm, ...(serverForm || {}) });
       const selectedForm = hasServerDraft ? serverSelectedForm : restoredDraft || serverSelectedForm;
       const localRecovery = hasServerDraft && restoredDraft &&
         JSON.stringify(restoredDraft) !== JSON.stringify(serverSelectedForm) ? restoredDraft : null;
@@ -806,8 +804,7 @@ const PublicCarInvitePage: React.FC = () => {
         submitted_by_email: current.form.submitted_by_email.trim(),
         containment_action: clampResponseText(current.form.containment_action.trim()),
         root_cause: clampResponseText(current.form.root_cause.trim()),
-        corrective_action: clampResponseText(current.form.corrective_action.trim()),
-        preventive_action: clampResponseText(current.form.preventive_action.trim()),
+        corrective_action: clampResponseText(current.form.corrective_action.trim(), 20000),
         evidence_ref: clampEvidenceReference(current.form.evidence_ref.trim()),
         ...(current.invite.deadline_change_requires_review ? {} : {
           due_date: current.form.due_date || null,
@@ -1068,6 +1065,7 @@ const PublicCarInvitePage: React.FC = () => {
     }
   };
 
+  const phoneLayout = usePhoneLayout();
   const readyEntries = entries.filter((entry) => entry.state === "ready" && entry.invite);
   const openItems = readyEntries.filter((entry) => !["CLOSED", "CANCELLED"].includes(entry.invite?.status ?? "")).length;
   const evidenceCount = entries.reduce((sum, entry) => sum + entry.attachments.length, 0);
@@ -1085,7 +1083,7 @@ const PublicCarInvitePage: React.FC = () => {
           <div>
             <p className="car-invite-kicker">Public CAR workspace</p>
             <h2 className="car-invite-title">Assigned corrective actions</h2>
-            <p className="car-invite-subtitle">Fields marked <strong>*</strong> are required. Response fields are limited to {MAX_RESPONSE_CHARS} characters each.</p>
+            <p className="car-invite-subtitle">Fields marked <strong>*</strong> are required.</p>
           </div>
           <div className="car-invite-toolbar__stats" aria-label="Workspace status">
             <span><ClipboardCheck size={16} /> {readyEntries.length} CAR{readyEntries.length === 1 ? "" : "s"}</span>
@@ -1151,11 +1149,11 @@ const PublicCarInvitePage: React.FC = () => {
                           <p className="car-invite-kicker">Finding to address</p>
                           <h3>{invite.finding_description || invite.summary || "Finding details pending"}</h3>
                         </div>
-                        <dl>
+                        <details className="car-invite-finding-details" open={!phoneLayout}><summary>Finding details</summary><dl>
                           <div><dt>Finding ref</dt><dd>{invite.finding_ref || "N/A"}</dd></div>
                           <div><dt>Audit</dt><dd>{invite.audit_title || invite.audit_ref || "N/A"}</dd></div>
                           <div><dt>Auditee</dt><dd>{personDisplay(invite.auditee, "N/A")}</dd></div>
-                        </dl>
+                        </dl></details>
                       </section>
 
                       <input hidden id={`evidence-${entry.token}`} type="file" multiple disabled={locked || entry.uploading} onChange={handleUpload(entry.token)} accept={INVITE_EVIDENCE_ACCEPT}/>
@@ -1270,20 +1268,14 @@ const PublicCarInvitePage: React.FC = () => {
                                 {active && step.id === "corrective" && (
                                   <div className="car-invite-stage__body car-invite-form-grid">
                                     <StructuredTextField
-                                      label="Corrective action plan"
+                                      label="Corrective Action (CAP)"
+                                      maxChars={20000}
                                       required
                                       value={entry.form.corrective_action}
                                       disabled={locked}
                                       onChange={(value) => updateFormField(entry.token, "corrective_action", value)}
                                       placeholder="State what will change, who owns it, and when it will be completed."
                                       note={invite.capa_review_note}
-                                    />
-                                    <StructuredTextField
-                                      label="Preventive action / systemic control"
-                                      value={entry.form.preventive_action}
-                                      disabled={locked}
-                                      onChange={(value) => updateFormField(entry.token, "preventive_action", value)}
-                                      placeholder="State how recurrence will be prevented."
                                     />
                                     <label className="car-invite-field">
                                       <span>Target closure date</span>
@@ -1338,6 +1330,7 @@ const PublicCarInvitePage: React.FC = () => {
                                     </div>}
                                     {entry.attachmentsError && <div className="car-invite-error" role="alert">
                                       <AlertTriangle size={18} /> {entry.attachmentsError}
+                                      {entry.failedFiles.length > 0 && <button type="button" className="car-invite-btn" disabled={entry.uploading} onClick={()=>updateEntry(entry.token,current=>({...current,failedFiles:[],attachmentsError:null}))}>Remove failed files</button>}
                                       {entry.failedFiles.length > 0 && <button type="button" className="car-invite-btn" disabled={entry.uploading}
                                         onClick={() => void uploadFiles(entry.token, entry.failedFiles)}>Retry {entry.failedFiles.length} failed file(s)</button>}
                                       <button type="button" className="car-invite-btn" disabled={entry.refreshingEvidence || entry.uploading} onClick={() => void refreshEvidence(entry.token)}><RotateCcw size={16} /> {entry.refreshingEvidence ? "Refreshing…" : "Refresh evidence"}</button>
@@ -1453,7 +1446,7 @@ const PublicCarInvitePage: React.FC = () => {
           </main>
 
           <aside className="car-invite-side">
-            <details className="car-invite-panel" open>
+            <details className="car-invite-panel" open={!phoneLayout}>
               <summary><span>Action items</span><strong>{readyEntries.length}</strong></summary>
               <div className="car-invite-list">
                 {readyEntries.length === 0 && <p className="car-invite-subtitle">No CARs loaded yet.</p>}
@@ -1466,7 +1459,7 @@ const PublicCarInvitePage: React.FC = () => {
               </div>
             </details>
 
-            <details className="car-invite-panel" open>
+            <details className="car-invite-panel" open={!phoneLayout}>
               <summary><span>Audit report</span><FileText size={16} /></summary>
               {readyEntries.find((entry) => entry.invite?.audit_report_download_url)?.invite ? (
                 <a className="car-invite-btn car-invite-btn--wide" href={absoluteApiUrl(readyEntries.find((entry) => entry.invite?.audit_report_download_url)!.invite!.audit_report_download_url!)} target="_blank" rel="noreferrer">
@@ -1475,7 +1468,7 @@ const PublicCarInvitePage: React.FC = () => {
               ) : <p className="car-invite-subtitle">The auditor has not issued the report yet.</p>}
             </details>
 
-            <details className="car-invite-panel" open>
+            <details className="car-invite-panel" open={!phoneLayout}>
               <summary><span>Evidence attached</span><strong>{sideEvidence.length}</strong></summary>
               <div className="car-invite-side-evidence">
                 {sideEvidence.length === 0 && <p className="car-invite-subtitle">No evidence uploaded yet.</p>}

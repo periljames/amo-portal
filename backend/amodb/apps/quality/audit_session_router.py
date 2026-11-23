@@ -361,7 +361,7 @@ def project_audit_session(
         "prepare": "An issued preparation snapshot and governed checklist must exist before fieldwork.",
         "live": getattr(findings, "helper", "Complete fieldwork and finalize released findings."),
         "closing": getattr(report, "helper", "Issue the governed report and record audit execution closure."),
-        "follow-up": "Findings, CAR/CAPA and effectiveness obligations must be resolved before assurance follow-up completes.",
+        "follow-up": "Findings, CAR/CAP and effectiveness obligations must be resolved before assurance follow-up completes.",
         "archive": "Create the controlled audit work package after assurance follow-up is complete.",
     }
 

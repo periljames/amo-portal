@@ -1314,7 +1314,7 @@ QMS_ROUTE_TREE: dict[str, dict[str, Any]] = {
         ],
     },
     "cars": {
-        "label": "CAR / CAPA",
+        "label": "CAR / CAP",
         "path": "cars",
         "permission": "qms.car.view",
         "children": [

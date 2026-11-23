@@ -1,0 +1,97 @@
+/* Phone layouts for the shared Quality shell. Desktop registers retain columns. */
+@media (max-width: 700px) {
+  .tenant-shell[data-workspace-module="quality"] { --qms-mobile-gap: 12px; }
+  .tenant-shell[data-workspace-module="quality"] :is(.tenant-shell__workspace, .tenant-shell__main, .tenant-shell__content, .audit-shell-content, .qa-workspace-main, .section-card, .section-card__body) { min-width: 0; max-width: 100%; }
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-page, .qms-settings-page) { padding: 12px 8px; }
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-workspace-grid, .qms-ops-hero, .qms-calendar-layout, .qms-settings__cards, .qms-intelligence__support-grid) { grid-template-columns: minmax(0, 1fr); gap: var(--qms-mobile-gap); }
+  .tenant-shell[data-workspace-module="quality"] .qms-ops-span-2 { grid-column: auto; }
+  .tenant-shell[data-workspace-module="quality"] :is(.page-header, .section-card__header, .qms-settings__header, .qms-control-centre__header) { flex-wrap: wrap; gap: 12px; }
+  .tenant-shell[data-workspace-module="quality"] :is(.page-header__actions, .qms-ops-header-actions, .qms-control-centre__header-actions) { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-filter-bar, .qms-register-toolbar, .qa-audits-list__toolbar) { position: static; display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-filter-bar, .qms-register-toolbar, .qa-audits-list__toolbar) > :is(label, select, input) { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-search, .qa-audits-list__search) { flex-basis: 100%; width: 100%; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__create-actions { width: 100%; display: flex; gap: 8px; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__create-actions > button { flex: 1; }
+  .tenant-shell[data-workspace-module="quality"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { font-size: 16px; min-height: 44px; max-width: 100%; box-sizing: border-box; }
+  .tenant-shell[data-workspace-module="quality"] :is(button, .btn, .qms-section-tabs a, .quality-context-bar__tabs a) { min-height: 44px; }
+  .tenant-shell[data-workspace-module="quality"] :is(h1,h2,h3,p,dd) { overflow-wrap: anywhere; }
+  .tenant-shell[data-workspace-module="quality"] .record-table-scroll { height: auto; overflow: visible; }
+  .tenant-shell[data-workspace-module="quality"] .record-table { display: block; min-width: 0 !important; width: 100%; }
+  .tenant-shell[data-workspace-module="quality"] .record-table colgroup { display: none; }
+  .tenant-shell[data-workspace-module="quality"] .record-table thead { display: block; }
+  .tenant-shell[data-workspace-module="quality"] .record-table thead:not([data-sortable="true"]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .tenant-shell[data-workspace-module="quality"] .record-table thead[data-sortable="true"] tr { display: flex; overflow-x: auto; padding-bottom: 8px; gap: 8px; }
+  .tenant-shell[data-workspace-module="quality"] .record-table th { position: static; flex-shrink: 0; height: auto; padding: 0; border: 0; }
+  .tenant-shell[data-workspace-module="quality"] .record-table-sort { min-height: 44px; padding: 8px; border: 1px solid var(--qms-line); border-radius: 6px; }
+  .tenant-shell[data-workspace-module="quality"] .record-table-resize { display: none; }
+  .tenant-shell[data-workspace-module="quality"] .record-table tbody { display: grid; gap: 12px; }
+  .tenant-shell[data-workspace-module="quality"] .record-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; border: 1px solid var(--qms-line,var(--border-color)); border-radius: 10px; background: var(--qms-panel,var(--surface-elevated)); }
+  .tenant-shell[data-workspace-module="quality"] .record-table td { position: static; min-width: 0; padding: 8px 6px; border: 0; white-space: normal; }
+  .tenant-shell[data-workspace-module="quality"] .record-table td::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--qms-muted,var(--text-secondary)); }
+  .tenant-shell[data-workspace-module="quality"] .record-table td:first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--qms-line,var(--border-color)); padding-bottom: 12px; margin-bottom: 4px; }
+  .tenant-shell[data-workspace-module="quality"] .record-table td[data-label="Actions"] { grid-column: 1 / -1; }
+  .tenant-shell[data-workspace-module="quality"] .record-table td :is(.qa-audits-grid__identity strong, .qa-register-grid__primary span) { display: block; -webkit-line-clamp: unset; overflow: visible; white-space: normal; }
+  .tenant-shell[data-workspace-module="quality"] .record-table td :is(a,button) { white-space: normal; overflow-wrap: anywhere; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__grid-shell { height: auto; min-height: 0; overflow: visible; }
+  .tenant-shell[data-workspace-module="quality"] .record-pagination { display: flex; flex-wrap: wrap; padding: 12px 0; gap: 8px; }
+  .tenant-shell[data-workspace-module="quality"] .record-pagination__summary { flex-basis: 100%; }
+  .tenant-shell[data-workspace-module="quality"] .record-pagination__pages { max-width: 100%; flex-wrap: wrap; }
+  .tenant-shell[data-workspace-module="quality"] .record-pagination form label { font-size: 12px; gap: 6px; }
+}
+@media (max-width: 700px) {
+  .tenant-shell[data-workspace-module="quality"] .qms-menu-bar.quality-context-bar { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 2px; padding: 4px 6px; }
+  .tenant-shell[data-workspace-module="quality"] .qms-menu-bar > .qms-page-menu { min-width: 0; margin: 0; }
+  .tenant-shell[data-workspace-module="quality"] .qms-menu-bar > .qms-menu-bar__home,
+  .tenant-shell[data-workspace-module="quality"] .qms-menu-bar > .qms-page-menu > button { width: 100%; min-height: 44px; justify-content: center; white-space: normal; text-align: center; padding: 6px 4px; font-size: 12px; }
+  .tenant-shell[data-workspace-module="quality"] .qms-page-menu__panel { max-height: 60dvh; overflow-y: auto; }
+  .tenant-shell[data-workspace-module="quality"] .qms-page-menu__panel a { display: flex; align-items: center; min-height: 44px; }
+}
+@media (max-width: 700px) {
+  .tenant-shell[data-workspace-module="quality"] :is(.qms-ops-filter-bar, .qms-register-toolbar, .qa-audits-list__toolbar) { flex-direction: row; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__filter { display: grid; gap: 6px; align-content: start; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__filter select { width: 100%; }
+  .tenant-shell[data-workspace-module="quality"] .audit-shell-segmented { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tenant-shell[data-workspace-module="quality"] .audit-shell-segmented__button { flex: 1 1 56px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 6px 4px; }
+  .tenant-shell[data-workspace-module="quality"] .audit-shell-segmented__label--mobile { display: inline; font-size: 11px; }
+}
+@media (max-width: 700px) {
+  .tenant-shell[data-workspace-module="quality"] .qa-workspace-main { overflow: visible; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list--register { flex: 0 0 auto; min-height: 0; height: auto; }
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__grid-shell,
+  .tenant-shell[data-workspace-module="quality"] .qa-audits-list__grid-shell > div { flex: 0 0 auto; height: auto; }
+}
+/* The audit workspace uses page scrolling on phones, rather than a shrinking
+   desktop records viewport beneath a variable-height toolbar. */
+@media (max-width: 700px) {
+  html.quality-context-active .tenant-shell[data-workspace-module="quality"]:has(.qa-audits-list--register) .tenant-shell__main { overflow-y: auto; }
+  html.quality-context-active .tenant-shell[data-workspace-module="quality"]:has(.qa-audits-list--register) :is(.tenant-shell__content,.qms-shell,.qms-content,.audit-shell-content,.qa-workspace-shell,.qa-workspace-main,.qa-audits-list--register,.qa-audits-list__grid-shell) { flex: 0 0 auto; height: auto; overflow: visible; }
+}
+/* Phone navigation has one owner: the existing hamburger / side drawer. */
+@media (max-width: 700px) {
+  .tenant-shell[data-workspace-module="quality"] .quality-context-bar-host { display: none; }
+  .tenant-shell[data-workspace-module="quality"] .tenant-shell__main { --qms-context-height: 0px; }
+}
+@media(max-width:700px) {
+ html.quality-context-active .tenant-shell[data-workspace-module="quality"]:has(.qms-live-audit-focus) .tenant-shell__main { overflow-y:auto; }
+ html.quality-context-active .tenant-shell[data-workspace-module="quality"]:has(.qms-live-audit-focus) :is(.tenant-shell__content,.qms-shell,.qms-content,.audit-shell-content,.qms-audit-occurrence-shell,.qms-audit-occurrence-shell__body,.qms-live-audit-focus,.qms-live-audit-focus__body,.qms-live-audit-focus__matrix,.audit-checklist-table-scroll) { height:auto; min-height:0; max-height:none; overflow:visible; flex:0 0 auto; }
+ html.quality-context-active .tenant-shell[data-workspace-module="quality"] .qms-live-audit-focus__body { display:block; padding:0 4px 16px; }
+ .qms-live-audit-focus .audit-checklist-table tbody tr { padding:10px; }
+
+}
+.qms-provider-overview>summary{cursor:pointer;min-height:44px;padding:10px 12px;border:1px solid var(--qms-line,var(--surface-border));border-radius:8px;font-size:13px}
+.qms-provider-overview[open]>summary{margin-bottom:12px}
+@media(min-width:701px){.qms-provider-overview>summary{display:none}}
+@media(max-width:700px){
+ .qms-provider-overview{margin:4px 0}
+ .qms-provider-page .qms-provider-page__header{padding:12px;gap:8px}
+ .qms-provider-page .qms-provider-page__header h1{font-size:20px}
+ .qms-provider-page .qms-provider-page__actions{gap:6px}
+ .qms-provider-page .qms-provider-toolbar{display:flex;align-items:start;gap:8px;flex-wrap:wrap}
+ .qms-provider-page .qms-provider-search{flex:1;min-width:120px}
+ .auth-layout--car-invite .auth-layout__header{padding:12px}
+ .car-invite-toolbar{padding:10px;gap:8px}
+ .car-invite-toolbar .car-invite-kicker,.car-invite-toolbar .car-invite-subtitle,.car-invite-toolbar__stats{display:none}
+ .car-invite-toolbar .car-invite-title{font-size:19px}
+ .car-invite-side{position:static}
+ .car-invite-panel{margin-block:6px}
+}

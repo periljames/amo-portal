@@ -361,8 +361,10 @@ const LoginPage: React.FC = () => {
       onSubmit={handleSubmit}
       onTogglePassword={() => setShowPassword((prev) => !prev)}
       onForgotPassword={() => {
-        const query = amoSlugForLabel ? `?amo=${amoSlugForLabel}` : "";
-        navigate(`/reset-password${query}`);
+        const query = new URLSearchParams();
+        if (amoSlugForLabel) query.set("amo", amoSlugForLabel);
+        if (identifier.trim()) query.set("email", identifier.trim());
+        navigate(`/reset-password?${query.toString()}`);
       }}
       onSwitchAccount={step === "password" && !amoCode ? resetContext : undefined}
       onFindAmo={amoCode ? () => navigate("/login") : undefined}

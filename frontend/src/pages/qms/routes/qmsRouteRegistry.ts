@@ -115,8 +115,8 @@ const MODULES: readonly QmsModuleRoute[] = [
   {
     id: "cars",
     segment: "cars",
-    label: "CAR and CAPA",
-    navigationLabel: "CAR / CAPA",
+    label: "CAR and CAP",
+    navigationLabel: "CAR / CAP",
     permission: "qms.car.view",
     section: "assurance",
     defaultView: "register",

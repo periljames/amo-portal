@@ -268,7 +268,7 @@ def _archive_readiness(db: Session, *, amo_id: str, audit_id: uuid.UUID, policy)
     if closure is None or closure.execution_status != "CLOSED":
         blockers.append({"type": "EXECUTION", "reason": "Issue the report and close audit execution in Closing."})
     # Archive commencement follows the tenant's approved retention start event.
-    # EXECUTION_CLOSED records may be archived with open CAR/CAPA obligations;
+    # EXECUTION_CLOSED records may be archived with open CAR/CAP obligations;
     # archiving must never mark those obligations complete or waive their gates.
     # FOLLOW_UP_COMPLETE policies retain the full corrective-action gate.
     if policy is not None and policy.retention_start_event == "FOLLOW_UP_COMPLETE":

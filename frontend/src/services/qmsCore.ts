@@ -420,7 +420,6 @@ export interface CAROut {
   containment_action?: string | null;
   root_cause?: string | null;
   corrective_action?: string | null;
-  preventive_action?: string | null;
   evidence_ref?: string | null;
   submitted_by_name?: string | null;
   submitted_by_email?: string | null;
@@ -449,11 +448,13 @@ export interface CAROut {
   auditor_remarks?: string | null;
   register_root_cause?: string | null;
   register_cap?: string | null;
-  register_pap?: string | null;
+
   auditor_name?: string | null;
   requested_by_name?: string | null;
   responsible_department?: string | null;
   responsible_personnel?: string | null;
+  finding_level?: string | null;
+  finding_severity?: string | null;
   car_category_limit?: string | null;
   car_sequence_no?: string | null;
   created_at: string;
@@ -2086,7 +2087,6 @@ export interface CARInviteOut {
   containment_action?: string | null;
   root_cause?: string | null;
   corrective_action?: string | null;
-  preventive_action?: string | null;
   evidence_ref?: string | null;
   submitted_by_name?: string | null;
   submitted_by_email?: string | null;
@@ -2129,7 +2129,6 @@ export interface CARResponseOut {
   containment_action?: string | null;
   root_cause?: string | null;
   corrective_action?: string | null;
-  preventive_action?: string | null;
   evidence_ref?: string | null;
   submitted_by_name?: string | null;
   submitted_by_email?: string | null;
@@ -2169,7 +2168,6 @@ export async function qmsSubmitCarInvite(
     containment_action?: string | null;
     root_cause?: string | null;
     corrective_action?: string | null;
-    preventive_action?: string | null;
     evidence_ref?: string | null;
     due_date?: string | null;
     target_closure_date?: string | null;
@@ -2208,7 +2206,7 @@ export interface CARAttachmentOut {
   id: string;
   car_id: string;
   filename: string;
-  response_section?: "CONTAINMENT" | "ROOT_CAUSE" | "CORRECTIVE" | "PREVENTIVE" | null;
+  response_section?: "CONTAINMENT" | "ROOT_CAUSE" | "CORRECTIVE" | null;
   description?: string | null;
   content_type: string | null;
   size_bytes: number | null;

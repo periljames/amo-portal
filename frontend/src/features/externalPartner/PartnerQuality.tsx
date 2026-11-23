@@ -6,8 +6,8 @@ import {ActionNotice,Section,State,Status} from "./PartnerPrimitives";
 import { usePartnerLoad } from "./usePartnerLoad";
 type Car=QualityPage["cars"]["items"][number];
 type AuditDocumentRequest=QualityPage["document_requests"]["items"][number];
-type Draft={containment_action:string;root_cause:string;corrective_action:string;preventive_action:string;evidence_submission_id:string};
-const empty:Draft={containment_action:"",root_cause:"",corrective_action:"",preventive_action:"",evidence_submission_id:""};
+type Draft={containment_action:string;root_cause:string;corrective_action:string;evidence_submission_id:string};
+const empty:Draft={containment_action:"",root_cause:"",corrective_action:"",evidence_submission_id:""};
 export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
   const [searchParams,setSearchParams]=useSearchParams();
   const assignedAudit=searchParams.get("audit")||"";
@@ -129,7 +129,7 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
       <Section title="Corrective-action requests" description="Respond only to assigned CARs. Submission uses the authoritative QMS CAR response workflow.">
         {data.value.cars.items.map(x=><div key={x.id} className="partner-record">
           <div className="partner-row"><div><strong>{x.car_number} · {x.title}</strong>
-            <small>Due {friendlyDate(x.due_date)} · Root cause review {x.root_cause_status} · CAPA review {x.capa_status}</small></div><Status value={x.status}/></div>
+            <small>Due {friendlyDate(x.due_date)} · Root cause review {x.root_cause_status} · CAP review {x.capa_status}</small></div><Status value={x.status}/></div>
           {canSubmit&&<button type="button" disabled={busy} onClick={()=>{
             setActiveCar(x);setDraft(empty);setError("");setNotice("");
           }}>Prepare governed CAR response</button>}
@@ -142,11 +142,10 @@ export default function PartnerQuality({tenant,csrf,capabilities}:PartnerProps){
           {([
             ["containment_action","Immediate containment"],
             ["root_cause","Root cause analysis"],
-            ["corrective_action","Corrective action plan"],
-            ["preventive_action","Preventive action"],
+            ["corrective_action","Corrective Action (CAP)"],
           ] as const).map(([name,title])=><label key={name}>{title}
-            <textarea value={draft[name]} minLength={name==="preventive_action"?0:12}
-              required={name!=="preventive_action"} maxLength={500} rows={3}
+            <textarea value={draft[name]} minLength={name==="containment_action"?2:12}
+              required maxLength={name==="corrective_action"?20000:500} rows={3}
               onChange={e=>setDraft(d=>({...d,[name]:e.target.value}))}/>
           </label>)}
           <label>Quality-reviewed objective evidence<select value={draft.evidence_submission_id}

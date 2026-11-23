@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockQualityShell } from "./helpers/mockQualityShell";
 
 const carId = "11111111-1111-4111-8111-111111111111";
-const car = { id: carId, car_number: "CAR/TEST/26/001", title: "Controlled investigation", audit_ref:"AUD/26/004", finding_ref:"F-012", due_date:"2026-12-10", responsible_personnel:"Jane Smith",
+const car = { id: carId, car_number: "CAR/TEST/26/001", title: "Controlled investigation", audit_ref:"AUD/26/004", audit_title:"Maintenance control audit", finding_description:"Release records lack independent verification.", finding_level:"LEVEL_2", finding_severity:"MAJOR", created_at:"2026-10-01T00:00:00Z", finding_ref:"F-012", due_date:"2026-12-10", responsible_personnel:"Jane Smith",
   summary: "Review a documented maintenance process", program: "QUALITY", priority: "HIGH", status: "OPEN" };
 const investigation = { version: 1, problem_statement: car.summary, investigations: [], conclusion: "",
   supported_cause_ids: [], conclusion_evidence_references: [], evidence_notes: "", effectiveness_proposal: null };
@@ -39,7 +39,7 @@ test("register hierarchy, queues and actions remain usable", async ({page}) => {
  await page.goto('/maintenance/tenant-a/quality/cars?dueWindow=week');
  await expect(page.getByRole('button',{name:car.car_number,exact:true})).toBeVisible({timeout:20000});
  await expect(page.getByRole('heading',{name:'Corrective action register',exact:true})).toHaveCount(1);
- await expect(page.getByRole('table',{name:'Corrective action register'}).getByRole('columnheader')).toHaveCount(6);
+ await expect(page.getByRole('table',{name:'Corrective action register'}).getByRole('columnheader')).toHaveCount(8);
  await expect(page.getByRole('combobox',{name:'Status',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Filters',exact:true}).click();
  const status=page.getByRole('combobox',{name:'Status',exact:true});
@@ -60,9 +60,11 @@ test("register fits desktop and mobile", async ({page}) => {
  await prepare(page);await page.setViewportSize({width:1440,height:1000});
  await page.goto('/maintenance/tenant-a/quality/cars');
  await expect(page.getByRole('button',{name:car.car_number,exact:true})).toBeVisible({timeout:20000});
+ await expect(page.getByRole('cell',{name:car.audit_title,exact:true})).toBeVisible();
+ await expect(page.getByRole('cell',{name:/Level 2 Major/})).toBeVisible();
  await page.screenshot({path:'test-results/car-register-desktop.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});
- await expect(page.getByText(car.title,{exact:true})).toBeVisible();
+ await expect(page.getByText(car.finding_description,{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
  await page.screenshot({path:'test-results/car-register-mobile.png',fullPage:true});
  await page.evaluate(() => { localStorage.setItem('amo_color_scheme','dark'); window.dispatchEvent(new CustomEvent('amo:color-scheme-changed',{detail:'dark'})); });
@@ -76,4 +78,15 @@ test("read only register exposes records without management controls",async({pag
  await page.getByRole('button',{name:'Actions for '+car.car_number}).click();
  await expect(page.getByRole('button',{name:'Download evidence pack'})).toBeVisible();
  await expect(page.getByRole('button',{name:'Edit assignment & dates'})).toHaveCount(0);
+});
+
+test("register shows deadline urgency and age without flagging closed records overdue",async({page})=>{
+ await prepare(page);await page.clock.setFixedTime(new Date('2026-11-21T12:00:00Z'));
+ const items=[{...car,due_date:'2026-11-19'},{...car,id:'soon',car_number:'CAR-SOON',due_date:'2026-11-24'},{...car,id:'closed',car_number:'CAR-CLOSED',status:'CLOSED',due_date:'2026-11-19',closed_at:'2026-11-20T12:00:00Z'}];
+ await page.route('**/quality/cars/register/paged*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({items,total:3,limit:25,offset:0,has_more:false,summary:{total:3,open:2,overdue:1,in_review:0}})}));
+ await page.goto('/maintenance/tenant-a/quality/cars');
+ const table=page.getByRole('table',{name:'Corrective action register'});
+ const overdue=table.getByRole('row').filter({hasText:car.car_number});await expect(overdue).toContainText('2 days overdue');await expect(overdue).toContainText('51 days open');await expect(overdue).toHaveAttribute('data-aging','overdue');
+ await expect(table.getByRole('row').filter({hasText:'CAR-SOON'})).toHaveAttribute('data-aging','soon');
+ const closed=table.getByRole('row').filter({hasText:'CAR-CLOSED'});await expect(closed).toHaveAttribute('data-aging','closed');await expect(closed).not.toContainText('overdue');
 });

@@ -62,7 +62,8 @@ function isAuthRecoveryUrl(url: string): boolean {
 function isPublicAuthUrl(url: string): boolean {
   try {
     const path = new URL(url, window.location.origin).pathname.replace(/\/+$/, "");
-    return path === "/auth/login"
+    return path === "/quality/audit-access/phone-capture"
+      || path === "/auth/login"
       || path === "/auth/login-context"
       || path === "/auth/logout-session"
       || path.startsWith("/auth/password-reset/")

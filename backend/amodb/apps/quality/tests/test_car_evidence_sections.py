@@ -18,10 +18,19 @@ def test_response_section_patch_preserves_existing_description():
     assert result.description=="Retained description"
     db.commit.assert_called_once()
 
-@pytest.mark.parametrize("section",["CONTAINMENT","ROOT_CAUSE","CORRECTIVE","PREVENTIVE",None])
+@pytest.mark.parametrize("section",["CONTAINMENT","ROOT_CAUSE","CORRECTIVE",None])
 def test_response_section_roundtrips_and_does_not_require_a_description(section):
     payload=schemas.CARAttachmentUpdate(response_section=section)
     assert payload.model_dump(exclude_unset=True)=={"response_section":section}
 
 def test_arbitrary_response_section_is_rejected():
     with pytest.raises(ValidationError): schemas.CARAttachmentUpdate(response_section="UNRELATED")
+
+def test_register_uses_linked_finding_level_and_severity_instead_of_car_priority():
+    finding=SimpleNamespace(level=router.models.FindingLevel.LEVEL_2,severity=router.models.QMSFindingSeverity.MAJOR,description="Independent verification missing",finding_ref="F-1",audit=SimpleNamespace(id=uuid4(),audit_ref="AUD-1",title="Maintenance control audit"))
+    car=SimpleNamespace(finding=finding,requested_by_user_id=None,assigned_to_user_id=None,created_at=datetime.now(timezone.utc),closed_at=None,due_date=None,target_closure_date=None,root_cause_status="PENDING",capa_status="PENDING",evidence_verified_at=None,root_cause_review_note=None,capa_review_note=None,summary="CAR summary",root_cause_text=None,root_cause=None,capa_text=None,corrective_action=None,preventive_action=None,submitted_by_name=None,priority="LOW")
+    result=router._decorate_car_register_items(MagicMock(),[car])[0]
+    assert result.audit_title=="Maintenance control audit"
+    assert result.finding_description=="Independent verification missing"
+    assert result.finding_level=="LEVEL 2"
+    assert result.finding_severity=="MAJOR"

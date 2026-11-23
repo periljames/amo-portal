@@ -38,6 +38,25 @@ describe("portal offline cache policy", () => {
 });
 
 describe("portal offline mutation policy", () => {
+  it.each([500, 502, 503, 504, 429])("durably retains guarded fieldwork on HTTP %s", async status => {
+    const path = "/api/maintenance/amo/quality/audits/a/checklist-items/i/fieldwork-mutations";
+    const body = offlineTestBody(path);
+    const key = JSON.parse(body).client_mutation_id;
+    globalThis.fetch = vi.fn(async () => new Response('{"detail":"Temporarily unavailable"}', {
+      status, headers: {"Content-Type":"application/json", ...(status===502?{"X-AMO-Proxy-Transport-Error":"1"}:{})},
+    })) as typeof fetch;
+    const result = await portalFetch(path, {method:"POST",body,offline:{queueMutation:true,requireDurable:true,idempotencyKey:key}}).catch(error=>error);
+    expect(result).toBeInstanceOf(OfflineQueuedError);
+    expect(result.operation.body).toBe(body);
+    expect(result.operation.idempotencyKey).toBe(key);
+  });
+  it.each([400, 403, 409, 422])("keeps fieldwork HTTP %s rejection visible", async status => {
+    const path = "/api/maintenance/amo/quality/audits/a/checklist-items/i/fieldwork-mutations";
+    const body = offlineTestBody(path);
+    globalThis.fetch = vi.fn(async()=>new Response('{}',{status})) as typeof fetch;
+    const response = await portalFetch(path,{method:"POST",body,offline:{queueMutation:true,requireDurable:true,idempotencyKey:JSON.parse(body).client_mutation_id}});
+    expect(response.status).toBe(status);
+  });
   it.each([
     ["/rostering/versions/id/assignments", "POST"],
     ["/rostering/assignments/id", "PATCH"],

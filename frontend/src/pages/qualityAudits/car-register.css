@@ -67,3 +67,28 @@
 .car-register--structured .car-register-table td:last-child:not([colspan]) { padding-inline:8px; }
 .car-register--structured .car-row-actions { display:flex; justify-content:center; }
 @media(max-width:760px) { .car-register--structured .car-register-table td:last-child:not([colspan]) { padding:0; } }
+/* Scan the finding, audit and deadline without opening the record. */
+.car-register--structured .car-register-table { min-width:1100px; }
+.car-register-table th:nth-child(1) { width:12%; }
+.car-register-table th:nth-child(2) { width:25%; }
+.car-register-table th:nth-child(3) { width:15%; }
+.car-register-table th:nth-child(4) { width:10%; }
+.car-register-table th:nth-child(5) { width:12%; }
+.car-register-table th:nth-child(6) { width:13%; }
+.car-register-finding > strong { font-weight:500; }
+.car-register-finding small,.car-register-aging small { display:block; color:var(--text-secondary); font-size:11px; margin-top:5px; }
+.car-register-severity { display:block; margin-top:5px; font-size:11px; font-weight:600; }
+.car-register-severity[data-severity="MAJOR"],.car-register-severity[data-severity="CRITICAL"] { color:var(--accent-danger,#b42318); }
+.car-aging-label { display:block; margin-top:5px; font-weight:600; font-size:11px; }
+.car-aging-label[data-tone="overdue"] { color:var(--accent-danger,#b42318); }
+.car-aging-label[data-tone="soon"] { color:var(--accent-warning,#986000); }
+.car-register-table tr[data-aging="overdue"] td:first-child { box-shadow:inset 3px 0 var(--accent-danger,#b42318); }
+.car-register-table tr[data-aging="soon"] td:first-child { box-shadow:inset 3px 0 var(--accent-warning,#986000); }
+@media(max-width:760px) {
+ .car-register--structured .car-register-table { min-width:0; }
+ .car-register-table tr[data-aging] td:first-child { box-shadow:none; }
+ .car-register-table tr[data-aging="overdue"] { border-left:3px solid var(--accent-danger,#b42318); }
+ .car-register-table tr[data-aging="soon"] { border-left:3px solid var(--accent-warning,#986000); }
+ .car-register-table td:nth-child(3) { grid-column:1/-1; }
+ .car-register-table .car-register-source { display:block!important; }
+}

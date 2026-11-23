@@ -9,7 +9,7 @@ import "./qualityAudits/car-register.css";
 import AuditHistoryPanel from "../components/QMS/AuditHistoryPanel";
 import { useToast } from "../components/feedback/ToastProvider";
 import CarRecordView from "./qualityAudits/CarRecordView";
-import { carHasReview, carNextAction, caseDate } from "./qualityAudits/carCaseModel";
+import { carHasReview, carNextAction, caseDate, carAging } from "./qualityAudits/carCaseModel";
 import CarActionsMenu from "./qualityAudits/CarActionsMenu";
 import { hasQmsRolePermission } from "../app/routeGuards";
 import { getCachedUser, getContext } from "../services/auth";
@@ -710,24 +710,25 @@ const QualityCarsPage: React.FC = () => {
             <thead>
               <tr>
                 <th scope="col">Corrective action</th>
-                <th scope="col">Audit / finding</th>
+                <th scope="col">Non-conformance</th><th scope="col">Audit</th><th scope="col">Level / severity</th>
                 <th scope="col">Next step</th>
-                <th scope="col">Due</th>
+                <th scope="col">Due / aging</th>
                 <th scope="col">Responsible</th>
                 <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {registerQuery.isLoading ? (
-                <tr><td colSpan={6} role="status">Loading corrective actions…</td></tr>
+                <tr><td colSpan={8} role="status">Loading corrective actions…</td></tr>
               ) : cars.length === 0 ? (
-                <tr><td colSpan={6}>{registerQuery.isError ? "Records unavailable. Retry to reload the register." : "No corrective actions match these filters."}</td></tr>
+                <tr><td colSpan={8}>{registerQuery.isError ? "Records unavailable. Retry to reload the register." : "No corrective actions match these filters."}</td></tr>
               ) : cars.map((car) => {
+                const aging = carAging(car);
                 const assignee = car.assigned_to_user_id ? assigneeLookup.get(car.assigned_to_user_id) : undefined;
                 const canModify = car.can_current_user_modify ?? canManageCars;
                 const canReview = car.can_current_user_review !== false && hasQmsRolePermission("qms.car.review");
                 return (
-                  <tr key={car.id}>
+                  <tr key={car.id} data-aging={aging.tone}>
                     <td>
                       <button
                         type="button"
@@ -736,13 +737,13 @@ const QualityCarsPage: React.FC = () => {
                       >
                         <strong>{car.car_number}</strong>
                       </button>
-                      <strong className="car-register-title">{car.title}</strong>
-                      <span className="car-register-priority" data-priority={car.priority}>{humanize(car.priority)}</span>
+
+
                     </td>
-                    <td className="car-register-source">{car.audit_ref ? <strong>{car.audit_ref}</strong> : null}<span>{car.finding_ref || (car.finding_id ? "Linked finding" : "Standalone action")}</span></td>
+                    <td className="car-register-finding" data-label="Non-conformance"><strong>{car.finding_description || car.summary}</strong>{car.finding_ref ? <small>{car.finding_ref}</small> : null}</td><td className="car-register-source" data-label="Audit"><strong>{car.audit_title || (car.audit_id || car.audit_ref ? "Audit title not recorded" : "Standalone CAR")}</strong></td><td data-label="Level / severity"><strong>{car.finding_level ? humanize(car.finding_level) : "Not recorded"}</strong>{car.finding_severity ? <span className="car-register-severity" data-severity={car.finding_severity}>{humanize(car.finding_severity)}</span> : null}</td>
                     <td data-label="Next step"><strong>{carNextAction(car)}</strong><span className="case-status" data-tone={car.status === "CLOSED" ? "success" : car.status === "ESCALATED" ? "danger" : "info"}>{humanize(car.status)}</span></td>
-                    <td data-label="Due">
-                      <strong>{dateOnly(car.due_date)}</strong>
+                    <td data-label="Due / aging" className="car-register-aging">
+                      <strong>{dateOnly(car.due_date || car.target_closure_date)}</strong><span className="car-aging-label" data-tone={aging.tone}>{aging.label}</span>{aging.age ? <small>{aging.age}</small> : null}
                       {car.target_closure_date && car.target_closure_date.slice(0, 10) !== car.due_date?.slice(0, 10) ? <div className="text-muted">Target {dateOnly(car.target_closure_date)}</div> : null}
                     </td>
                     <td data-label="Responsible">
@@ -956,9 +957,8 @@ const QualityCarsPage: React.FC = () => {
                 <p>{reviewCar.register_root_cause || reviewCar.root_cause_text || reviewCar.root_cause || "No root cause submitted."}</p>
               </div>
               <div className="qms-card">
-                <strong>Corrective / preventive action</strong>
+                <strong>Corrective Action (CAP)</strong>
                 <p>{reviewCar.register_cap || reviewCar.capa_text || reviewCar.corrective_action || "No corrective action submitted."}</p>
-                <p className="text-muted">{reviewCar.register_pap || reviewCar.preventive_action || "No preventive action recorded."}</p>
               </div>
             </div>
 

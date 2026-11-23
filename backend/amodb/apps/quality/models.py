@@ -763,7 +763,6 @@ class QMSCorrectiveAction(Base):
     root_cause = Column(Text, nullable=True)
     containment_action = Column(Text, nullable=True)
     corrective_action = Column(Text, nullable=True)
-    preventive_action = Column(Text, nullable=True)
 
     responsible_user_id = Column(String(36), _user_id_fk(), nullable=True, index=True)
     due_date = Column(Date, nullable=True, index=True)
@@ -869,7 +868,6 @@ class CorrectiveActionRequest(Base):
     containment_action = Column(Text, nullable=True)
     root_cause = Column(Text, nullable=True)
     corrective_action = Column(Text, nullable=True)
-    preventive_action = Column(Text, nullable=True)
     evidence_ref = Column(String(512), nullable=True)
     submitted_by_name = Column(String(255), nullable=True)
     submitted_by_email = Column(String(255), nullable=True)
@@ -987,7 +985,6 @@ class CARResponse(Base):
     containment_action = Column(Text, nullable=True)
     root_cause = Column(Text, nullable=True)
     corrective_action = Column(Text, nullable=True)
-    preventive_action = Column(Text, nullable=True)
     evidence_ref = Column(String(512), nullable=True)
     submitted_by_name = Column(String(255), nullable=True)
     submitted_by_email = Column(String(255), nullable=True)

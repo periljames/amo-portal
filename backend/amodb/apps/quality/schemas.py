@@ -5,7 +5,16 @@ from datetime import date, datetime, time
 from typing import Annotated, Any, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, model_validator
+
+
+from .cap_content import unified_cap
+
+class UnifiedCAPInput(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def consolidate_legacy_cap(cls, value):
+        return unified_cap(value) if isinstance(value, dict) else value
 
 from amodb.apps.accounts.models import AccountRole
 from .enums import (
@@ -694,11 +703,10 @@ class QMSAuditScheduleOut(BaseModel):
     days_remaining: Optional[int] = None
 
 
-class QMSCAPUpsert(BaseModel):
+class QMSCAPUpsert(UnifiedCAPInput):
     root_cause: Optional[str] = None
     containment_action: Optional[str] = None
     corrective_action: Optional[str] = None
-    preventive_action: Optional[str] = None
 
     responsible_user_id: Optional[str] = None
     due_date: Optional[date] = None
@@ -717,7 +725,6 @@ class QMSCAPOut(BaseModel):
     root_cause: Optional[str]
     containment_action: Optional[str]
     corrective_action: Optional[str]
-    preventive_action: Optional[str]
 
     responsible_user_id: Optional[str]
     due_date: Optional[date]
@@ -1112,7 +1119,7 @@ class CARCreate(BaseModel):
     evidence_required: bool = True
 
 
-class CARUpdate(BaseModel):
+class CARUpdate(UnifiedCAPInput):
     title: Optional[str] = Field(default=None, max_length=255)
     summary: Optional[str] = None
     priority: Optional[CARPriority] = None
@@ -1124,7 +1131,6 @@ class CARUpdate(BaseModel):
     reminder_interval_days: Optional[int] = Field(default=None, ge=1, le=90)
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
-    preventive_action: Optional[str] = None
     evidence_ref: Optional[str] = None
 
 
@@ -1151,7 +1157,6 @@ class CAROut(BaseModel):
     containment_action: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
-    preventive_action: Optional[str] = None
     evidence_ref: Optional[str] = None
     submitted_by_name: Optional[str] = None
     submitted_by_email: Optional[str] = None
@@ -1180,11 +1185,12 @@ class CAROut(BaseModel):
     auditor_remarks: Optional[str] = None
     register_root_cause: Optional[str] = None
     register_cap: Optional[str] = None
-    register_pap: Optional[str] = None
     auditor_name: Optional[str] = None
     requested_by_name: Optional[str] = None
     responsible_department: Optional[str] = None
     responsible_personnel: Optional[str] = None
+    finding_level: Optional[str] = None
+    finding_severity: Optional[str] = None
     car_category_limit: Optional[str] = None
     car_sequence_no: Optional[str] = None
     created_at: datetime
@@ -1257,7 +1263,6 @@ class CARInviteOut(BaseModel):
     containment_action: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
-    preventive_action: Optional[str] = None
     evidence_ref: Optional[str] = None
     submitted_by_name: Optional[str] = None
     submitted_by_email: Optional[str] = None
@@ -1284,11 +1289,10 @@ class CARInviteOut(BaseModel):
     related_cars: List[CARInviteRelatedOut] = Field(default_factory=list)
 
 
-class CARInviteUpdate(BaseModel):
+class CARInviteUpdate(UnifiedCAPInput):
     containment_action: Optional[str] = Field(default=None, max_length=8000)
     root_cause: Optional[str] = Field(default=None, max_length=8000)
-    corrective_action: Optional[str] = Field(default=None, max_length=8000)
-    preventive_action: Optional[str] = Field(default=None, max_length=8000)
+    corrective_action: Optional[str] = Field(default=None, max_length=20000)
     evidence_ref: Optional[str] = Field(default=None, max_length=500)
     target_closure_date: Optional[date] = None
     due_date: Optional[date] = None
@@ -1306,7 +1310,6 @@ class CARResponseOut(BaseModel):
     containment_action: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
-    preventive_action: Optional[str] = None
     evidence_ref: Optional[str] = None
     submitted_by_name: Optional[str] = None
     submitted_by_email: Optional[str] = None
@@ -1326,7 +1329,7 @@ class CARReviewUpdate(BaseModel):
 
 
 class CARAttachmentUpdate(BaseModel):
-    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = None
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE"]] = None
     description: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -1336,7 +1339,7 @@ class CARAttachmentOut(BaseModel):
     id: UUID
     car_id: UUID
     filename: str
-    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = None
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE"]] = None
     description: Optional[str] = None
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None

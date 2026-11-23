@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import CarRcaWorkbench from "./CarRcaWorkbench";
 import { getCarRcaInternal, reviewCarRcaAction, addCarRcaInternalAction, type CarRcaProjection, type CarRcaAction, type CarRcaActionCreate } from "../../../services/qmsCarRca";
 import "./car-rca.css";
-import CarRcaParetoSource from "./CarRcaParetoSource";
+
 import { hasQmsRolePermission } from "../../../app/routeGuards";
 import type { CARAttachmentOut, CARAssignee } from "../../../services/qms";
 import { portalErrorMessage } from "../../../services/portalError";
@@ -113,18 +113,13 @@ export default function CarRcaInternalReview({ amoCode, carId, canReview, attach
         disabled onChange={() => undefined} onSave={() => undefined}
         saveState="Controlled record — reviewer read only" /></details> :
         <p>No structured investigation recorded.</p>}
-      {hasQmsRolePermission("qms.reports.view") && <details>
-        <summary>Source frequency analysis</summary>
-        <CarRcaParetoSource amoCode={amoCode} carId={carId}
-          canSave={canReview && hasQmsRolePermission("qms.car.manage")} />
-      </details>}
       {canReview && hasQmsRolePermission("qms.car.manage") && <details>
         <summary>Add a Quality-managed action</summary>
         <div className="car-rca" aria-label="Create an internal governed corrective action">
         <p>Assign an owner and deadline for this action.</p>
         <div className="car-rca-grid">
           <label>Type<select value={newAction.kind} onChange={event => setNewAction(current => ({ ...current, kind: event.target.value as CarRcaActionCreate["kind"] }))}>
-            <option value="CORRECTIVE">Corrective</option><option value="PREVENTIVE">Preventive</option><option value="CONTAINMENT">Containment</option>
+            <option value="CORRECTIVE">Corrective</option><option value="CONTAINMENT">Containment</option>
           </select></label>
           <label>Responsible person's name<input value={newAction.external_owner_name || ""} onChange={event => setNewAction(current => ({ ...current, external_owner_name: event.target.value }))}/></label>
           <label>Target date<input type="date" value={newAction.target_date || ""} onChange={event => setNewAction(current => ({ ...current, target_date: event.target.value || null }))}/></label>

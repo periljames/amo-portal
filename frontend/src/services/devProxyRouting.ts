@@ -6,7 +6,7 @@ export const DEV_API_PROXY_PATTERN =
 const PLATFORM_OPS_DEV_PATH = new RegExp(PLATFORM_OPS_DEV_PROXY_PATTERN, "i");
 const DEV_API_PATH = new RegExp(DEV_API_PROXY_PATTERN, "i");
 const PLATFORM_PATH = /^\/platform(?:\/|$|\?)/i;
-const PUBLIC_QMS_SPA_PATH = /^\/qms\/(?:audit-access|car-access)(?:\/|$|\?)/i;
+const PUBLIC_QMS_SPA_PATH = /^\/qms\/(?:audit-access|car-access|phone-capture)(?:\/|$|\?)/i;
 const PUBLIC_QMS_VERIFICATION_SPA_PATH = /^\/verify\/[^/?]+(?:\/|$|\?)/i;
 
 export type DevProxyTargets = {

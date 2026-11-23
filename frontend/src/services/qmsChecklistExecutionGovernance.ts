@@ -1,3 +1,4 @@
+import { isTemporaryPortalFailure } from "./portalAvailability";
 import { apiRequest, qmsPath } from "./apiClient";
 import { projectOfflineChecklistExecution, readAuditOfflinePack } from "./qmsAuditOfflinePack";
 import { requireAuditContract } from "./qmsAuditWorkflowContract";
@@ -276,8 +277,7 @@ export async function listChecklistExecutionGovernance(amoCode: string, auditId:
       },
     ), "checklist");
   } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    if (!isTemporaryPortalFailure(error)) throw error;
     const offline = await readOffline();
     if (offline) return offline;
     throw error;

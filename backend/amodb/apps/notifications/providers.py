@@ -77,6 +77,20 @@ def _template_variables(context: dict[str, Any]) -> dict[str, str | int]:
 
 
 def _fallback_content(template_key: str, subject: str, context: dict[str, Any]) -> tuple[str, str]:
+    if template_key == "password-reset":
+        action_url = str(context.get("action_url") or "").strip()
+        if not action_url.startswith("https://"):
+            raise ValueError("Password reset requires a public HTTPS link.")
+        minutes = int(context.get("expires_minutes") or 1440)
+        expiry = f"{minutes // 60} hours" if minutes % 60 == 0 else f"{minutes} minutes"
+        instruction = f"This link expires in {expiry} and can be used once."
+        return (
+            "<!doctype html><html><body style='font-family:Arial,sans-serif;color:#172033;line-height:1.6'>"
+            "<h2>Reset your password</h2><p>You requested a password reset for AMO Portal.</p>"
+            f"<p><a href='{html.escape(action_url, quote=True)}'>Reset password</a></p><p>{instruction}</p>"
+            "<p>If you did not request this, ignore this email. Your password has not changed.</p></body></html>",
+            f"You requested a password reset for AMO Portal.\n\nReset password: {action_url}\n\n{instruction}\n\nIf you did not request this, ignore this email. Your password has not changed.",
+        )
     if template_key.startswith("external-provider-"):
         # Standalone account invitation/recovery content; never fall back to a
         # password-reset hosted template with unrelated variable contracts.
@@ -230,13 +244,18 @@ class ResendProvider(EmailProvider):
             raise EmailDeliveryBlocked(
                 "Automatic Resend delivery is blocked until the current API key passes a health check or explicit test email"
             )
+        recovery = template_key == "password-reset"
+        if recovery and mode == "SANDBOX":
+            if os.getenv("PORTAL_ACCOUNT_RECOVERY_LIVE_DELIVERY", "").lower() not in {"1", "true", "yes"}:
+                raise EmailDeliveryBlocked("Password recovery cannot be redirected to a sandbox mailbox. Enable account recovery delivery.")
+            mode = "ACCOUNT_RECOVERY"
         if mode == "PRODUCTION" and _environment() not in {"production", "prod"}:
             raise EmailDeliveryBlocked("Production email is blocked outside a production deployment")
 
         from amodb.apps.platform.resend_adapter import email_recipients
 
         effective_recipient = recipient.strip()
-        intended_cc = context.get("_cc")
+        intended_cc = None if recovery else context.get("_cc")
         intended_reply_to = context.get("_reply_to")
 
         def recipient_rows(value: Any) -> list[str]:
@@ -282,7 +301,7 @@ class ResendProvider(EmailProvider):
         mapping = _template_map(self.config.get("template_map_json"))
         # Authentication codes use the versioned local contract so hosted templates
         # cannot omit expiry or render an unrelated password-reset presentation.
-        template_id = None if template_key.startswith("external-provider-") and context.get("code") else mapping.get(template_key)
+        template_id = None if template_key == "password-reset" or (template_key.startswith("external-provider-") and context.get("code")) else mapping.get(template_key)
         variables = _template_variables(context)
         html_body: str | None = None
         text_body: str | None = None

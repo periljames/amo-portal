@@ -1,3 +1,4 @@
+import { isTemporaryPortalFailure } from "../../../services/portalAvailability";
 import QuestionAuditHistory from "./QuestionAuditHistory";
 import { readFieldworkJournal, saveFieldworkJournal } from "../../../services/qmsFieldworkJournal";
 import QuestionEvidenceCapture from "./QuestionEvidenceCapture";
@@ -29,7 +30,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiClientError } from "../../../services/apiClient";
 import { isOfflineQueuedError } from "../../../services/offlineHttp";
 import { projectPendingChecklistItems } from "../../../services/qmsOfflineFieldworkProjection";
-import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete, onOfflineStateChanged } from "../../../services/offlinePersistence";
+import { listOfflineMutations, replayOfflineMutations, onOfflineSyncComplete, onOfflineStateChanged, type OfflineOutboxEntry } from "../../../services/offlinePersistence";
 import { qmsListFindings } from "../../../services/qms";
 import { requireAuditContract } from "../../../services/qmsAuditWorkflowContract";
 import { listOfflineAuditEvidence, synchronizeOfflineAuditEvidence, onOfflineAuditEvidenceChanged } from "../../../services/qmsOfflineAuditEvidence";
@@ -113,6 +114,7 @@ type LiveChecklistSourceContext = ChecklistTemplateItem & {
 };
 
 type FindingDraft = {
+  inactive?: boolean;
   mode: "NONCOMPLIANT" | "OBSERVATION";
   responseValue: string;
   item: ChecklistExecutionGovernanceRow;
@@ -248,6 +250,10 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("amo:fieldwork-active", { detail: true }));
+    return () => { window.dispatchEvent(new CustomEvent("amo:fieldwork-active", { detail: false })); };
+  }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -365,8 +371,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       try {
         return await qmsListFindings(auditId, amoCode);
       } catch (error) {
-        const message = error instanceof Error ? error.message.toLowerCase() : "";
-        if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+        if (!isTemporaryPortalFailure(error)) throw error;
         const local = await offline();
         if (local) return local;
         throw error;
@@ -652,6 +657,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   };
 
   const updateMutation = useMutation({
+    networkMode: "always",
     mutationFn: ({ item, response, responseValue, auditorNotes, sampledItemInformation, assessment: assessmentState }: FieldworkUpdateInput) => {
       const normalized = normalisedAssessment(item, response, assessmentState);
       const integrityError = assessmentIntegrityError(normalized);
@@ -670,7 +676,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       queryClient.setQueryData<ChecklistExecutionGovernanceResponse>(["qms", "live-audit-checklist", amoCode, auditId], current => acceptChecklistReceipt(current, result.row));
       setAcceptedRows(current => ({ ...current, [result.row.checklist_item_id]: result.row }));
       setLocalError(null);
-      setSyncNotice("Saved to the authoritative audit record.");
+      setSyncNotice(null);
       setPendingChoices((current) => { const next = { ...current }; delete next[variables.item.checklist_item_id]; return next; });
       setNoteDrafts((current) => {
         const id = variables.item.checklist_item_id;
@@ -694,8 +700,13 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     },
     onError: (error, variables) => {
       if (isOfflineQueuedError(error)) {
+        // Hand the optimistic answer to its durable projection before clearing
+        // the transient choice. Waiting for a later refetch briefly unchecks it.
+        queryClient.setQueryData<OfflineOutboxEntry[]>(["qms", "live-audit-outbox", auditId], current => [
+          ...(current || []).filter(entry => entry.id !== error.operation.id), error.operation,
+        ]);
         setLocalError(null);
-        setSyncNotice("Saved securely on this device · pending ordered sync. The authoritative audit state will not change until the server accepts the mutation.");
+        setSyncNotice(null);
         // The durable outbox owns these edits now; they must not remain
         // mistaken for unsaved in-memory notes when the auditor moves on.
         const id = variables.item.checklist_item_id;
@@ -723,6 +734,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
 
   const findingMutation = useMutation({
+    networkMode: "always",
     onMutate: () => { setLocalError(null); setSyncNotice(null); },
     mutationFn: async (draft: FindingDraft) => {
       const classification = findingClassification(draft);
@@ -993,9 +1005,12 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     // they must not prevent an auditor from reaching it in the first place.
     if (response === "NONCOMPLIANT" || response === "OBSERVATION") {
       setLocalError(null);
-      setFindingDraft(parkedFindings[item.checklist_item_id] || { mode: response, responseValue: option.value, item, level: response === "OBSERVATION" ? "LEVEL_4" : "", statement: "", objectiveEvidence: item.objective_evidence || "" });
+      setFindingDraft({ ...(parkedFindings[item.checklist_item_id] || { item, level: response === "OBSERVATION" ? "LEVEL_4" : "", statement: "", objectiveEvidence: item.objective_evidence || "" }), inactive: false, mode: response, responseValue: option.value });
       return;
     }
+    // Retain the finding text for later, but an explicitly changed answer owns
+    // the selection. A parked NO draft must never pin the radio back to NO.
+    setParkedFindings(current => current[item.checklist_item_id] ? { ...current, [item.checklist_item_id]: { ...current[item.checklist_item_id], inactive: true } } : current);
     const requirementError = responseRequirementError(item, source, response, auditorNotes);
     if (requirementError) {
       setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
@@ -1014,7 +1029,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       setSelectedId(item.checklist_item_id);
       setDetailOpen(true);
       setPendingChoices((current) => ({ ...current, [item.checklist_item_id]: option }));
-      setLocalError("N/A requires an explicit governed applicability basis. Expand Compliance intelligence below before recording N/A.");
+      setLocalError("N/A needs a governed applicability reason and basis. Review the open Compliance intelligence section below, or choose a different response.");
       return;
     }
     setPendingChoices(current => ({ ...current, [item.checklist_item_id]: option }));
@@ -1214,7 +1229,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               </footer>
               </section>
 
-              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis">
+              <details className="qms-live-audit-focus__compliance" aria-label="Compliance evidence analysis" open={pendingChoices[selected.checklist_item_id]?.canonical_status === "NOT_APPLICABLE" || undefined}>
                 <summary className="qms-live-audit-focus__compliance-summary">
                   <span><strong>Compliance intelligence</strong><small>Applicability, documentary sources and field verification</small></span>
                   <span className="qms-live-audit-focus__verification-status">{assessment ? `${statusLabel(assessment.documentary_status)} · ${statusLabel(assessment.field_verification_status)}` : "Unverified"} <ChevronDown size={15} /></span>
@@ -1450,7 +1465,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
 
 
 
-      {externalDraftsQuery.isError || outboxQuery.isError || evidenceOutboxQuery.isError ? <div className="qms-live-audit-focus__error" role="alert">Completion is paused because external drafts, pending device changes or evidence uploads could not be verified. <button type="button" onClick={() => { void externalDraftsQuery.refetch(); void outboxQuery.refetch(); void evidenceOutboxQuery.refetch(); }}>Retry completion checks</button></div> : null}
+      {(externalDraftsQuery.isError && !isTemporaryPortalFailure(externalDraftsQuery.error)) || outboxQuery.isError || evidenceOutboxQuery.isError ? <div className="qms-live-audit-focus__error" role="alert">Completion is paused because external drafts, pending device changes or evidence uploads could not be verified. <button type="button" onClick={() => { void externalDraftsQuery.refetch(); void outboxQuery.refetch(); void evidenceOutboxQuery.refetch(); }}>Retry completion checks</button></div> : null}
 
       {!canExecute && !fieldworkComplete && journalReady === auditId ? <div className="qms-live-audit-focus__sync-notice" role="status">
         {sessionQuery.data.fieldwork_access?.blocker || "This account is not assigned to the audit team. Sign in as an assigned auditor to record responses and findings."}
@@ -1461,7 +1476,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
       {fieldworkComplete ? <div className="qms-live-audit-focus__sync-notice" role="status">Fieldwork is complete. This workspace is read-only; reopen the governed lifecycle before recording further work.</div> : null}
       {localError && !findingDraft ? <div className="qms-live-audit-focus__error" role="alert"><AlertTriangle size={16} /> {localError}</div> : null}
       {Object.keys(parkedFindings).length ? <div className="qms-live-audit-focus__sync-notice qms-live-audit-focus__finding-drafts" aria-label="Saved finding drafts">
-        <span>Finding drafts</span>{Object.values(parkedFindings).map(draft => <button type="button" key={draft.item.checklist_item_id} onClick={() => { setLocalError(null); setFindingDraft(draft); }}>Question {draft.item.checklist_ref || itemNumberById.get(draft.item.checklist_item_id)}</button>)}
+        <span>Finding drafts</span>{Object.values(parkedFindings).map(draft => <button type="button" key={draft.item.checklist_item_id} onClick={() => { setLocalError(null); setFindingDraft({ ...draft, inactive: false }); }}>Question {draft.item.checklist_ref || itemNumberById.get(draft.item.checklist_item_id)}</button>)}
       </div> : null}
       {syncNotice ? <div className="qms-live-audit-focus__sync-notice" role="status">{syncNotice}</div> : null}
       {/* Findings are governed audit records, not an internal team-presence
@@ -1490,9 +1505,9 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               const source = sourceContextByItemId.get(item.checklist_item_id);
               return source?.response_options?.length ? source.response_options : fallbackResponseOptions(source?.response_type);
             }}
-            valueForItem={(item) => (findingDraft?.item.checklist_item_id === item.checklist_item_id ? findingDraft.responseValue : undefined) || parkedFindings[item.checklist_item_id]?.responseValue || pendingChoices[item.checklist_item_id]?.value || localAnswers.get(item.checklist_item_id)?.value || item.response_value || item.canonical_response_status || "NOT_VERIFIED"}
+            valueForItem={(item) => (findingDraft?.item.checklist_item_id === item.checklist_item_id ? findingDraft.responseValue : undefined) || (!parkedFindings[item.checklist_item_id]?.inactive ? parkedFindings[item.checklist_item_id]?.responseValue : undefined) || pendingChoices[item.checklist_item_id]?.value || localAnswers.get(item.checklist_item_id)?.value || item.response_value || item.canonical_response_status || "NOT_VERIFIED"}
             notesForItem={(item) => noteDrafts[item.checklist_item_id] ?? item.auditor_notes ?? ""}
-            pendingForItem={(item) => localAnswers.get(item.checklist_item_id) || (parkedFindings[item.checklist_item_id] || findingDraft?.item.checklist_item_id === item.checklist_item_id ? { status: "finding-draft" } : pendingChoices[item.checklist_item_id] ? { status: "draft" } : undefined)}
+            pendingForItem={(item) => localAnswers.get(item.checklist_item_id) || ((parkedFindings[item.checklist_item_id] && !parkedFindings[item.checklist_item_id].inactive) || findingDraft?.item.checklist_item_id === item.checklist_item_id ? { status: "finding-draft" } : pendingChoices[item.checklist_item_id] ? { status: "draft" } : undefined)}
             expandedId={detailOpen ? selected?.checklist_item_id : undefined} detailsId="audit-question-details" canEdit={canExecute}
             busy={updateMutation.isPending || findingMutation.isPending} onResponse={selectResponse}
             onNotes={(item, value) => setNoteDrafts((current) => ({ ...current, [item.checklist_item_id]: value }))}
@@ -1559,7 +1574,7 @@ const LiveAuditWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
             <label><span>Finding statement</span><textarea rows={5} value={findingDraft.statement} onChange={(event) => setFindingDraft((current) => current ? { ...current, statement: event.target.value } : current)} /></label>
             <label><span>Objective evidence</span><textarea rows={4} value={findingDraft.objectiveEvidence} onChange={(event) => setFindingDraft((current) => current ? { ...current, objectiveEvidence: event.target.value } : current)} /></label>
             <label><span>Auditor remarks</span><textarea rows={2} value={noteDrafts[findingDraft.item.checklist_item_id] ?? findingDraft.item.auditor_notes ?? ""} onChange={(event) => setNoteDrafts((current) => ({ ...current, [findingDraft.item.checklist_item_id]: event.target.value }))} /></label>
-            <footer><button type="button" disabled={findingMutation.isPending} onClick={() => { setParkedFindings(current => ({ ...current, [findingDraft.item.checklist_item_id]: findingDraft })); setFindingDraft(null); setLocalError(null); }}>Save draft & continue</button><button type="button" className="is-primary" disabled={findingDraft.statement.trim().length < 8 || !findingDraft.level || findingMutation.isPending} onClick={() => findingMutation.mutate(findingDraft)}>{findingMutation.isPending ? "Creating…" : "Create finding"}</button></footer>
+            <footer><button type="button" disabled={findingMutation.isPending} onClick={() => { const id = findingDraft.item.checklist_item_id; setParkedFindings(current => { const next = { ...current }; delete next[id]; return next; }); setFindingDraft(null); setLocalError(null); }}>Discard draft</button><button type="button" disabled={findingMutation.isPending} onClick={() => { setParkedFindings(current => ({ ...current, [findingDraft.item.checklist_item_id]: findingDraft })); setFindingDraft(null); setLocalError(null); }}>Save draft & continue</button><button type="button" className="is-primary" disabled={findingDraft.statement.trim().length < 8 || !findingDraft.level || findingMutation.isPending} onClick={() => findingMutation.mutate(findingDraft)}>{findingMutation.isPending ? "Creating…" : "Create finding"}</button></footer>
           </section>
         </div>
       ) : null}

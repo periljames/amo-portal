@@ -48,9 +48,9 @@ test("continue flushes edits made during an earlier autosave without losing the 
   await expect.poll(()=>state.writes.length).toBe(1);
   await editor.getByLabel("Final root cause explanation").fill("A newer conclusion entered while the first save is in flight.");
   await page.getByRole("button",{name:"Save root cause and continue",exact:true}).click();
-  await expect(page.getByLabel("Corrective action plan structured editor").locator("textarea")).toBeHidden();
+  await expect(page.getByLabel("Corrective Action (CAP) structured editor").locator("textarea")).toBeHidden();
   state.release();
-  await expect(page.getByLabel("Corrective action plan structured editor").locator("textarea")).toBeVisible({timeout:15000});
+  await expect(page.getByLabel("Corrective Action (CAP) structured editor").locator("textarea")).toBeVisible({timeout:15000});
   expect(state.writes.length).toBeGreaterThanOrEqual(2);
   expect(state.writes.at(-1)?.form.root_cause).toBe("A newer conclusion entered while the first save is in flight.");
   expect(state.writes.at(-1)?.investigation.conclusion).toBe(state.writes.at(-1)?.form.root_cause);

@@ -357,7 +357,7 @@ def list_audit_evidence(
             QualityAuditEvidenceArtifact.checklist_item_id.in_(linked_items),
         ))
     rows = query.order_by(QualityAuditEvidenceArtifact.created_at.asc()).limit(1000).all()
-    return {"items": [_artifact_dict(row) for row in rows]}
+    return {"items": [_artifact_dict(row) for row in rows if not (row.context_json or {}).get("_withdrawn")]}
 
 
 @router.post("/audits/{audit_id}/checklist-items/{item_id}/evidence")
@@ -477,6 +477,51 @@ async def upload_internal_audit_evidence(
     db.commit()
     _publish_persisted_evidence_event(realtime_event)
     return {"artifact": _artifact_dict(artifact), "committed_version": int(updated.entity_version or 1), "replayed": False}
+
+
+@router.delete("/audits/{audit_id}/evidence/{artifact_id}")
+def remove_internal_audit_evidence(
+    audit_id: uuid.UUID,
+    artifact_id: str,
+    base_version: int,
+    ctx: TenantContext = Depends(write_tenant_context),
+    db: Session = Depends(get_write_db),
+):
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    artifact = db.query(QualityAuditEvidenceArtifact).filter(
+        QualityAuditEvidenceArtifact.id == artifact_id,
+        QualityAuditEvidenceArtifact.amo_id == ctx.amo_id,
+        QualityAuditEvidenceArtifact.audit_id == audit_id,
+    ).with_for_update().first()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Evidence attachment not found.")
+    if artifact.uploaded_by_user_id != ctx.user_id:
+        raise HTTPException(status_code=403, detail="Only the uploader can remove this attachment.")
+    if (artifact.context_json or {}).get("_withdrawn"):
+        return {"removed": True}
+    if artifact.checklist_item_id is None:
+        raise HTTPException(status_code=409, detail="This attachment is not linked to an editable checklist item.")
+    item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=artifact.checklist_item_id, lock=True)
+    governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item.id)
+    _assert_base_version(payload_base_version=base_version, client_mutation_id=None, item=item, governance=governance)
+    if artifact.finding_id or artifact.evidence_request_id or artifact.id in (getattr(governance, "evidence_ids", None) or []):
+        raise HTTPException(status_code=409, detail="This file is used in a finding, document request or assessment. Remove that evidence selection before removing the attachment.")
+    refs = [ref for ref in (governance.evidence_references or []) if ref.get("artifact_id") != artifact.id]
+    updated = _apply_execution_update(db, ctx=ctx, item=item, governance=governance,
+        payload=ChecklistExecutionUpdate(canonical_response_status=governance.canonical_response_status,
+            auditor_notes=governance.auditor_notes, evidence_references=refs,
+            reason="Uploader removed an evidence attachment from active checklist use."))
+    artifact.context_json = {**dict(artifact.context_json or {}), "_withdrawn": {
+        "by_user_id": ctx.user_id, "at": datetime.utcnow().isoformat() + "Z"}}
+    event = _evidence_audit_event(amo_id=ctx.amo_id, audit_id=audit_id, artifact=artifact,
+        actor_user_id=ctx.user_id, actor_participant_id=None)
+    event.action = "REMOVED"
+    db.add(event)
+    db.commit()
+    _publish_persisted_evidence_event(event)
+    return {"removed": True, "committed_version": int(updated.entity_version or 1)}
 
 
 @router.get("/audits/{audit_id}/evidence/{artifact_id}/download")
@@ -701,3 +746,58 @@ def download_released_audit_evidence(
     _append_access_event(db, grant, "READ", f"Released evidence artifact {row.id} downloaded for finding {finding_id}.")
     db.commit()
     return FileResponse(path, filename=row.filename, media_type=row.content_type or "application/octet-stream", headers={"X-Content-SHA256": row.sha256})
+
+
+# Short-lived, upload-only phone handoff. This is never a login token.
+def _phone_capture_grant(token: str, db: Session):
+    from jose import JWTError, jwt
+    from amodb.security import SECRET_KEY, JWT_ALGORITHM
+    try:
+        data = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM], audience="qms-phone-evidence")
+        if data.get("purpose") != "checklist-photo":
+            raise ValueError("Invalid purpose")
+        audit_id, item_id = uuid.UUID(data["audit"]), uuid.UUID(data["item"])
+        ctx = TenantContext(amo_code=data["code"], amo_id=data["amo"], user_id=data["actor"], is_superuser=False)
+    except (JWTError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=401, detail="Phone capture link has expired or is invalid. Generate a new QR code on your computer.") from exc
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    item = _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=True)
+    return data, ctx, audit_id, item_id, item
+
+
+@router.post("/audits/{audit_id}/checklist-items/{item_id}/phone-capture")
+def create_phone_capture(audit_id: uuid.UUID, item_id: uuid.UUID, ctx: TenantContext = Depends(write_tenant_context), db: Session = Depends(get_write_db)):
+    from datetime import timedelta, timezone
+    from jose import jwt
+    from amodb.security import SECRET_KEY, JWT_ALGORITHM
+    if ctx.is_superuser:
+        raise HTTPException(status_code=403, detail="Use an assigned auditor account for phone capture.")
+    set_postgres_tenant_context(db, amo_id=ctx.amo_id, user_id=ctx.user_id)
+    assert_quality_permission_any(db, ctx, "qms.audit.manage", "qms.audit.execute")
+    _internal_fieldwork_actor(db, ctx=ctx, audit_id=audit_id)
+    _item(db, amo_id=ctx.amo_id, audit_id=audit_id, item_id=item_id, lock=False)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    token = jwt.encode({"aud":"qms-phone-evidence", "purpose":"checklist-photo", "amo":str(ctx.amo_id), "code":ctx.amo_code, "actor":str(ctx.user_id), "audit":str(audit_id), "item":str(item_id), "jti":uuid.uuid4().hex, "exp":expires}, SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return {"token":token, "expires_at":expires.isoformat()}
+
+
+@public_router.get("/phone-capture")
+def phone_capture_details(token: str = Header(alias="X-Phone-Capture"), db: Session = Depends(get_write_db)):
+    data, ctx, audit_id, item_id, item = _phone_capture_grant(token, db)
+    return {"question":item.prompt, "checklist_ref":item.checklist_ref, "expires_at":data["exp"]}
+
+
+@public_router.post("/phone-capture")
+async def phone_capture_upload(token: str = Header(alias="X-Phone-Capture"), file: UploadFile = File(...), capture_id: uuid.UUID = Form(...), db: Session = Depends(get_write_db)):
+    data, ctx, audit_id, item_id, item = _phone_capture_grant(token, db)
+    if not (file.content_type or "").lower().startswith("image/") and not (file.filename or "").lower().endswith((".heic", ".heif")):
+        raise HTTPException(status_code=422, detail="Choose a photo to attach to this checklist question.")
+    governance = _locked_governance(db, ctx=ctx, audit_id=audit_id, item_id=item_id)
+    return await upload_internal_audit_evidence(audit_id=audit_id, item_id=item_id, file=file,
+        base_version=int(governance.entity_version or 1) if governance is not None else 0, client_mutation_id=f"phone-{data['jti']}-{capture_id}",
+        description="Phone photo capture", finding_id=item.finding_id, evidence_request_id=None,
+        location_ref=None, person_ref=None, facility_ref=None, asset_ref=None, tool_ref=None, component_ref=None,
+        regulation_refs_json=None, procedure_refs_json=None, document_revision_ids_json=None,
+        source_device_id="paired-phone", captured_at=datetime.utcnow(), ctx=ctx, db=db)

@@ -195,9 +195,8 @@ async function submitResponsibleManagerResponse(page: Page, data: Fixture, suffi
   );
   await page.getByRole("button", { name: "Save root cause and continue" }).click();
   console.log(`CAR acceptance: ${suffix} RCA saved; preparing action plan`);
-  await expect(structuredEditor(page, "Corrective action plan")).toBeVisible({ timeout: 30_000 });
-  await structuredEditor(page, "Corrective action plan").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
-  await structuredEditor(page, "Preventive action / systemic control").fill(`Trend CAR effectiveness and overdue milestones in the Quality operating review ${suffix}.`);
+  await expect(structuredEditor(page, "Corrective Action (CAP)")).toBeVisible({ timeout: 30_000 });
+  await structuredEditor(page, "Corrective Action (CAP)").fill(`Add governed RCA/CAPA milestones, assign accountable owners, index evidence and require effectiveness verification before closure ${suffix}.`);
   const actionSection = page.getByRole("region", { name: "Individual corrective actions" });
   await expect(actionSection).toBeVisible();
   const revisionButton = actionSection.getByRole("button", { name: "Revise proposed action" }).first();

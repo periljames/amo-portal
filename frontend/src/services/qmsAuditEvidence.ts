@@ -146,3 +146,7 @@ export async function downloadPublicReleasedAuditEvidence(findingId: string, art
   }
   return response.blob();
 }
+
+export function removeInternalAuditEvidence(amoCode:string,auditId:string,artifactId:string,baseVersion:number) {
+ return apiRequest<{removed:boolean;committed_version?:number}>(qmsPath(amoCode,`/audits/${encodeURIComponent(auditId)}/evidence/${encodeURIComponent(artifactId)}?base_version=${baseVersion}`),{method:'DELETE'});
+}

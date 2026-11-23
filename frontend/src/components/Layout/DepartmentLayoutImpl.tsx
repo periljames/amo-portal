@@ -11,6 +11,7 @@ import PortalUpdateMenuItem from "../feedback/PortalUpdateMenuItem";
 import { useLocation, useNavigate } from "react-router-dom";
 import PortalErrorBoundary from "../feedback/PortalErrorBoundary";
 import "../../styles/qms-workspace-usability.css";
+import "../../styles/qms-mobile.css";
 import {
   BarChart3,
   BookOpen,

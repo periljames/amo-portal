@@ -853,7 +853,6 @@ def generate_car_form_pdf(
         ),
         ("Root Cause", car.root_cause or "N/A"),
         ("Corrective Action Plan (CAP)", car.corrective_action or "N/A"),
-        ("Preventive Action Plan (PAP)", car.preventive_action or "N/A"),
         ("Evidence Reference", car.evidence_ref or "N/A"),
     ]
 

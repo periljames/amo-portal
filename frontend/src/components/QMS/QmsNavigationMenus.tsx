@@ -1,3 +1,4 @@
+import { useQmsAdminMode } from "../../hooks/useQmsAdminMode";
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
@@ -21,7 +22,8 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
   const root = useRef<HTMLElement>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const catalogue = qmsNavigationCatalogue(amoCode).filter(item => hasQmsRolePermission(item.permission));
+  const adminMode = useQmsAdminMode(amoCode);
+  const catalogue = qmsNavigationCatalogue(amoCode).filter(item => hasQmsRolePermission(item.permission) && (adminMode || !item.path.includes("/settings/audit-log")));
   const results = searchQualityDestinations(catalogue, search);
   const base = qmsBasePath(amoCode);
   const moduleActive = (segment: string) => location.pathname === `${base}/${segment}` || location.pathname.startsWith(`${base}/${segment}/`);
@@ -76,7 +78,7 @@ function QmsNavigationMenusContent({ amoCode }: { amoCode: string }) {
           {group.id === "reports" && hasQmsRolePermission("qms.reports.view") && link(qmsWorkspaceEntryPath(amoCode, "intelligence"), "Quality Intelligence")}
           {modules.map(module => <div className="qms-page-menu__destination" key={module.id}>
             {link(qmsModulePath(amoCode, module.id, module.defaultView), module.navigationLabel)}
-            <div className="qms-page-menu__views">{module.validViews.filter(view => view !== module.defaultView && hasQmsRolePermission(qmsViewPermission(module, view))).map(view => link(qmsModulePath(amoCode, module.id, view), `${qmsViewLabel(view)}`))}</div>
+            <div className="qms-page-menu__views">{module.validViews.filter(view => view !== module.defaultView && (adminMode || view !== "audit-log") && hasQmsRolePermission(qmsViewPermission(module, view))).map(view => link(qmsModulePath(amoCode, module.id, view), `${qmsViewLabel(view)}`))}</div>
           </div>)}
           {hubDestinations.length > 0 && <div className="qms-page-menu__destination">
             {link(hubDestinations[0].path, hubDestinations[0].label)}

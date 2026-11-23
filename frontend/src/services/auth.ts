@@ -929,6 +929,12 @@ export async function fetchCurrentUser(): Promise<PortalUser> {
  *
  * Backend: POST /auth/password-reset/request
  */
+export async function getPasswordResetChannels(): Promise<{email: boolean; whatsapp: boolean}> {
+  const response = await fetchWithTimeout(`${getApiBaseUrl()}/auth/password-reset/channels`, {headers:{Accept:"application/json"}});
+  if (!response.ok) throw new Error(await readErrorMessage(response));
+  return response.json();
+}
+
 export async function requestPasswordReset(
   amoSlug: string,
   email: string,

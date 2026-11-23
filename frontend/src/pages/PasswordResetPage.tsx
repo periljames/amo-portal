@@ -1,5 +1,5 @@
 // src/pages/PasswordResetPage.tsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import AuthLayout from "../components/Layout/AuthLayout";
@@ -8,9 +8,9 @@ import Button from "../components/UI/Button";
 import {
   confirmPasswordReset,
   getLoginContext,
+  getPasswordResetChannels,
   requestPasswordReset,
   type PasswordResetDeliveryMethod,
-  type PasswordResetResponse,
 } from "../services/auth";
 import { decodeAmoCertFromUrl } from "../utils/amo";
 
@@ -21,7 +21,7 @@ const PasswordResetPage: React.FC = () => {
   const token = (params.get("token") || "").trim();
   const amoSlug = (params.get("amo") || "").trim();
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(params.get("email") || "");
   const [deliveryMethod, setDeliveryMethod] =
     useState<PasswordResetDeliveryMethod>("email");
   const [newPassword, setNewPassword] = useState("");
@@ -29,7 +29,16 @@ const PasswordResetPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [resetInfo, setResetInfo] = useState<PasswordResetResponse | null>(null);
+  const [channels, setChannels] = useState({email:false, whatsapp:false});
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  useEffect(() => {
+    if (token) { setChannelsLoading(false); return; }
+    let active = true;
+    getPasswordResetChannels().then(value => { if(active) {setChannels(value); if(!value.email && value.whatsapp) setDeliveryMethod("whatsapp");} })
+      .catch(() => { if(active) setErrorMsg("Recovery options could not be loaded. Please try again shortly."); })
+      .finally(() => { if(active) setChannelsLoading(false); });
+    return () => {active=false;};
+  }, [token]);
 
   const isConfirmMode = useMemo(() => !!token, [token]);
 
@@ -37,7 +46,6 @@ const PasswordResetPage: React.FC = () => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
-    setResetInfo(null);
 
     if (!email.trim()) {
       setErrorMsg("Please enter your work email address.");
@@ -58,7 +66,6 @@ const PasswordResetPage: React.FC = () => {
         email,
         deliveryMethod
       );
-      setResetInfo(response);
       setSuccessMsg(response.message);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not request reset.";
@@ -91,19 +98,6 @@ const PasswordResetPage: React.FC = () => {
       setErrorMsg(msg);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleCopyLink = async () => {
-    if (!resetInfo?.reset_link) return;
-    try {
-      if (!navigator.clipboard) {
-        throw new Error("Clipboard unavailable");
-      }
-      await navigator.clipboard.writeText(resetInfo.reset_link);
-      setSuccessMsg("Reset link copied to clipboard.");
-    } catch {
-      setErrorMsg("Unable to copy reset link. Please copy it manually.");
     }
   };
 
@@ -141,30 +135,13 @@ const PasswordResetPage: React.FC = () => {
             />
 
             <div className="auth-form__field">
-              <label htmlFor="deliveryMethod">Send reset link via</label>
-              <select
-                id="deliveryMethod"
-                name="deliveryMethod"
-                value={deliveryMethod}
-                onChange={(e) =>
-                  setDeliveryMethod(e.target.value as PasswordResetDeliveryMethod)
-                }
-              >
-                <option value="email">Email</option>
-                <option value="whatsapp">WhatsApp (phone on file)</option>
-                <option value="both">Email + WhatsApp</option>
-              </select>
-              <div className="auth-form__hint">
-                WhatsApp uses the phone number stored on your profile.
-              </div>
+              {channels.whatsapp ? <><label htmlFor="deliveryMethod">Send reset link via</label>
+                <select id="deliveryMethod" value={deliveryMethod} onChange={e=>setDeliveryMethod(e.target.value as PasswordResetDeliveryMethod)}>
+                  {channels.email ? <option value="email">Email</option> : null}<option value="whatsapp">WhatsApp (phone on file)</option>
+                  {channels.email ? <option value="both">Email + WhatsApp</option> : null}
+                </select></> : <div className="auth-form__hint">{channelsLoading ? "Checking recovery options..." : channels.email ? "We will email the reset link to your registered address. WhatsApp recovery is not currently available." : "Password recovery is unavailable. Please contact your administrator."}</div>}
+              {successMsg ? <div className="auth-form__hint">Check your inbox and junk folder.</div> : null}
             </div>
-
-            {resetInfo?.reset_link && (
-              <div className="auth-form__hint" style={{ marginBottom: 12 }}>
-                Reset link (share via email/SSO):{" "}
-                <code>{resetInfo.reset_link}</code>
-              </div>
-            )}
           </>
         )}
 
@@ -192,13 +169,7 @@ const PasswordResetPage: React.FC = () => {
         )}
 
         <div className="auth-form__actions">
-          {!isConfirmMode && resetInfo?.reset_link && (
-            <Button type="button" className="btn-secondary" onClick={handleCopyLink}>
-              Copy reset link
-            </Button>
-          )}
-
-          <Button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading || (!isConfirmMode && (channelsLoading || (!channels.email && !channels.whatsapp)))}>
             {loading
               ? "Please wait..."
               : isConfirmMode

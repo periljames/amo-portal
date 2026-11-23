@@ -66,7 +66,7 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
   };
   return <section className="car-rca car-rca-actions" aria-label="Individual corrective actions">
     <div className="car-rca-heading"><div><h4>Corrective actions and implementation</h4>
-      <p>Separate containment from permanent correction and systemic prevention. Each action has its own owner, due date, evidence and Quality decision.</p>
+      <p>CAP addresses the root cause and prevents recurrence. Record immediate containment separately. Each action has its own owner, due date, evidence and Quality decision.</p>
     </div></div>
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error} <button type="button" onClick={()=>void onChanged().then(()=>setError(null),()=>setError("Latest actions could not be refreshed. Your recorded actions are retained."))}>Refresh actions</button></p>}
@@ -106,8 +106,7 @@ export default function CarRcaActions({ token, actions, disabled, canProgress = 
       <h4>{editingActionId ? "Revise proposed action" : "New accountable action"}</h4>
       <div className="car-rca-grid">
         <label>Action category<select value={draft.kind} onChange={e => setDraft(d => ({ ...d, kind: e.target.value as CarRcaActionCreate["kind"] }))}>
-          <option value="CORRECTIVE">Corrective — remove a cause</option>
-          <option value="PREVENTIVE">Preventive / systemic control</option>
+          <option value="CORRECTIVE">Corrective Action (CAP)</option>
           <option value="CONTAINMENT">Containment — immediate correction</option>
         </select></label>
         <label>Responsible person<input value={draft.external_owner_name || ""} onChange={e => setDraft(d => ({ ...d, external_owner_name: e.target.value }))} placeholder="Full name / authorized provider representative" /></label>

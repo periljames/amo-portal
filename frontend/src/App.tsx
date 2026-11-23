@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect } from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -28,6 +28,8 @@ import "./styles/qms-live-audit-completion.css";
 import "./styles/qms-audit-canonical-occurrence.css";
 import "./styles/qms-assurance-cta-hierarchy.css";
 
+const PhoneEvidenceCapturePage = lazy(() => import("./pages/PhoneEvidenceCapturePage"));
+
 const App: React.FC = () => {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -37,7 +39,8 @@ const App: React.FC = () => {
   const isPublicAuditAccess = /^\/qms\/audit-access(?:\/[^/]+)?\/?$/i.test(location.pathname);
   const isPublicCarAccess = /^\/qms\/car-access\/[^/]+\/?$/i.test(location.pathname);
   const isPublicAuditVerification = /^\/verify\/[^/]+\/?$/i.test(location.pathname);
-  const isPublicQualitySurface = isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
+  const isPhoneCapture = /^\/qms\/phone-capture\/?$/i.test(location.pathname);
+  const isPublicQualitySurface = isPhoneCapture || isPublicAuditAccess || isPublicCarAccess || isPublicAuditVerification;
   const isExternalProviderSurface = /^\/(?:vendor|partner)(?:\/|$)/i.test(location.pathname);
 
   useEffect(() => { document.body.dataset.theme = theme; }, [theme]);
@@ -104,6 +107,7 @@ const App: React.FC = () => {
     };
   }, []);
 
+  if (isPhoneCapture) return <PortalErrorBoundary><Suspense fallback={<p>Opening phone capture…</p>}><PhoneEvidenceCapturePage /></Suspense></PortalErrorBoundary>;
   if (isPublicAuditVerification) return <PortalErrorBoundary><PublicAuditVerificationPage /></PortalErrorBoundary>;
   if (isPublicAuditAccess) return <PortalErrorBoundary><PublicAuditAccessPage /></PortalErrorBoundary>;
   if (isPublicCarAccess) return <PortalErrorBoundary><CanonicalPublicCarAccessPage /></PortalErrorBoundary>;

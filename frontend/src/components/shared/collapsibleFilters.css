@@ -1,0 +1,10 @@
+.qms-collapsible-filters,.qms-collapsible-filters__fields:not([hidden]){display:contents}
+.qms-collapsible-filters__toggle{display:none}
+@media(max-width:700px){
+ .qms-collapsible-filters{display:block;min-width:0}
+ .qms-collapsible-filters__toggle{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 12px;border:1px solid var(--qms-line,var(--surface-border,#ccd5dc));border-radius:7px;background:var(--surface-elevated,var(--qms-panel,#fff));color:inherit;font:inherit;font-size:13px;cursor:pointer}
+ .qms-collapsible-filters__fields:not([hidden]){display:flex;flex-wrap:wrap;gap:10px;padding-block:10px}
+ .qms-collapsible-filters__fields > *{flex:1 1 140px;min-width:0;max-width:100%}
+ .qms-collapsible-filters__fields label{display:grid;gap:5px}
+ .qms-collapsible-filters__fields select{width:100%}
+}

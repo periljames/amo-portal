@@ -319,7 +319,15 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
     // direct backend exactly once.
     if (!proxyTransportFailure) notePortalResponse(response);
     assertRequestScope(requestScope);
-    if (proxyTransportFailure) return response;
+    const guardedDurableCommand = capability.id.startsWith("qms-checklist-fieldwork-") && queueMutation && offline?.requireDurable === true
+      && Boolean(offline.idempotencyKey) && isReplaySafeMutation(cachePath, method);
+    if (proxyTransportFailure) {
+      if (guardedDurableCommand) {
+        notePortalNetworkFailure("proxy-unavailable");
+        return queueRequest(cachePath, method, init, requestScope);
+      }
+      return response;
+    }
 
     if (response.ok) {
       if (cacheEnabled) {
@@ -353,6 +361,12 @@ export async function portalFetch(path: string, init: PortalFetchInit = {}): Pro
     // command before processing. Generic 5xx responses have an ambiguous
     // commit outcome and must remain visible until their receipt is resolved.
     if (queueMutation && await confirmedNotAccepted(response)) {
+      return queueRequest(cachePath, method, init, requestScope);
+    }
+    // Guarded fieldwork commands have durable server receipts. Preserve the
+    // original key/body even when an acknowledgement is ambiguous: replay
+    // resolves that receipt before attempting the same command again.
+    if (guardedDurableCommand && ([408, 425, 429].includes(response.status) || response.status >= 500)) {
       return queueRequest(cachePath, method, init, requestScope);
     }
 

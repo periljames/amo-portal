@@ -50,9 +50,8 @@ _DETAILED_RESPONSE_FIELDS = (
     "containment_action",
     "root_cause",
     "corrective_action",
-    "preventive_action",
 )
-_DETAILED_RESPONSE_MAX_LENGTH = 8000
+_DETAILED_RESPONSE_MAX_LENGTH = 20000
 
 
 def _car_for_token(db: Session, invite_token: str, *, lock: bool = False) -> models.CorrectiveActionRequest:

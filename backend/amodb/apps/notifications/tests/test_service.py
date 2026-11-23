@@ -136,8 +136,11 @@ def test_send_email_provider_success(db_session, monkeypatch):
     assert log.status == notification_models.EmailStatus.SENT
     assert log.sent_at is not None
     assert log.error is None
+    db_session.refresh(log)
     assert log.context_json["_delivery"]["provider"] == "resend"
     assert log.context_json["_delivery"]["message_id"] == "email_123"
+    assert log.context_json["_delivery"]["effective_recipient"] == "notify@example.com"
+    assert log.delivery_status == "ACCEPTED"
 
 
 def test_send_email_passes_attachment_without_persisting_content(db_session, monkeypatch):

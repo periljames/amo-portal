@@ -314,7 +314,7 @@ const PublicAuditAccessPage: React.FC = () => {
 
           {collaboration?.cars.length ? (
             <section className="qms-public-audit__card" aria-label="Corrective action plans">
-              <header><Wrench size={19} /><div><strong>Corrective action plans</strong><small>Open a response to record containment, root cause, corrective and preventive actions, dates and supporting evidence.</small></div></header>
+              <header><Wrench size={19} /><div><strong>Corrective action plans</strong><small>Open a response to record containment, root cause, Corrective Action (CAP), dates and supporting evidence.</small></div></header>
               <div className="qms-public-audit__requests">
                 {collaboration.cars.map((car) => (
                   <article key={car.id}>

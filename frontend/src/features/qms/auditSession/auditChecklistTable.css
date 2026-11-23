@@ -107,3 +107,29 @@
   .audit-checklist-table__details button { min-height: 44px; }
   .audit-checklist-table__section { scroll-margin-top: 10px; }
 }
+.audit-evidence-camera { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 20px; border: 1px solid var(--fw-border, #ccc); border-radius: 12px; background: var(--fw-surface, #fff); color: var(--fw-text, #162c3e); }
+.audit-evidence-camera::backdrop { background: #0009; }
+.audit-evidence-camera header, .audit-evidence-camera footer { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.audit-evidence-camera h2 { margin: 0; font-size: 20px; }
+.audit-evidence-camera video { display: block; width: 100%; max-height: 60dvh; background: #101820; margin-block: 16px; border-radius: 6px; }
+.audit-evidence-camera button { min-height: 44px; }
+.audit-phone-handoff { text-align: center; }
+.audit-phone-handoff header { text-align: left; }
+.audit-phone-handoff > svg { max-width: 100%; height: auto; }
+.audit-phone-handoff [role="status"] { margin-top: 16px; font-weight: 600; }
+.audit-phone-capture { max-width: 640px; margin: 0 auto; padding: 24px 16px; color: var(--text-primary, #172c3d); background: var(--surface, #fff); min-height: 100dvh; }
+.audit-phone-capture h1 { font-size: 28px; margin: 8px 0; }
+.audit-phone-capture header { border-bottom: 1px solid #ccd5dc; margin-bottom: 20px; }
+.audit-phone-capture button { min-height: 48px; padding: 10px 16px; border: 1px solid #bacbd2; border-radius: 8px; background: #fff; color: #075e70; cursor: pointer; }
+.audit-phone-capture__actions { display: flex; gap: 12px; margin: 20px 0 12px; }
+.audit-phone-capture__photos { list-style: none; padding: 0; }
+.audit-phone-capture__photos li { display: flex; align-items: center; gap: 12px; border-block-end: 1px solid #ccd5dc; padding: 16px 0; }
+.audit-phone-capture__photos img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; }
+.audit-phone-capture__photos li > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.audit-phone-capture__photos small { display: block; margin-top: 6px; }
+.audit-phone-capture .audit-phone-capture__submit { width: 100%; background: #086d78; color: #fff; font-weight: 600; }
+.audit-question-files{list-style:none;margin:8px 0;padding:0;display:grid;gap:6px}
+.audit-question-files li{display:flex;align-items:center;gap:6px;border-top:1px solid var(--fw-line,#ccd5dc);padding:8px 0}
+.audit-question-files li>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.audit-question-files small{display:block;font-size:12px}
+.audit-question-files button{min-height:44px;padding:6px 10px}

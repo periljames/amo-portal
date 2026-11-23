@@ -165,7 +165,7 @@ def _maybe_send_email(
         template_key="password-reset",
         recipient=to_email,
         subject=subject,
-        context={"message": body, "action_url": action_url},
+        context={"message": body, "action_url": action_url, "expires_minutes": services.PASSWORD_RESET_TOKEN_TTL_MINUTES},
         audit_context={"purpose": "password-reset", "user_id": user_id},
         correlation_id=f"password-reset:{user_id}:{int(time.time())}",
         critical=False,
@@ -654,6 +654,22 @@ def change_password(
 # ---------------------------------------------------------------------------
 
 
+def _reset_delivery_channels(db: Session) -> dict[str, bool]:
+    from amodb.apps.notifications import providers
+    provider, configured = providers.get_email_provider(db=db, amo_id="account-recovery", template_key="password-reset")
+    mode = str(getattr(provider, "config", {}).get("sending_mode") or "DISABLED").upper()
+    live_recovery = os.getenv("PORTAL_ACCOUNT_RECOVERY_LIVE_DELIVERY", "").lower() in {"1", "true", "yes"}
+    email_ready = bool(configured and getattr(provider, "credential_status", "") == "HEALTHY"
+        and RESET_LINK_BASE_URL.startswith("https://")
+        and ((mode == "SANDBOX" and live_recovery) or (mode == "PRODUCTION" and _APP_ENV in {"prod", "production"})))
+    return {"email": email_ready, "whatsapp": bool(os.getenv("WHATSAPP_WEBHOOK_URL"))}
+
+
+@router.get("/password-reset/channels")
+def password_reset_channels(db: Session = Depends(get_read_db)):
+    return _reset_delivery_channels(db)
+
+
 @router.post(
     "/password-reset/request",
     status_code=status.HTTP_202_ACCEPTED,
@@ -672,19 +688,22 @@ def request_password_reset(
     - Reset tokens and links are never returned in the public response.
     - Email delivery uses the platform Resend integration.
     """
+    _enforce_auth_rate_limit(request, "password-reset-request")
+    channels = _reset_delivery_channels(db)
+    delivery = payload.delivery_method
+    if delivery == "whatsapp" and not channels["whatsapp"]:
+        raise HTTPException(status_code=503, detail="WhatsApp recovery is not configured. Choose email instead.")
+    if delivery in {"email", "both"} and not channels["email"]:
+        raise HTTPException(status_code=503, detail="Email recovery is temporarily unavailable. Please contact your administrator.")
+    response_message = "If the account matches, a reset link will be sent to its registered contact details."
+    if delivery == "both" and not channels["whatsapp"]:
+        delivery = "email"
+        response_message = "If the account matches, a reset link will be emailed. WhatsApp recovery is not configured."
     payload.amo_slug = _normalise_amo_slug(payload.amo_slug)
-
-    amo = (
-        db.query(models.AMO)
-        .filter(
-            models.AMO.login_slug == payload.amo_slug,
-            models.AMO.is_active.is_(True),
-        )
-        .first()
-    )
+    amo = services.resolve_amo_by_slug_or_code(db, payload.amo_slug)
 
     if not amo:
-        return {"message": "If the account exists, a reset link will be sent."}
+        return {"message": response_message}
 
     user = services.get_active_user_by_email(
         db=db,
@@ -692,7 +711,7 @@ def request_password_reset(
         email=payload.email,
     )
     if not user:
-        return {"message": "If the account exists, a reset link will be sent."}
+        return {"message": response_message}
 
     raw_token = services.create_password_reset_token(
         db=db,
@@ -701,8 +720,7 @@ def request_password_reset(
         user_agent=_user_agent(request),
     )
 
-    reset_link = _build_reset_link(amo_slug=payload.amo_slug, token=raw_token)
-    delivery = payload.delivery_method
+    reset_link = _build_reset_link(amo_slug=amo.login_slug, token=raw_token)
     subject = "Reset your AMO Portal password"
     message = (
         f"Use this link to reset your password: {reset_link}"
@@ -724,7 +742,7 @@ def request_password_reset(
 
     if delivery in {"whatsapp", "both"}:
         _maybe_send_whatsapp(background_tasks, getattr(user, "phone", None), message)
-    return {"message": "If the account exists, a reset link will be sent."}
+    return {"message": response_message}
 
 
 @router.post(

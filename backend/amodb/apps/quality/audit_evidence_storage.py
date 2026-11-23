@@ -13,7 +13,7 @@ from fastapi import HTTPException, UploadFile
 MAX_EVIDENCE_BYTES = int(os.getenv("QMS_AUDIT_EVIDENCE_MAX_BYTES", str(50 * 1024 * 1024)))
 _STORAGE_ROOT = Path(os.getenv("QMS_AUDIT_EVIDENCE_DIR", "uploads/qms-audit-evidence")).resolve()
 _ALLOWED_EXTENSIONS = {
-    ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".mp4", ".mov", ".m4a", ".wav"
+    ".heic", ".heif", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".mp4", ".mov", ".m4a", ".wav"
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 _CFBF_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -38,6 +38,8 @@ def _validate_signature(filename: str, sample: bytes) -> None:
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=415, detail=f"Unsupported evidence type: {suffix or 'unknown'}")
+    if suffix in {".heic", ".heif"} and not (len(sample) >= 12 and sample[4:8] == b"ftyp" and sample[8:12] in {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1"}):
+        raise HTTPException(status_code=415, detail="Uploaded HEIF photo has an invalid signature.")
     if suffix == ".pdf" and not sample.startswith(b"%PDF-"):
         raise HTTPException(status_code=415, detail="Uploaded PDF has an invalid signature.")
     if suffix == ".png" and not sample.startswith(b"\x89PNG\r\n\x1a\n"):

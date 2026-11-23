@@ -83,7 +83,7 @@ export const DEFAULT_PLANNER_PREFERENCES: PlannerPreferences = {
 // for future source integrations, but are not presented as available today.
 export const PLANNER_CATEGORIES: Array<{ key: PlannerCategory; label: string }> = [
   { key: "audits", label: "Audits" },
-  { key: "cars", label: "CAR / CAPA" },
+  { key: "cars", label: "CAR / CAP" },
   { key: "training", label: "Training" },
 ];
 

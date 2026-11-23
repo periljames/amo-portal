@@ -49,7 +49,7 @@ def deliver_released_car_invite(db, *, ctx, audit_id, finding_id):
         summary += f"\nObjective evidence: {finding.objective_evidence}"
     log = notifications.send_email(
         template_key="qms_car_auditee_invite", recipient=recipient,
-        subject=f"CAR/CAPA response required · {car.car_number}",
+        subject=f"CAR/CAP response required · {car.car_number}",
         context={"car_number": car.car_number, "title": car.title, "summary": summary,
             "priority": getattr(car.priority, "value", car.priority),
             "due_date": car.due_date.isoformat() if car.due_date else None,

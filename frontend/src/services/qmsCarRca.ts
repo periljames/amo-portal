@@ -44,7 +44,7 @@ export interface CarRcaAction {
   car_id: string;
   sequence_no: number;
   action_number: string;
-  kind: "CORRECTIVE" | "PREVENTIVE" | "CONTAINMENT";
+  kind: "CORRECTIVE" | "CONTAINMENT";
   description: string;
   cause_node_ids: string[];
   evidence_references: string[];

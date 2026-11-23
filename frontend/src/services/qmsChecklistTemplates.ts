@@ -1,3 +1,4 @@
+import { isTemporaryPortalFailure } from "./portalAvailability";
 import { apiRequest, qmsPath } from "./apiClient";
 import { uploadTimeoutMs } from "./transferPolicy";
 import type { PublicationUploadPayload } from "./publications";
@@ -206,8 +207,7 @@ export async function listChecklistBindings(amoCode: string, auditId: string, si
   try {
     return requireAuditContract(await apiRequest<{ items: ChecklistBinding[] }>(qmsPath(amoCode, `/audits/${encodeURIComponent(auditId)}/checklist-bindings`), { timeoutMs: 15_000, cacheTtlMs: 2_000, signal }), "bindings");
   } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    if (!isTemporaryPortalFailure(error)) throw error;
     const offline = await readOffline();
     if (offline) return offline;
     throw error;

@@ -1,7 +1,7 @@
 import type { CARAttachmentOut } from '../../services/qms';
 import type { CarRcaProjection } from '../../services/qmsCarRca';
-export type ResponseSection='CONTAINMENT'|'ROOT_CAUSE'|'CORRECTIVE'|'PREVENTIVE';
-export const RESPONSE_SECTIONS:{value:ResponseSection;label:string}[]=[{value:'CONTAINMENT',label:'Immediate action'},{value:'ROOT_CAUSE',label:'Root cause'},{value:'CORRECTIVE',label:'Corrective action plan'},{value:'PREVENTIVE',label:'Preventive action'}];
+export type ResponseSection='CONTAINMENT'|'ROOT_CAUSE'|'CORRECTIVE';
+export const RESPONSE_SECTIONS:{value:ResponseSection;label:string}[]=[{value:'CONTAINMENT',label:'Immediate action'},{value:'ROOT_CAUSE',label:'Root cause'},{value:'CORRECTIVE',label:'Corrective Action (CAP)'}];
 export function sectionEvidence(files:CARAttachmentOut[],projection:CarRcaProjection|null,section:ResponseSection,narrative?:string|null) {
  const doc=projection?.submitted_snapshot?.investigation??projection?.draft.investigation;
  const refs=section==='ROOT_CAUSE'?[...(doc?.conclusion_evidence_references||[]),...(doc?.investigations||[]).flatMap(method=>method.nodes.flatMap(node=>node.evidence_references))]:(projection?.actions||[]).filter(action=>action.kind===section).flatMap(action=>action.evidence_references);

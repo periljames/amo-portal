@@ -156,3 +156,26 @@ test("public evidence keeps its response-section label through upload and reassi
  const section=page.getByRole('combobox',{name:'Response section for containment.txt',exact:true});await expect(section).toHaveValue('CONTAINMENT');
  await section.selectOption('ROOT_CAUSE');await expect.poll(()=>patched).toBe(true);await expect(section).toHaveValue('ROOT_CAUSE');
 });
+
+test("public response has one CAP field including recurrence prevention",async({page})=>{
+ const state=await prepare(page);await page.goto('/qms/car-access/synthetic-token');
+ await page.getByRole('region',{name:'Root cause investigation'}).getByLabel('Final root cause explanation').fill('The independent review checkpoint was absent from the controlled procedure.');
+ await page.getByRole('button',{name:'Save root cause and continue',exact:true}).click();
+ const editor=page.getByRole('textbox',{name:'Corrective Action (CAP)',exact:true});await expect(editor).toBeVisible({timeout:15000});
+ await expect(page.getByRole('textbox',{name:/Preventive action/i})).toHaveCount(0);
+ await expect(page.locator('option[value="PREVENTIVE"]')).toHaveCount(0);
+ await expect(page.getByText(/Response fields are limited/)).toHaveCount(0);
+ const narrative='Implement and verify recurrence prevention controls. '.repeat(180);
+ await editor.fill(narrative);
+ await expect.poll(()=>state.writes.at(-1)?.form.corrective_action).toBe(narrative);
+ expect(state.writes.at(-1)?.form).not.toHaveProperty('preventive_action');
+ await page.screenshot({path:'test-results/car-unified-cap.png',fullPage:true});
+});
+test('phone CAR context is collapsed and a test attachment can be removed',async({page})=>{
+ await prepare(page);await page.setViewportSize({width:390,height:844});let removed=false;let uploaded=false;
+ const photo={id:'test-photo',filename:'photo.jpg',content_type:'image/jpeg',uploaded_at:'2026-11-22T00:00:00Z',download_url:'/files/photo.jpg'};
+ await page.route('**/quality/cars/invite/synthetic-token/attachments**',r=>{const method=r.request().method();if(method==='DELETE'){removed=true;return r.fulfill({status:204});}if(method==='POST'){uploaded=true;return r.fulfill({contentType:'application/json',body:JSON.stringify(photo)});}return r.fulfill({contentType:'application/json',body:JSON.stringify(uploaded&&!removed?[photo]:[])});});
+ await page.goto('/qms/car-access/synthetic-token?capture=1');await expect(page.getByLabel('Evidence reference',{exact:true})).toBeVisible({timeout:20000});
+ await expect(page.locator('.car-invite-finding-details')).not.toHaveAttribute('open','');await expect(page.locator('.car-invite-side .car-invite-panel[open]')).toHaveCount(0);
+ await page.locator('input[type="file"][multiple]').setInputFiles({name:'photo.jpg',mimeType:'image/jpeg',buffer:Buffer.from('test photo')});await page.getByRole('button',{name:'Delete photo.jpg',exact:true}).click();await expect.poll(()=>removed).toBe(true);await expect(page.getByRole('button',{name:'Delete photo.jpg',exact:true})).toHaveCount(0);await page.screenshot({path:'../.artifacts/qms-remodel-public-car-phone.png'});
+});

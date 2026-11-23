@@ -82,7 +82,7 @@ function isQmsRegisterWorkspace(route: QmsPathClassification): boolean {
   // Checklists are owned by QmsCanonicalPage (Assurance chrome + checklist library host).
   // Keep only shallow audit register shortcuts here.
   if (route.module.id === "audits") return ["reports", "templates"].includes(view);
-  // CAR/CAPA has a governed specialist owner in PortalRouteSurface. Keeping it
+  // CAR/CAP has a governed specialist owner in PortalRouteSurface. Keeping it
   // out of this generic register shortcut prevents list/new/queue routes from
   // bypassing assignment, auditee response, evidence and Quality review controls.
   if (route.module.id === "cars") return false;

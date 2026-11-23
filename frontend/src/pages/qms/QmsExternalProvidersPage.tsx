@@ -1,3 +1,5 @@
+import { usePhoneLayout } from "../../hooks/usePhoneLayout";
+import CollapsibleFilters from "../../components/shared/CollapsibleFilters";
 import { classifyQmsPath } from "./routes/qmsRouteRegistry";
 import QmsControlledRegisterPage from "./QmsControlledRegisterPage";
 import QmsSectionTabs from "../../components/QMS/QmsSectionTabs";
@@ -501,7 +503,7 @@ function ProviderDetailWorkspace({ amoCode, providerId, tab, onBack }: {
           {hasQmsRolePermission("qms.audit.view") &&
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/audits/register`}>QMS audits and findings</Link>}
           {hasQmsRolePermission("qms.car.view") &&
-            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/register`}>CAR / CAPA and effectiveness reviews</Link>}
+            <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/cars/register`}>CAR / CAP and effectiveness reviews</Link>}
           {hasQmsRolePermission("qms.audit.manage") &&
             <Link to={`/maintenance/${encodeURIComponent(amoCode)}/quality/external-accounts/register?supplier=${provider.id}`}>Provider accounts and delegated access</Link>}
           {hasQmsRolePermission("qms.document.view") &&
@@ -594,6 +596,7 @@ function ProviderWorkspace(): React.ReactElement {
   const [page, setPage] = useState(0);
   const pageSize = 50;
   const [search, setSearch] = useState("");
+  const phoneLayout = usePhoneLayout();
   const fixedStatus=location.pathname.endsWith("/approved-list")?"APPROVED":location.pathname.endsWith("/expired-approvals")?"EXPIRED":"";
   const [statusFilter, setStatusFilter] = useState(fixedStatus);
   const [kindFilter, setKindFilter] = useState("");
@@ -665,6 +668,7 @@ function ProviderWorkspace(): React.ReactElement {
         </div>
       </header>
 
+      <details className="qms-provider-overview" open={!phoneLayout}><summary>Provider overview &amp; controls</summary>
       {summary && (
         <section className="qms-provider-summary" aria-label="Provider governance summary">
           <SummaryCard icon={Building2} label="Active providers" value={summary.total} />
@@ -678,15 +682,18 @@ function ProviderWorkspace(): React.ReactElement {
 
       <ProviderPortfolio amoCode={amoCode} />
       <ProviderAlertSettingsPanel amoCode={amoCode} department="QUALITY" />
+      </details>
       {creating && <ProviderCreatePanel amoCode={amoCode} onClose={() => setCreating(false)} onCreated={(provider) => navigate(`${basePath}/${provider.id}/overview`)} />}
       {error && <div className="qms-provider-alert is-error"><AlertTriangle size={17} />{error}</div>}
 
       <section className="qms-provider-register">
         <div className="qms-provider-toolbar">
           <label className="qms-provider-search"><Search size={17} /><input aria-label="Search external providers" placeholder="Search code, legal name or trading name" value={search} onChange={(e) => {setSearch(e.target.value);setPage(0);}} /></label>
+          <CollapsibleFilters label="Provider filters" active={[statusFilter,kindFilter,riskFilter].filter(Boolean).length}>
           <select aria-label="Provider status" disabled={Boolean(fixedStatus)} value={statusFilter} onChange={(e) => {setStatusFilter(e.target.value);setPage(0);}}><option value="">All statuses</option>{PROVIDER_STATUSES.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
           <select aria-label="Provider type" value={kindFilter} onChange={(e) => {setKindFilter(e.target.value);setPage(0);}}><option value="">All provider types</option>{PROVIDER_KINDS.map((item) => <option key={item} value={item}>{titleCase(item)}</option>)}</select>
           <select aria-label="Provider risk" value={riskFilter} onChange={(e) => {setRiskFilter(e.target.value);setPage(0);}}><option value="">All risk levels</option>{PROVIDER_RISKS.map((item) => <option key={item}>{item}</option>)}</select>
+          </CollapsibleFilters>
         </div>
         {loading ? <div className="qms-provider-loading"><RefreshCw className="is-spinning" size={20} />Loading provider governance…</div> : (
           <div className="qms-provider-table-wrap">

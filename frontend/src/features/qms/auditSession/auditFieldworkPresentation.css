@@ -142,3 +142,37 @@
   .qms-live-audit-focus__matrix-toolbar.audit-checklist-toolbar { padding: 0 8px 6px; gap: 4px; }
   .audit-checklist-toolbar__count { display: none; }
 }
+.audit-checklist-filter-toggle { display:none; }
+.audit-checklist-toolbar .audit-checklist-filter-fields { display:contents; }
+@media (max-width:700px) {
+  .qms-live-audit-focus .audit-fieldwork-header { position:static; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__eyebrow { display:none; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__identity h1 { font-size:16px; line-height:1.3; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__actions { grid-column:2; grid-row:1 / 3; width:auto; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__meter { grid-column:1; font-size:11px; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__sync { grid-column:1; font-size:11px; }
+  .audit-fieldwork-header--compact .audit-fieldwork-team > summary span { display:none; }
+  .audit-fieldwork-header--compact .audit-fieldwork-header__actions .is-primary { flex:none; width:auto; max-width:120px; font-size:12px; }
+  .qms-live-audit-focus .qms-live-audit-focus__findings { margin:4px 0; padding:0; }
+  .qms-live-audit-focus__findings details > summary { min-height:36px; padding:6px 10px; }
+  .audit-checklist-heading.audit-checklist-heading { display:none; }
+  .qms-live-audit-focus__matrix-toolbar.audit-checklist-toolbar { display:flex; flex-wrap:wrap; align-items:center; padding:6px 8px; }
+  .audit-checklist-toolbar .audit-checklist-toolbar__search { flex:1; min-width:0; }
+  .audit-checklist-filter-toggle { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border:1px solid var(--fw-line,#ccd5dc); border-radius:6px; background:var(--fw-surface,var(--surface)); color:inherit; }
+  .audit-checklist-toolbar .audit-checklist-filter-fields { display:none; }
+  .audit-checklist-toolbar .audit-checklist-filter-fields.is-open { display:flex; flex-wrap:wrap; gap:8px; flex-basis:100%; }
+  .audit-checklist-filter-fields > label { flex:1 1 140px; min-width:0; }
+  .audit-checklist-filter-fields select { width:100%; }
+}
+@media(max-width:700px){
+ .qms-live-audit-focus .audit-fieldwork-header.audit-fieldwork-header--compact{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"identity actions" "meter actions" "sync actions";align-items:center;gap:2px 8px;padding:6px 8px}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__identity{grid-area:identity}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__identity h1{font-size:16px;line-height:1.25;margin:0}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__meter{grid-area:meter;justify-content:flex-start;font-size:11px}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__sync{grid-area:sync;justify-content:flex-start;font-size:11px}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__actions{grid-area:actions;display:flex;flex-direction:row;align-items:center;gap:2px;width:auto}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-team>summary{min-width:32px;min-height:44px;padding:6px;justify-content:center}
+ .qms-live-audit-focus .audit-fieldwork-header--compact .audit-fieldwork-header__actions .is-primary{width:auto;max-width:110px;min-height:44px;font-size:12px;padding:6px 8px;line-height:1.2}
+ .qms-live-audit-focus .audit-checklist-table .audit-checklist-table__section{padding:6px 10px;min-height:0}
+ .qms-live-audit-focus .audit-checklist-table .audit-checklist-table__section th{padding:2px 0}
+}

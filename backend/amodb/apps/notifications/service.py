@@ -299,8 +299,9 @@ def send_email(
                 "template_id": result.get("template_id"),
                 "accepted_at": _utcnow().isoformat(),
             }
-            safe_context["_delivery"] = delivery
-            log.context_json = safe_context
+            # Replace the JSON value: mutating the dict assigned at insert time
+            # is not tracked by SQLAlchemy's plain JSON column after flush.
+            log.context_json = {**safe_context, "_delivery": delivery}
             log.status = models.EmailStatus.SENT
             log.sent_at = _utcnow()
             log.error = None

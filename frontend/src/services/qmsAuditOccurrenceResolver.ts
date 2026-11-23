@@ -1,3 +1,4 @@
+import { isTemporaryPortalFailure } from "./portalAvailability";
 import { apiRequest, qmsPath } from "./apiClient";
 import type { QMSAuditOut } from "./qms";
 import { readAuditOfflinePackByKey } from "./qmsAuditOfflinePack";
@@ -65,8 +66,7 @@ export async function resolveAuditOccurrence(amoCode: string, auditKey: string, 
       { timeoutMs: 15_000, cacheTtlMs: 5_000, signal },
     ), "occurrence");
   } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (!message.includes("offline") && !message.includes("could not be reached") && !message.includes("cached copy")) throw error;
+    if (!isTemporaryPortalFailure(error)) throw error;
     const offline = await readOffline();
     if (offline) return offline;
     throw error;

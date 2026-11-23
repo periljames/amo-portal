@@ -1,3 +1,4 @@
+import CollapsibleFilters from "../../components/shared/CollapsibleFilters";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -19,7 +20,7 @@ const titles: Record<string, string> = {
   watching: "Watching", completed: "Completed work",
 };
 const sources = [
-  ["", "All Quality sources"], ["audits", "Audits"], ["cars", "CAR / CAPA"],
+  ["", "All Quality sources"], ["audits", "Audits"], ["cars", "CAR / CAP"],
   ["review-actions", "Management review actions"], ["reviews", "Management reviews"],
   ["risks", "Risk assessments"], ["treatments", "Risk treatments"], ["commitments", "External commitments"],
 ];
@@ -177,7 +178,7 @@ export default function QmsWorkInboxPage() {
             <div className="qms-inbox__filters">
               <label>Search work<input type="search" value={search} maxLength={80}
                 placeholder="Search titles" onChange={event => setSearch(event.target.value)} /></label>
-              <label>Quality source<select aria-label="Quality source" value={source}
+              <CollapsibleFilters label="Work filters" active={[source,dueFilter!=="all",sort!=="priority"].filter(Boolean).length}><label>Quality source<select aria-label="Quality source" value={source}
                 onChange={event => update({ source: event.target.value, offset: null })}>
                 {sources.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select></label>
@@ -192,6 +193,7 @@ export default function QmsWorkInboxPage() {
                 <option value="priority">Urgency first</option>
                 <option value="title">Title A to Z</option>
               </select></label>
+            </CollapsibleFilters>
             </div>
           </div>
           {error && <p role="alert" className="qms-inbox__notice">{error}</p>}

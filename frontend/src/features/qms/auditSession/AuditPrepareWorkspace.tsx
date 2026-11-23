@@ -1,3 +1,4 @@
+import { useQmsAdminMode } from "../../../hooks/useQmsAdminMode";
 import AuditStageLoading from "./AuditStageLoading";
 import WorkflowDisclosure from "./WorkflowDisclosure";
 import React, { useEffect, useMemo, useState } from "react";
@@ -372,10 +373,11 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
     enabled: Boolean(auditId),
     staleTime: 1_500,
   });
+  const adminMode = useQmsAdminMode(amoCode);
   const activityQuery = useQuery({
     queryKey: ["qms-audit-activity", amoCode, auditId],
     queryFn: ({ signal }) => listAuditActivity(amoCode, auditId, signal),
-    enabled: Boolean(auditId),
+    enabled: Boolean(auditId) && adminMode,
     staleTime: 2_000,
   });
   const offlinePackQuery = useQuery({
@@ -1341,7 +1343,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           <div className="qms-audit-prepare__intelligence-grid">
             <article><strong>{context.prior_audit_history.items.length}</strong><span>Comparable prior audits</span><small>{context.prior_audit_history.matching_basis}</small></article>
             <article><strong>{context.prior_findings.total}</strong><span>Prior findings</span><small>{Object.entries(context.prior_findings.classification_counts || {}).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(" · ") || "No prior finding classification counts"}</small></article>
-            <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAPA exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
+            <article><strong>{context.car_exposure.open_count}</strong><span>Open CAR / CAP exposure</span><small>{context.car_exposure.total} related corrective action record(s) reviewed</small></article>
             <article><strong>{context.cross_source_assurance_pressure.factors.length}</strong><span>Preparation context factors</span><small>{context.cross_source_assurance_pressure.statement}</small></article>
           </div>
           {context.prior_findings.items.length ? (
@@ -1383,7 +1385,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           </div> : null}
         </WorkflowDisclosure>
 
-        <section className="qms-audit-prepare-stage__section qms-audit-prepare__activity" id="audit-occurrence-activity">
+        {adminMode && <section className="qms-audit-prepare-stage__section qms-audit-prepare__activity" id="audit-occurrence-activity">
           <header><span className="audit-workflow-section-icon"><History size={19} aria-hidden /></span>
             <div><h3><History size={16} /> Activity / audit trail</h3><p>Append-only preparation and audit-domain events for this occurrence.</p></div>
             <button type="button" onClick={() => void activityQuery.refetch()} disabled={activityQuery.isFetching}>Refresh</button>
@@ -1402,7 +1404,7 @@ const AuditPrepareWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
               ))}
             </ol>
           ) : null}
-        </section>
+        </section>}
       </div>
       <ControlledDocumentUploadDialog
         tenant={amoCode.toLowerCase()}

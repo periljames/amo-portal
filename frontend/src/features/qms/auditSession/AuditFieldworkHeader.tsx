@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { ArrowLeft, Cloud, CloudOff, RefreshCw, Users } from "lucide-react";
-import ThemeToggle from "../../../components/UI/ThemeToggle";
 import "./auditFieldworkPresentation.css";
 
 type Props = {
@@ -29,7 +28,7 @@ export default function AuditFieldworkHeader(props: Props) {
       <details className="audit-fieldwork-team"><summary aria-label="Audit team and activity"><Users size={17} aria-hidden /><span>{props.teamCount} active</span></summary>
         <div className="audit-fieldwork-team__panel"><h2>Team & audit activity</h2><p role="status">{props.syncMessage}</p>{props.syncActions}{props.teamDetails}</div>
       </details>
-      <ThemeToggle />{props.readOnly ? <span className="audit-fieldwork-header__readonly">Read-only</span> : null}{props.actions}
+      {props.readOnly ? <span className="audit-fieldwork-header__readonly">Read-only</span> : null}{props.actions}
     </div>
   </header>;
 }

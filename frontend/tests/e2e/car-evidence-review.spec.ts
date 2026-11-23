@@ -38,17 +38,20 @@ test("reviewer views linked evidence beside responses and sees independent RC an
  await prepare(page);
  const image={id:'photo-1',car_id:carId,filename:'containment.png',response_section:'CONTAINMENT',content_type:'image/png',size_bytes:68,uploaded_at:'2026-11-21T12:00:00Z'};
  const text={id:'root-1',car_id:carId,filename:'investigation.txt',response_section:'ROOT_CAUSE',content_type:'text/plain',size_bytes:90,uploaded_at:'2026-11-21T12:00:00Z'};
- await page.route('**/quality/cars/register/paged*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({items:[{...car,containment_action:'Affected equipment isolated.',root_cause:'The independent review control was missing.',corrective_action:'Introduce independent release review.',root_cause_status:'REJECTED',capa_status:'ACCEPTED',root_cause_review_note:'Explain why the missing control was not detected.',capa_review_note:'Plan has an accountable owner and deadline.'}],total:1,limit:1,offset:0,has_more:false})}));
+ await page.route('**/quality/cars/register/paged*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({items:[{...car,containment_action:'Affected equipment isolated.',root_cause:'The independent review control was missing.',corrective_action:'Introduce independent release review.',root_cause_status:'REJECTED',capa_status:'ACCEPTED',root_cause_review_note:'Explain why the missing control was not detected.',capa_review_note:'Plan has an accountable owner and deadline.'}],total:1,limit:1,offset:0,has_more:false,summary:{total:1,open:1,overdue:0,in_review:0}})}));
  await page.route('**/quality/cars/*/attachments',route=>route.fulfill({contentType:'application/json',body:JSON.stringify([image,text])}));
  let fileReads=0;await page.route('**/quality/cars/*/attachments/*/download',route=>{fileReads++;return route.request().url().includes('photo-1')?route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk0cAAAAASUVORK5CYII=','base64')}):route.fulfill({contentType:'text/plain',body:'Documented investigation evidence for independent assessment.'});});
  await page.setViewportSize({width:1440,height:1000});await page.goto(`/maintenance/tenant-a/quality/cars?carId=${carId}`);
  const immediate=page.getByRole('region',{name:'Immediate action',exact:true});
  await expect(immediate.getByRole('button',{name:'View containment.png for Immediate action',exact:true})).toBeVisible({timeout:15000});
- const root=page.getByRole('region',{name:'Root cause',exact:true});const cap=page.getByRole('region',{name:'Corrective action plan',exact:true});
+ const root=page.getByRole('region',{name:'Root cause',exact:true});const cap=page.getByRole('region',{name:'Corrective Action (CAP)',exact:true});
  await expect(root.locator('.case-response-prose')).toContainText('The independent review control was missing.');
  await expect(root.locator('.case-quality-decision')).toContainText('Explain why the missing control was not detected.');
  await expect(root.locator('.case-response-evidence__body > header')).toContainText('Rejected');
  await expect(cap.locator('.case-response-evidence__body > header')).toContainText('Accepted');
+ await expect(page.locator('.case-decision')).toHaveCount(2);
+ await expect(page.getByText(/System audit trail|Source frequency analysis|Original CAR statement/)).toHaveCount(0);
+ await expect(page.getByRole('heading',{name:'Non-conformance',exact:true})).toBeVisible();
  await expect(cap.locator('.case-evidence-thumbnail')).toHaveCount(0);
  const downloads:string[]=[];page.on('download',event=>downloads.push(event.suggestedFilename()));
  await root.getByRole('button',{name:'View investigation.txt for Root cause',exact:true}).click();
@@ -60,7 +63,12 @@ test("reviewer views linked evidence beside responses and sees independent RC an
  await immediate.getByRole('button',{name:'View containment.png for Immediate action',exact:true}).click();
  await expect(page.getByRole('region',{name:'Evidence preview',exact:true}).getByRole('img',{name:'containment.png',exact:true})).toBeVisible();
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
- expect(fileReads).toBe(2);
+ const readsBeforeReopen=fileReads;
+ await page.getByRole('region',{name:'Evidence preview',exact:true}).getByRole('button',{name:'Close evidence preview'}).click();
+ await immediate.getByRole('button',{name:'View containment.png for Immediate action',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Evidence preview',exact:true}).getByRole('img',{name:'containment.png',exact:true})).toBeVisible();
+ expect(fileReads).toBe(readsBeforeReopen);
+ expect(downloads).toEqual([]);
 });
 test("unassigned evidence stays in the general list and preview failures can be retried",async({page})=>{
  await prepare(page);await page.route('**/quality/cars/*/attachments',route=>route.fulfill({contentType:'application/json',body:JSON.stringify([{id:'general',car_id:carId,filename:'general.txt',content_type:'text/plain'}])}));

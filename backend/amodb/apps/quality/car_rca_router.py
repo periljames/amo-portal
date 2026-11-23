@@ -20,6 +20,7 @@ from amodb.database import get_db, get_read_db, get_write_db
 from amodb.security import get_current_active_user
 from amodb.apps.accounts import models as account_models
 from . import models
+from .cap_content import unified_cap
 from .car_rca_models import (
     QualityCarRcaAction, QualityCarRcaActionEvent, QualityCarRcaDocument,
     QualityCarRcaMutation, QualityCarRcaRevision, QualityCarRcaRollout,
@@ -160,8 +161,13 @@ class CarRcaSave(BaseModel):
 
 
 class ActionCreate(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def unified_kind(cls, value):
+        return unified_cap(value) if isinstance(value, dict) else value
+
     mutation_key: str | None = Field(default=None, min_length=8, max_length=80)
-    kind: Literal["CORRECTIVE", "PREVENTIVE", "CONTAINMENT"] = "CORRECTIVE"
+    kind: Literal["CORRECTIVE", "CONTAINMENT"] = "CORRECTIVE"
     description: str = Field(min_length=5, max_length=8000)
     cause_node_ids: list[str] = Field(default_factory=list, max_length=30)
     evidence_references: list[str] = Field(default_factory=list, max_length=40)
@@ -380,13 +386,13 @@ def _public_projection(db: Session, car, *, include_history=False):
     )
     return {
         "car_id": str(car.id), "revision": doc.revision if doc else 0,
-        "draft": doc.draft if doc else {
+        "draft": unified_cap(doc.draft) if doc else {
             "form": {}, "investigation": InvestigationDocument(
                 problem_statement=str(car.summary or "")
             ).model_dump()
         },
         "submitted_revision": doc.submitted_revision if doc else None,
-        "submitted_snapshot": doc.submitted_snapshot if doc else None,
+        "submitted_snapshot": unified_cap(doc.submitted_snapshot) if doc else None,
         "submitted_at": doc.submitted_at if doc else None,
         # Public bearer capabilities must not expose internal actor identities.
         # Full attributed history is available only to tenant Quality readers.
@@ -401,14 +407,14 @@ def _public_projection(db: Session, car, *, include_history=False):
             {"id": str(item.id), "original_response_id": item.original_response_id,
              "event_type": item.event_type, "submitted_at": item.submitted_at,
              "retained_at": item.retained_at, "reason": item.reason,
-             "snapshot": item.snapshot} for item in recalled
+             "snapshot": unified_cap(item.snapshot)} for item in recalled
         ],
         "history": [
             {
                 "id": str(item.id), "revision": item.revision,
                 "event_type": item.event_type, "actor_kind": item.actor_kind,
                 "actor_ref": item.actor_ref, "created_at": item.created_at,
-                "reason": item.reason, "snapshot": item.snapshot
+                "reason": item.reason, "snapshot": unified_cap(item.snapshot)
             } for item in revisions
         ],
     }
@@ -428,10 +434,10 @@ def _save(db: Session, car, payload: CarRcaSave, *, actor, actor_ref):
     doc = _document(db, car, lock=True, create=True)
     data = {
         "investigation": payload.investigation.model_dump(mode="json"),
-        "form": {key: value[:8000] for key, value in payload.form.items()
+        "form": {key: value[:20000] for key, value in unified_cap(payload.form).items()
                  if key in {
                      "submitted_by_name", "submitted_by_email", "containment_action",
-                     "root_cause", "corrective_action", "preventive_action",
+                     "root_cause", "corrective_action",
                      "evidence_ref", "due_date", "target_closure_date"
                  } and isinstance(value, str)}
     }

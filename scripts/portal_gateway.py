@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import mimetypes
 from contextlib import asynccontextmanager
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from pathlib import Path
@@ -17,6 +18,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 from starlette.staticfiles import StaticFiles
+
+# Windows registry MIME mappings can classify module workers as plain text.
+mimetypes.add_type("text/javascript", ".mjs")
 
 API_PATH = re.compile(r"^/(auth|accounts|admin|billing|aircraft|work-orders|crs|training|public|quality|qms|platform|reliability|resilience|audit|audit-events|bootstrap|integrations|api|notifications|email-logs|tasks|health|healthz|livez|readyz|time|manuals|doc-control|records|foundations|rostering|workforce)(?:/|$)", re.I)
 HOP_HEADERS = {b"connection", b"keep-alive", b"proxy-authenticate", b"proxy-authorization", b"te", b"trailer", b"transfer-encoding", b"upgrade"}
@@ -49,7 +53,7 @@ def forwarded_headers(raw_headers):
 def spa_navigation(request: Request) -> bool:
     if request.method not in {"GET", "HEAD"} or "text/html" not in request.headers.get("accept", "").lower():
         return False
-    return bool(re.match(r"^/(?:platform(?:/|$)|qms/(?:audit-access|car-access)(?:/|$)|verify/[^/]+(?:/|$))", request.url.path, re.I))
+    return bool(re.match(r"^/(?:platform(?:/|$)|qms/(?:audit-access|car-access|phone-capture)(?:/|$)|verify/[^/]+(?:/|$))", request.url.path, re.I))
 
 
 def create_app(root: Path, api_target="http://127.0.0.1:8080", ops_target="http://127.0.0.1:8090", *, transport=None, allowed_hosts=None):
@@ -123,10 +127,25 @@ def create_app(root: Path, api_target="http://127.0.0.1:8080", ops_target="http:
         except HTTPException as error:
             if error.status_code != 404:
                 raise
+            # Open tabs still import chunks from their original release. Keep
+            # those immutable assets reachable across a deployment; never use
+            # an old shell, arbitrary path or API response as a fallback.
+            response = None
+            if root.parent.name == "frontend-releases" and re.fullmatch(r"/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(?:js|mjs|css|wasm|woff2?|png|jpe?g|svg|webp)", path):
+                for previous in sorted(root.parent.glob("release-*"), reverse=True):
+                    if previous == root or not previous.is_dir():
+                        continue
+                    try:
+                        response = await StaticFiles(directory=previous, follow_symlink=False).get_response(path.lstrip("/"), request.scope)
+                        break
+                    except HTTPException as missing:
+                        if missing.status_code != 404:
+                            raise
             # Missing release assets must be 404, never HTML pretending to be JS/PDF.
-            if path.startswith(("/assets/", "/pdfjs/")) or (Path(path).suffix and not spa_navigation(request)):
+            if response is None and (path.startswith(("/assets/", "/pdfjs/")) or (Path(path).suffix and not spa_navigation(request))):
                 raise
-            response = await static.get_response("index.html", request.scope)
+            if response is None:
+                response = await static.get_response("index.html", request.scope)
         if path.startswith(("/assets/", "/pdfjs/")):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:

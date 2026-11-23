@@ -166,7 +166,7 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
   });
   const executionCloseMutation = useMutation({
     mutationFn: () => recordAuditExecutionClosed(amoCode, auditId, "Audit execution closed after governed report issue and passkey approval; follow-up obligations remain independently controlled."),
-    onSuccess: async () => { setLocalError(null); setNotice("Execution closed. CAR/CAPA follow-up remains open until its own closure gates are satisfied."); await invalidateClosing(); },
+    onSuccess: async () => { setLocalError(null); setNotice("Execution closed. CAR/CAP follow-up remains open until its own closure gates are satisfied."); await invalidateClosing(); },
     onError: (cause) => setLocalError(cause instanceof Error ? cause.message : "Audit execution close failed."),
   });
   const assuranceArtifactMutation = useMutation({
@@ -425,12 +425,12 @@ const AuditClosingWorkspace: React.FC<Props> = ({ amoCode, auditKey }) => {
           {issuedRevision ? <div className="qms-audit-closing__success"><CheckCircle2 size={16} /> Report R{issuedRevision.revision_no} issued · {issuedRevision.issued_at ? new Date(issuedRevision.issued_at).toLocaleString() : "issued"}</div> : null}
         </details>
         <details open={activeClosingStep === 6 || closure?.execution_status === "CLOSED"} className={closingCardClass(6)} aria-current={activeClosingStep === 6 ? "step" : undefined}>
-          <summary><ShieldAlert size={19} /><div><h3>6 · Close execution without erasing follow-up</h3><small>Execution closure and CAR/CAPA completion are separate controls.</small></div></summary>
+          <summary><ShieldAlert size={19} /><div><h3>6 · Close execution without erasing follow-up</h3><small>Execution closure and CAR/CAP completion are separate controls.</small></div></summary>
           {lockedReason(6) ? <div className="qms-audit-closing__locked">{lockedReason(6)}</div> : null}
           {closure?.execution_readiness?.blockers?.length ? <ul>{closure.execution_readiness.blockers.map((blocker, index) => <li key={`${blocker.type}-${index}`}>{blocker.reason}</li>)}</ul> : null}
           {closure?.execution_status === "CLOSED" && closure.follow_up_readiness?.blockers?.length ? (
             <div className="qms-audit-closing__blocker" role="region" aria-label="Open CAR and follow-up obligations">
-              <strong>Audit execution is closed; the following CAR/CAPA and assurance records remain independently open:</strong>
+              <strong>Audit execution is closed; the following CAR/CAP and assurance records remain independently open:</strong>
               <ul>{closure.follow_up_readiness.blockers.map((blocker, index) => (
                 <li key={`${blocker.type}-${blocker.id || index}`}>{blocker.ref ? `${blocker.ref}: ` : ""}{blocker.reason}</li>
               ))}</ul>

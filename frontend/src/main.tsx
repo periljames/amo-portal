@@ -304,10 +304,22 @@ if (typeof window !== "undefined") {
         }
       }
       onlineManager.setOnline(true);
-      await queryClient.resumePausedMutations();
-      await synchronizePortalOfflineNow();
-      await queryClient.invalidateQueries();
-    })().finally(() => {
+      try {
+        await queryClient.resumePausedMutations();
+        await synchronizePortalOfflineNow();
+      } finally {
+        // A replay/storage failure must not leave recovered read models stale.
+        await queryClient.invalidateQueries();
+      }
+    })().catch(() => {
+      wasPortalReady = false;
+      if (getPortalConnectivity().state === "ONLINE") {
+        recoveryTimer = window.setTimeout(() => {
+          recoveryTimer = null;
+          recoverPortalWhenReady(getPortalConnectivity());
+        }, 2_000);
+      }
+    }).finally(() => {
       recoverySequence = null;
     });
   };

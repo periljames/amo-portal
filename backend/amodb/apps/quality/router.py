@@ -1110,7 +1110,7 @@ def _seed_car_reminders(db: Session, car: models.CorrectiveActionRequest) -> lis
                 scheduled_for=datetime.combine(scheduled_date, time.min, tzinfo=timezone.utc),
                 due_date=due_date,
                 recipient_user_id=recipient,
-                message=f"CAR {car.car_number} CAPA is due on {due_date.isoformat()} ({pct}% reminder).",
+                message=f"CAR {car.car_number} CAP is due on {due_date.isoformat()} ({pct}% reminder).",
             ))
     final_days = settings.final_reminder_days_before_due
     final_date = due_date - timedelta(days=final_days)
@@ -1124,7 +1124,7 @@ def _seed_car_reminders(db: Session, car: models.CorrectiveActionRequest) -> lis
             scheduled_for=datetime.combine(final_date, time.min, tzinfo=timezone.utc),
             due_date=due_date,
             recipient_user_id=recipient,
-            message=f"Final reminder: CAR {car.car_number} CAPA is due on {due_date.isoformat()}.",
+            message=f"Final reminder: CAR {car.car_number} CAP is due on {due_date.isoformat()}.",
             severity="WARNING",
         ))
         created.append(_create_reminder_if_missing(
@@ -1136,7 +1136,7 @@ def _seed_car_reminders(db: Session, car: models.CorrectiveActionRequest) -> lis
             scheduled_for=datetime.combine(due_date, time.min, tzinfo=timezone.utc),
             due_date=due_date,
             recipient_user_id=recipient,
-            message=f"CAR {car.car_number} CAPA is due today.",
+            message=f"CAR {car.car_number} CAP is due today.",
             severity="WARNING",
         ))
     return created
@@ -4963,7 +4963,7 @@ def update_audit(
                 raise HTTPException(status_code=400, detail="All NC findings must have an issued CAR before audit closure")
             for car in cars:
                 if car.root_cause_status != "ACCEPTED" or car.capa_status != "ACCEPTED":
-                    raise HTTPException(status_code=400, detail="All CAR root cause and CAPA reviews must be accepted before audit closure")
+                    raise HTTPException(status_code=400, detail="All CAR root cause and CAP reviews must be accepted before audit closure")
                 if car.evidence_required and not car.evidence_verified_at:
                     raise HTTPException(status_code=400, detail="Evidence verification is required for all CARs before audit closure")
 
@@ -5703,7 +5703,7 @@ def upsert_cap(
     before_status = cap.status.value if cap.status else None
     before = {"status": before_status}
     for field in (
-        "root_cause", "containment_action", "corrective_action", "preventive_action",
+        "root_cause", "containment_action", "corrective_action",
         "responsible_user_id", "due_date", "evidence_ref", "verified_at", "verified_by_user_id", "status",
     ):
         val = getattr(payload, field)
@@ -5715,7 +5715,7 @@ def upsert_cap(
         task_services.create_task(
             db,
             amo_id=_current_amo_id(current_user),
-            title="Complete CAPA actions + evidence",
+            title="Complete CAP actions + evidence",
             description=f"Complete corrective actions for finding {finding.finding_ref or finding.id}.",
             owner_user_id=cap.responsible_user_id or current_user.id,
             supervisor_user_id=None,
@@ -5744,8 +5744,8 @@ def upsert_cap(
         task_services.create_task(
             db,
             amo_id=_current_amo_id(current_user),
-            title="Verify CAPA",
-            description=f"Verify CAPA evidence for finding {finding.finding_ref or finding.id}.",
+            title="Verify CAP",
+            description=f"Verify CAP evidence for finding {finding.finding_ref or finding.id}.",
             owner_user_id=verifier_id or current_user.id,
             supervisor_user_id=None,
             due_at=None,
@@ -5906,6 +5906,8 @@ def _decorate_car_register_items(db: Session, cars: list[models.CorrectiveAction
         car.audit_title = getattr(audit, "title", None)
         car.finding_ref = getattr(finding, "finding_ref", None)
         car.finding_description = getattr(finding, "description", None) or car.summary
+        car.finding_level = _quality_car_value(getattr(finding, "level", None)).upper() or None
+        car.finding_severity = _quality_car_value(getattr(finding, "severity", None)).upper() or None
         car.date_issued = issued_date
         car.date_closed = closed_date
         if issued_date and closed_date:
@@ -5918,7 +5920,6 @@ def _decorate_car_register_items(db: Session, cars: list[models.CorrectiveAction
         car.auditor_remarks = "\n".join([line for line in remarks if line]) or None
         car.register_root_cause = car.root_cause_text or car.root_cause or getattr(latest_response, "root_cause", None)
         car.register_cap = car.capa_text or car.corrective_action or getattr(latest_response, "corrective_action", None) or getattr(latest_response, "containment_action", None)
-        car.register_pap = car.preventive_action or getattr(latest_response, "preventive_action", None)
         car.auditor_name = getattr(auditor_user, "full_name", None) or getattr(auditor_user, "email", None)
         car.requested_by_name = getattr(requested_user, "full_name", None) or getattr(requested_user, "email", None)
         car.responsible_department = getattr(department, "name", None) or getattr(department, "code", None)
@@ -5973,7 +5974,6 @@ def _quality_car_register_query(
                 models.CorrectiveActionRequest.summary.ilike(like),
                 models.CorrectiveActionRequest.root_cause_text.ilike(like),
                 models.CorrectiveActionRequest.capa_text.ilike(like),
-                models.CorrectiveActionRequest.preventive_action.ilike(like),
                 models.CorrectiveActionRequest.submitted_by_name.ilike(like),
                 models.QMSAuditFinding.finding_ref.ilike(like),
                 models.QMSAuditFinding.description.ilike(like),
@@ -6042,7 +6042,7 @@ def create_car_request(
                 amo_id=_current_amo_id(current_user),
                 template_key="qms_car_auditee_invite",
                 recipient=audit.auditee_email,
-                subject=f"CAR/CAPA response required · {car.car_number}",
+                subject=f"CAR/CAP response required · {car.car_number}",
                 context={
                     "car_number": car.car_number,
                     "title": car.title,
@@ -6259,7 +6259,6 @@ def update_car(
     assignee_allowed = {
         "root_cause",
         "corrective_action",
-        "preventive_action",
         "target_closure_date",
     }
 
@@ -6288,7 +6287,7 @@ def update_car(
                 actor_user_id=get_actor(),
             )
         updated_fields = {}
-        for field in ("root_cause", "corrective_action", "preventive_action"):
+        for field in ("root_cause", "corrective_action"):
             if field in data:
                 setattr(car, field, data[field])
                 updated_fields[field] = data[field]
@@ -6298,7 +6297,6 @@ def update_car(
                 containment_action=car.containment_action,
                 root_cause=car.root_cause,
                 corrective_action=car.corrective_action,
-                preventive_action=car.preventive_action,
                 evidence_ref=car.evidence_ref,
                 submitted_by_name=current_user.full_name,
                 submitted_by_email=current_user.email,
@@ -6748,7 +6746,6 @@ def _serialize_car_response(
         "containment_action": response.containment_action,
         "root_cause": response.root_cause,
         "corrective_action": response.corrective_action,
-        "preventive_action": response.preventive_action,
         "evidence_ref": response.evidence_ref,
         "submitted_by_name": response.submitted_by_name,
         "submitted_by_email": response.submitted_by_email,
@@ -6828,7 +6825,6 @@ def _car_invite_payload(car: models.CorrectiveActionRequest, request: Request | 
         "containment_action": getattr(car, "containment_action", None),
         "root_cause": getattr(car, "root_cause", None) or getattr(car, "root_cause_text", None),
         "corrective_action": getattr(car, "corrective_action", None) or getattr(car, "capa_text", None),
-        "preventive_action": getattr(car, "preventive_action", None),
         "evidence_ref": getattr(car, "evidence_ref", None),
         "submitted_by_name": getattr(car, "submitted_by_name", None),
         "submitted_by_email": getattr(car, "submitted_by_email", None),
@@ -6899,7 +6895,6 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         "containment_action",
         "root_cause",
         "corrective_action",
-        "preventive_action",
         "evidence_ref",
         "root_cause_text",
         "capa_text",
@@ -6908,7 +6903,6 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         "containment_action",
         "root_cause",
         "corrective_action",
-        "preventive_action",
         "evidence_ref",
         "target_closure_date",
         "due_date",
@@ -6927,7 +6921,7 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
     if not (car.root_cause_text or car.root_cause):
         raise HTTPException(status_code=400, detail="Root cause is required for CAR response")
     if not (car.capa_text or car.corrective_action):
-        raise HTTPException(status_code=400, detail="CAPA is required for CAR response")
+        raise HTTPException(status_code=400, detail="CAP is required for CAR response")
 
     attachment_count = db.query(models.CARAttachment).filter(models.CARAttachment.car_id == car.id).count()
     if car.evidence_required and not car.evidence_ref and attachment_count == 0:
@@ -6961,7 +6955,6 @@ def submit_car_from_invite(invite_token: str, payload: CARInviteUpdate, request:
         containment_action=car.containment_action,
         root_cause=car.root_cause_text or car.root_cause,
         corrective_action=car.capa_text or car.corrective_action,
-        preventive_action=car.preventive_action,
         evidence_ref=car.evidence_ref,
         submitted_by_name=car.submitted_by_name,
         submitted_by_email=car.submitted_by_email,
@@ -7110,7 +7103,7 @@ def upload_car_invite_attachment(
     invite_token: str,
     file: UploadFile = File(...),
     description: Optional[str] = Form(default=None),
-    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = Form(default=None),
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE"]] = Form(default=None),
     db: Session = Depends(get_db),
 ):
     car = (
@@ -7362,7 +7355,7 @@ def upload_car_attachment(
     car_id: UUID,
     file: UploadFile = File(...),
     description: Optional[str] = Form(default=None),
-    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE", "PREVENTIVE"]] = Form(default=None),
+    response_section: Optional[Literal["CONTAINMENT", "ROOT_CAUSE", "CORRECTIVE"]] = Form(default=None),
     request: Request = None,
     db: Session = Depends(get_db),
     current_user: account_models.User = Depends(get_current_active_user),
@@ -7520,7 +7513,6 @@ def _close_legacy_cap_for_car(
     cap.root_cause = cap.root_cause or car.root_cause_text or car.root_cause
     cap.containment_action = cap.containment_action or car.containment_action
     cap.corrective_action = cap.corrective_action or car.capa_text or car.corrective_action
-    cap.preventive_action = cap.preventive_action or car.preventive_action
     cap.evidence_ref = cap.evidence_ref or car.evidence_ref
     cap.verified_at = cap.verified_at or verified_at
     cap.verified_by_user_id = cap.verified_by_user_id or actor_user_id
@@ -7630,9 +7622,9 @@ def review_car_response(
 
     if payload.capa_status:
         if payload.capa_status not in {"ACCEPTED", "REJECTED", "NEEDS_EVIDENCE", "SUBMITTED", "PENDING"}:
-            raise HTTPException(status_code=400, detail="Invalid CAPA review decision")
+            raise HTTPException(status_code=400, detail="Invalid CAP review decision")
         if payload.capa_status in {"REJECTED", "NEEDS_EVIDENCE"} and not (payload.capa_review_note or "").strip():
-            raise HTTPException(status_code=400, detail="CAPA rejection/needs evidence requires a reason note")
+            raise HTTPException(status_code=400, detail="CAP rejection/needs evidence requires a reason note")
         car.capa_status = payload.capa_status
         car.capa_review_note = (payload.capa_review_note or "").strip() or None
 

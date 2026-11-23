@@ -209,7 +209,7 @@ _include_once(
 # and assignment-specific hard gates have been evaluated.
 _canonical_router.router.include_router(_planner_assignment_guard_router.router)
 
-# CAR/CAPA control-loop records are an additive governance layer over the
+# CAR/CAP control-loop records are an additive governance layer over the
 # authoritative quality_cars register under the canonical Quality route.
 _include_once(
     _canonical_router.router,

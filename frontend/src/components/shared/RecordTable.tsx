@@ -36,14 +36,14 @@ export default function RecordTable<T>({ rows, columns, label, loading = false, 
     return typeof column.valueFormatter === "function" ? column.valueFormatter(params as unknown as ValueFormatterParams<T>) : String(value ?? "—");
   };
   return <div className="record-table-scroll" aria-busy={loading}>
-    <table className="record-table" aria-label={label} style={{ minWidth: columns.reduce((sum, col) => sum + (col.minWidth || 96), 0) }}>
+    <table className="record-table" role="table" aria-label={label} style={{ minWidth: columns.reduce((sum, col) => sum + (col.minWidth || 96), 0) }}>
       <colgroup>{columns.map((column, index) => <col key={index} style={{ width: widths[index] || column.width || `${(column.flex || 1) * 100 / columns.reduce((sum, col) => sum + (col.flex || 1), 0)}%` }} />)}</colgroup>
-      <thead><tr>{columns.map((column, index) => <th key={index} scope="col" aria-sort={sort && sort.key===(column.colId || column.field) ? sort.direction==="asc" ? "ascending" : "descending" : undefined} data-pinned={column.pinned || undefined}>
+      <thead data-sortable={Boolean(onSortChange)} role="rowgroup"><tr role="row">{columns.map((column, index) => <th role="columnheader" key={index} scope="col" aria-sort={sort && sort.key===(column.colId || column.field) ? sort.direction==="asc" ? "ascending" : "descending" : undefined} data-pinned={column.pinned || undefined}>
         {onSortChange && column.sortable!==false ? <button type="button" className="record-table-sort" onClick={()=>onSortChange({key:column.colId || String(column.field || index),direction:sort && sort.key===(column.colId || column.field) && sort.direction==="asc" ? "desc" : "asc"})}>{column.headerName}{sort && sort.key===(column.colId || column.field) ? sort.direction==="asc" ? <ArrowUp size={13}/> : <ArrowDown size={13}/> : <ArrowUpDown size={13}/>}</button> : column.headerName || <span className="sr-only">Actions</span>}
         {column.resizable !== false && column.minWidth !== column.maxWidth ? <span className="record-table-resize" role="separator" aria-label={`Resize ${column.headerName || "actions"} column`} aria-orientation="vertical" tabIndex={0} onPointerDown={(event) => resize(event, index)} onKeyDown={(event) => keyResize(event, index)} /> : null}
       </th>)}</tr></thead>
-      <tbody>{rows.map((row) => <tr key={getRowId(row)} onClick={(event) => onRowClick?.(row, event)} onDoubleClick={(event) => onRowDoubleClick?.(row, event)}>
-        {columns.map((column, index) => <td key={index} data-pinned={column.pinned || undefined} style={column.wrapText ? { whiteSpace: "pre-wrap", textOverflow: "clip", overflow: "visible" } : undefined} className={typeof column.cellClass === "string" ? column.cellClass : undefined}>{cell(column, row)}</td>)}
+      <tbody role="rowgroup">{rows.map((row) => <tr role="row" key={getRowId(row)} onClick={(event) => onRowClick?.(row, event)} onDoubleClick={(event) => onRowDoubleClick?.(row, event)}>
+        {columns.map((column, index) => <td role="cell" data-label={column.headerName || "Actions"} key={index} data-pinned={column.pinned || undefined} style={column.wrapText ? { whiteSpace: "pre-wrap", textOverflow: "clip", overflow: "visible" } : undefined} className={typeof column.cellClass === "string" ? column.cellClass : undefined}>{cell(column, row)}</td>)}
       </tr>)}</tbody>
     </table>
     {!rows.length ? <div className="record-table-empty">{loading ? <InlineLoading label={`Loading ${label.toLowerCase()}`} /> : "No records in this view"}</div> : null}

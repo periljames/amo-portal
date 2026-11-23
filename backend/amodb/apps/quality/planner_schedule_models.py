@@ -39,7 +39,7 @@ def _json_list(value: str | None) -> list[Any]:
 class QMSPlannerScheduleMetadata(Base):
     """Planner-only timing, attendance and lifecycle metadata.
 
-    The linked audit schedule, audit, CAR/CAPA, training event or management
+    The linked audit schedule, audit, CAR/CAP, training event or management
     review remains authoritative for its business lifecycle. This table adds the
     information those records do not natively own: clock time, location,
     attendees, notification policy, suspension history and an optimistic-lock

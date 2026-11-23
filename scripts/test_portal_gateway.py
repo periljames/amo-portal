@@ -11,6 +11,24 @@ gateway = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gateway)
 
 
+def test_existing_tabs_can_load_hashed_chunks_from_previous_releases(tmp_path):
+    releases = tmp_path / "frontend-releases"
+    old, current = releases / "release-1", releases / "release-2"
+    for root, shell in ((old, "old shell"), (current, "new shell")):
+        (root / "assets").mkdir(parents=True)
+        (root / "index.html").write_text(shell)
+    (old / "assets/fieldwork-Abc12345.js").write_text("export const retained = true;")
+    (old / "private.txt").write_text("not an asset")
+    with TestClient(gateway.create_app(current), base_url="http://localhost") as client:
+        chunk = client.get("/assets/fieldwork-Abc12345.js")
+        assert chunk.status_code == 200
+        assert "immutable" in chunk.headers["cache-control"]
+        assert "retained" in chunk.text
+        assert client.get("/").text == "new shell"
+        assert client.get("/private.txt").status_code == 404
+        assert client.get("/assets/missing-Abc12345.js").status_code == 404
+
+
 class Chunks(httpx.AsyncByteStream):
     def __init__(self, *parts):
         self.parts = parts
@@ -33,7 +51,11 @@ def root(tmp_path):
 
 
 def test_static_routes_ranges_and_missing_chunks(root):
+    (root / "assets/pdf.worker.mjs").write_text("export {};")
     with TestClient(gateway.create_app(root), base_url="http://localhost") as client:
+        worker = client.get("/assets/pdf.worker.mjs")
+        assert worker.status_code == 200
+        assert worker.headers["content-type"].startswith("text/javascript")
         assert client.get("/maintenance/amo/quality").text == "<html>portal shell</html>"
         response = client.get("/assets/test-12345678.js", headers={"Range": "bytes=10-29"})
         assert response.status_code == 206
@@ -144,7 +166,7 @@ def test_public_navigation_stays_spa_while_ops_and_json_stay_api(root):
         return httpx.Response(200, stream=Chunks(b"{}"), headers={"content-type": "application/json"})
 
     with TestClient(gateway.create_app(root, transport=httpx.MockTransport(upstream)), base_url="http://localhost") as client:
-        for path in ("/platform/control", "/qms/audit-access/token", "/qms/car-access/signed.token.value", "/verify/signed.token.value"):
+        for path in ("/platform/control", "/qms/audit-access/token", "/qms/car-access/signed.token.value", "/qms/phone-capture", "/verify/signed.token.value"):
             assert "portal shell" in client.get(path, headers={"Accept": "text/html"}).text
         assert not requests
         client.get("/platform/settings", headers={"Accept": "application/json"})

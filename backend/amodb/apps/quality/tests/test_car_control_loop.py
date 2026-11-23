@@ -283,7 +283,7 @@ def test_public_invite_persistence_preserves_full_detailed_response() -> None:
     assert len(car.containment_action) == 8000
     assert len(car.root_cause) == 8000
     assert len(car.corrective_action) == 8000
-    assert len(car.preventive_action) == 8000
+    assert not hasattr(payload, "preventive_action")
 
 
 def test_public_invite_report_requires_matching_issued_revision() -> None:

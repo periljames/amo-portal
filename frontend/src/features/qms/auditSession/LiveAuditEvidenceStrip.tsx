@@ -1,9 +1,11 @@
+import { getCachedUser } from "../../../services/auth";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileUp, Paperclip, ShieldCheck } from "lucide-react";
 
 import {
   createEvidenceMutationId,
+  removeInternalAuditEvidence,
   downloadInternalAuditEvidence,
   listAuditEvidence,
   uploadInternalAuditEvidence,
@@ -11,6 +13,8 @@ import {
 } from "../../../services/qmsAuditEvidence";
 import {
   enqueueOfflineAuditEvidence,
+  discardOfflineAuditEvidence,
+  retryOfflineAuditEvidence,
   listOfflineAuditEvidence,
   onOfflineAuditEvidenceChanged,
   synchronizeOfflineAuditEvidence,
@@ -245,6 +249,16 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
     } finally { setBusy(false); }
   };
 
+  const changeAttachment=async(id:string,kind:'saved'|'local'|'retry')=>{
+    setBusy(true);onError(null);
+    try{if(kind==='saved')await removeInternalAuditEvidence(amoCode,auditId,id,item.entity_version);
+      else if(kind==='local')await discardOfflineAuditEvidence(id,amoCode,auditId);
+      else{await retryOfflineAuditEvidence(id,amoCode,auditId);await synchronizeOfflineAuditEvidence(amoCode,auditId);}
+      await evidenceQuery.refetch();await pendingQuery.refetch();await onChanged();onNotice(kind==='retry'?'Upload retried.':'Attachment removed.');
+    }catch(error){onError(error instanceof Error?error.message:'Attachment could not be changed. Retry.');await evidenceQuery.refetch();}
+    finally{setBusy(false);}
+  };
+
   const download = async (artifactId: string, filename: string) => {
     setDownloading(artifactId); onError(null);
     try {
@@ -289,6 +303,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
                       <span>Use in assessment</span>
                     </label>
                   ) : null}
+                  {canManage && artifact.uploaded_by_user_id===getCachedUser()?.id && <button type="button" disabled={busy || reliedUpon} onClick={()=>void changeAttachment(artifact.id,'saved')} aria-label={`Remove ${artifact.filename}`}>Remove</button>}
                   <button type="button" onClick={() => void download(artifact.id, artifact.filename)} disabled={downloading === artifact.id || (navigator.onLine === false && !retainedQuery.data?.includes(artifact.id))} title={retainedQuery.data?.includes(artifact.id) ? "Encrypted copy available offline" : navigator.onLine === false ? "Open this file once while connected to retain a copy." : undefined}><Download size={14} /> {downloading === artifact.id ? "Opening…" : navigator.onLine === false && !retainedQuery.data?.includes(artifact.id) ? "Not saved on device" : "Open"}</button>
                 </div>
               </li>
@@ -303,6 +318,7 @@ const LiveAuditEvidenceStrip: React.FC<Props> = ({
             {pending.map((entry) => (
               <li key={entry.id}>
                 <span><strong>{entry.filename}</strong><small>{Math.ceil(entry.sizeBytes / 1024)} KB · {entry.state.replaceAll("_", " ")}</small></span>
+                {canManage && <div><button type="button" disabled={busy||entry.state==='UPLOADING'} onClick={()=>void changeAttachment(entry.id,'retry')}>Retry</button><button type="button" disabled={busy||entry.state==='UPLOADING'} onClick={()=>void changeAttachment(entry.id,'local')} aria-label={`Remove ${entry.filename}`}>Remove</button></div>}
                 {entry.lastError ? <small>{entry.lastError}</small> : null}
               </li>
             ))}

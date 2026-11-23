@@ -1,3 +1,4 @@
+import { useQmsAdminMode } from "../../hooks/useQmsAdminMode";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -30,7 +31,9 @@ const icons = { general: SlidersHorizontal, workflows: Workflow, numbering: Hash
 export default function QmsSettingsPage() {
   const queryClient = useQueryClient();
   const { amoCode = "", "*": tail = "" } = useParams();
-  const selected = sections.find(section => section.id === tail) || sections[0];
+  const adminMode = useQmsAdminMode(amoCode);
+  const visibleSections = sections.filter(section=>section.id!=="audit-log" || adminMode);
+  const selected = visibleSections.find(section => section.id === tail) || sections[0];
   const base = `/maintenance/${encodeURIComponent(amoCode)}/quality`;
   const [settings, setSettings] = useState<Configuration | null>(null);
   const [tenant, setTenant] = useState(amoCode);
@@ -73,11 +76,11 @@ export default function QmsSettingsPage() {
   return <DepartmentLayout amoCode={amoCode} activeDepartment="quality"><div className="qms-settings-page">
     <header className="qms-settings__header"><h1>Settings{selected.id !== "general" ? ` · ${selected.label}` : ""}</h1><SettingsSoundControl /></header>
     <div className="qms-settings__scope"><Building2 size={16} /><strong>{tenant}</strong><span>Tenant configuration</span><span className="qms-settings__access">{canManage ? "Can configure" : "Read only"}</span></div>
-    <nav className="qms-settings__tabs" aria-label="Settings sections">{sections.map(section => { const Icon = icons[section.id as keyof typeof icons]; return <Link key={section.id} to={`${base}/settings/${section.id}`} aria-current={selected.id === section.id ? "page" : undefined}><Icon size={17} /><span>{section.label}</span></Link>; })}</nav>
+    <nav className="qms-settings__tabs" aria-label="Settings sections">{visibleSections.map(section => { const Icon = icons[section.id as keyof typeof icons]; return <Link key={section.id} to={`${base}/settings/${section.id}`} aria-current={selected.id === section.id ? "page" : undefined}><Icon size={17} /><span>{section.label}</span></Link>; })}</nav>
     {(loading || !settings || !selected.keys.length) && <SettingsFeedback message={error} error onDismiss={() => setError("")}><button type="button" onClick={() => void load()} disabled={loading}>Retry loading settings</button></SettingsFeedback>}
     {loading ? <p role="status">Loading Quality settings…</p> : settings && <>
       {!canManage && <p>You have read-only access to this configuration.</p>}
-      {selected.id === "general" ? <div className="qms-settings__cards">{sections.slice(1).map(section => <Link className="qms-settings__card" to={`${base}/settings/${section.id}`} key={section.id}><h2>{(() => { const Icon = icons[section.id as keyof typeof icons]; return <Icon size={21} />; })()}{section.label}<ArrowRight size={18} /></h2><p>{section.description}</p><span>Open configuration</span></Link>)}</div> : <>
+      {selected.id === "general" ? <div className="qms-settings__cards">{visibleSections.slice(1).map(section => <Link className="qms-settings__card" to={`${base}/settings/${section.id}`} key={section.id}><h2>{(() => { const Icon = icons[section.id as keyof typeof icons]; return <Icon size={21} />; })()}{section.label}<ArrowRight size={18} /></h2><p>{section.description}</p><span>Open configuration</span></Link>)}</div> : <>
         {selected.id === "notifications" && <QmsMailIdentityPage embedded />}
         {selected.id === "workflows" && <Link className="qms-settings__card" to={`${base}/audits/program`}><h2>Audit programme & notice controls <ArrowRight size={18} /></h2><p>Manage audit work and governed notices at their source.</p></Link>}
         {selected.id === "retention" && <Link className="qms-settings__card" to={`${base}/evidence-vault/immutable-archive`}><h2>Retained evidence <ArrowRight size={18} /></h2><p>Open retained evidence and source records.</p></Link>}

@@ -11,6 +11,7 @@ const projection = { car_id: carId, revision: 0, draft: { form: {}, investigatio
 
 async function prepare(page: Page, reader = false, invalid = false) {
   await mockQualityShell(page);
+  await page.route("**/quality/cars/*/attachments", route => route.fulfill({contentType:"application/json",body:"[]"}));
   await page.addInitScript(({ reader }) => {
     sessionStorage.setItem("amo_portal_token", `e30.${btoa(JSON.stringify({exp: Math.floor(Date.now()/1000)+3600}))}.fixture`);
     localStorage.setItem("amo_code", "AMO-A"); localStorage.setItem("amo_slug", "tenant-a"); localStorage.setItem("amo_department", "quality");
@@ -181,7 +182,7 @@ test("a new review does not reuse old rejection reasons and validates return not
  expect(await feedback.evaluate(element=>element.parentElement?.tagName)).toBe('ASIDE');
  const response=page.locator('.case-response');
  await expect(response.getByRole('heading',{name:'Root cause',exact:true})).toBeVisible();
- await expect(response.getByRole('heading',{name:'Corrective action plan',exact:true})).toBeVisible();
+ await expect(response.getByRole('heading',{name:'Corrective Action (CAP)',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Preventive action',exact:true})).toHaveCount(0);
  await expect(page.getByText('Revision 0',{exact:false})).toHaveCount(0);
  await page.getByText('Attach evidence',{exact:true}).click();

@@ -652,11 +652,12 @@ def quality(tenant_slug:str,request:Request,db:Session=Depends(get_db),
         "submission_policy":"CARs are submitted through the authoritative Quality response handler; supporting uploads require Quality review."}
 
 
-class CorrectiveActionSubmission(BaseModel):
+from amodb.apps.quality.schemas import UnifiedCAPInput
+
+class CorrectiveActionSubmission(UnifiedCAPInput):
     containment_action: str = Field(min_length=2,max_length=500)
     root_cause: str = Field(min_length=12,max_length=500)
-    corrective_action: str = Field(min_length=12,max_length=500)
-    preventive_action: str = Field(default="",max_length=500)
+    corrective_action: str = Field(min_length=12,max_length=20000)
     evidence_submission_id: str | None = Field(default=None,max_length=36)
 
 @router.post("/quality/cars/{car_id}/submit")
@@ -695,7 +696,7 @@ def submit_partner_capa(tenant_slug:str,car_id:str,payload:CorrectiveActionSubmi
     actor=_row("SELECT display_name,email FROM external_identities WHERE id=:id",db,id=ctx["person"])
     submit_car_from_invite(str(car[0]["invite_token"]),CARInviteUpdate(
         containment_action=payload.containment_action,root_cause=payload.root_cause,
-        corrective_action=payload.corrective_action,preventive_action=payload.preventive_action,
+        corrective_action=payload.corrective_action,
         evidence_ref=evidence_reference,
         submitted_by_name=actor["display_name"],submitted_by_email=actor["email"]),request,db)
     # The authoritative CAR handler commits, ending SET LOCAL RLS context.

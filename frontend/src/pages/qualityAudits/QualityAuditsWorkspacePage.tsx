@@ -1,3 +1,4 @@
+import CollapsibleFilters from "../../components/shared/CollapsibleFilters";
 import Pagination from "../../components/shared/Pagination";
 import InlineLoading from "../../components/shared/InlineLoading";
 import React, {
@@ -681,6 +682,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
               placeholder="Search audits"
             />
           </label>
+          <CollapsibleFilters label="Audit filters">
           <label className="qa-audits-list__filter">
             Sort
             <select
@@ -708,6 +710,7 @@ const QualityAuditsWorkspacePage: React.FC = () => {
               <option value="desc">Descending</option>
             </select>
           </label>
+          </CollapsibleFilters>
           {canCreateAudit ? (
             <div
               className="qa-audits-list__create-actions"

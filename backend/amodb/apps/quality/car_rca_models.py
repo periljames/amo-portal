@@ -76,7 +76,7 @@ class QualityCarRcaAction(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     __table_args__ = (
         UniqueConstraint("amo_id", "car_id", "sequence_no", name="uq_quality_car_rca_action_number"),
-        CheckConstraint("kind IN ('CORRECTIVE','PREVENTIVE','CONTAINMENT')", name="ck_quality_car_rca_action_kind"),
+        CheckConstraint("kind IN ('CORRECTIVE','CONTAINMENT')", name="ck_quality_car_rca_action_kind"),
         CheckConstraint("state IN ('PROPOSED','ACCEPTED','IN_PROGRESS','SUBMITTED','VERIFIED','REJECTED','CANCELLED')", name="ck_quality_car_rca_action_state"),
         CheckConstraint("priority IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_quality_car_rca_action_priority"),
         Index("ix_quality_car_rca_action_due", "amo_id", "state", "target_date"),
