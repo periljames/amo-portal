@@ -117,6 +117,7 @@ def effective_capability_decisions(
         models.AuthRoleCapabilityBinding.constraints_json,
     ).all()
     appointed = set()
+    appointment_conflict = False
     if any(code in PROTECTED_DECISION_CAPABILITIES for code, *_ in grants):
         from ..workforce import governance_models as organisation
         from ..workforce.hr_people_directory import _today
@@ -125,7 +126,7 @@ def effective_capability_decisions(
         placement = organisation.WorkforcePersonPlacement
         position = organisation.WorkforcePosition
         unit = organisation.WorkforceOrgUnit
-        appointments = db.query(position.access_profile_id, unit.legacy_department_id).select_from(
+        appointments = db.query(position.access_profile_id, unit.legacy_department_id, placement.placement_type).select_from(
             placement,
         ).join(position, position.id == placement.position_id).join(unit, unit.id == placement.org_unit_id).filter(
             placement.amo_id == str(user.amo_id), placement.user_id == str(user.id),
@@ -134,8 +135,9 @@ def effective_capability_decisions(
             placement.effective_from <= today,
             or_(placement.effective_to.is_(None), placement.effective_to >= today),
         ).all()
+        appointment_conflict = sum(kind == "PRIMARY" for _, _, kind in appointments) > 1
         appointed = {(str(profile), str(department) if department else None)
-                     for profile, department in appointments if profile}
+                     for profile, department, _ in appointments if profile}
     eligible: dict[str, list[str]] = {}
     for code, assignment_id, scope_department, profile_id, constraints in grants:
         if constraints:
@@ -151,6 +153,9 @@ def effective_capability_decisions(
             for profile, department in appointed
         ):
             result[code] = CapabilityDecision(False, "APPROVAL_AUTHORITY_MISSING")
+            continue
+        if code in PROTECTED_DECISION_CAPABILITIES and appointment_conflict:
+            result[code] = CapabilityDecision(False, "APPOINTMENT_CONFLICT")
             continue
         eligible.setdefault(code, []).append(str(assignment_id))
     result.update({code: CapabilityDecision(True, "ALLOWED", tuple(sorted(ids)))

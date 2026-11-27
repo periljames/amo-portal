@@ -44,7 +44,7 @@ def organogram(
     day = governance_directory._today(db, amo_id=amo_id)
     snapshot = supervisor_governance.organisation_snapshot(db, amo_id=amo_id, on_date=day)
     relationships = []
-    for user_id in sorted(snapshot.by_user):
+    for user_id in sorted(snapshot.users):
         manager = snapshot.direct_manager(user_id)
         functional = snapshot.direct_manager(user_id, placement_type="MATRIX")
         chain, chain_status = snapshot.reporting_chain(user_id)

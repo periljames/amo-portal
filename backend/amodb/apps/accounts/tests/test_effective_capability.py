@@ -107,6 +107,15 @@ def test_undefined_capability_does_not_use_account_role(authority):
     assert not result.allowed and result.code == "CAPABILITY_UNDEFINED"
 
 
+def test_overlapping_primary_appointments_block_controlled_decisions(authority):
+    db = authority[0]
+    db.add(org.WorkforcePersonPlacement(
+        id="conflicting", amo_id="tenant", user_id="actor", org_unit_id="unit", position_id="position",
+        placement_type="PRIMARY", effective_from=date(2026, 11, 26), effective_to=date(2026, 12, 1),
+    ))
+    assert decision(authority).code == "APPOINTMENT_CONFLICT"
+
+
 def test_inactive_identity_and_platform_context_are_denied(authority):
     authority[1].is_active = False
     assert decision(authority).code == "APPOINTMENT_INACTIVE"
