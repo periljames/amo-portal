@@ -16,6 +16,7 @@ from __future__ import annotations
 from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
 
 from datetime import date, datetime, timezone
+from dataclasses import dataclass
 from typing import Iterable
 
 from sqlalchemy import or_
@@ -44,6 +45,123 @@ MODULE_CATALOGUE = (
 )
 
 MODULE_CODES = frozenset(item[0] for item in MODULE_CATALOGUE)
+
+# Administrative access is never a controlled business-decision appointment.
+PROTECTED_DECISION_CAPABILITIES = frozenset({
+    "qms.audit.programme.approve", "qms.audit.programme.quality_review",
+    "qms.car.close", "qms.car.review", "qms.car.reject",
+    "qms.document.approve", "qms.document.publish", "qms.document.review",
+    "qms.authorization.approve", "qms.authorization.review",
+    "qms.authorization.exemption.approve", "qms.reports.attest_authority",
+    "doc_control.revision.publish",
+})
+
+
+@dataclass(frozen=True)
+class CapabilityDecision:
+    allowed: bool
+    code: str
+    assignment_ids: tuple[str, ...] = ()
+
+
+def evaluate_capability(
+    db: Session, *, user: models.User, capability_code: str,
+    department_id: str | None = None,
+) -> CapabilityDecision:
+    """Evaluate access/appointment; domain owners also enforce decision policy."""
+    return effective_capability_decisions(
+        db, user=user, capability_codes=[capability_code], department_id=department_id,
+    )[capability_code]
+
+
+def effective_capability_decisions(
+    db: Session, *, user: models.User, capability_codes: Iterable[str],
+    department_id: str | None = None,
+) -> dict[str, CapabilityDecision]:
+    """Batch evaluation without cross-request authorization caches.
+
+    Absent scope never broadens a grant. Unknown binding constraints fail
+    closed until their evaluator is supplied. Primary is presentation metadata,
+    not an authority restriction: every effective tenant assignment participates.
+    """
+    requested = set(capability_codes)
+    result = {code: CapabilityDecision(False, "CAPABILITY_UNDEFINED") for code in requested}
+    if not requested:
+        return result
+    if not tenant_member(user) or getattr(user, "is_platform_context", False):
+        return {code: CapabilityDecision(False, "APPOINTMENT_INACTIVE") for code in requested}
+    if department_id is not None and db.query(models.Department.id).filter(
+        models.Department.id == department_id, models.Department.amo_id == str(user.amo_id),
+        models.Department.is_active.is_(True),
+    ).first() is None:
+        return {code: CapabilityDecision(False, "OUTSIDE_AUTHORISED_SCOPE") for code in requested}
+    defined = db.query(models.AuthCapabilityDefinition.code).filter(
+        models.AuthCapabilityDefinition.code.in_(requested),
+    ).all()
+    result.update({code: CapabilityDecision(False, "CAPABILITY_MISSING") for (code,) in defined})
+    grants = _active_assignment_query(
+        db, amo_id=str(user.amo_id), user_id=str(user.id),
+    ).join(
+        models.AuthRoleCapabilityBinding,
+        models.AuthRoleCapabilityBinding.role_id == models.AuthUserRoleAssignment.role_id,
+    ).join(
+        models.AuthCapabilityDefinition,
+        models.AuthCapabilityDefinition.id == models.AuthRoleCapabilityBinding.capability_id,
+    ).filter(
+        models.AuthCapabilityDefinition.code.in_(requested),
+        models.AuthRoleDefinition.amo_id == str(user.amo_id),
+        models.AuthRoleDefinition.scope_type == "TENANT",
+    ).with_entities(
+        models.AuthCapabilityDefinition.code, models.AuthUserRoleAssignment.id,
+        models.AuthUserRoleAssignment.department_id, models.AuthUserRoleAssignment.role_id,
+        models.AuthRoleCapabilityBinding.constraints_json,
+    ).all()
+    appointed = set()
+    appointment_conflict = False
+    if any(code in PROTECTED_DECISION_CAPABILITIES for code, *_ in grants):
+        from ..workforce import governance_models as organisation
+        from ..workforce.hr_people_directory import _today
+
+        today = _today(db, amo_id=str(user.amo_id))
+        placement = organisation.WorkforcePersonPlacement
+        position = organisation.WorkforcePosition
+        unit = organisation.WorkforceOrgUnit
+        appointments = db.query(position.access_profile_id, unit.legacy_department_id, placement.placement_type).select_from(
+            placement,
+        ).join(position, position.id == placement.position_id).join(unit, unit.id == placement.org_unit_id).filter(
+            placement.amo_id == str(user.amo_id), placement.user_id == str(user.id),
+            position.amo_id == str(user.amo_id), position.is_active.is_(True),
+            unit.amo_id == str(user.amo_id), unit.is_active.is_(True),
+            placement.effective_from <= today,
+            or_(placement.effective_to.is_(None), placement.effective_to >= today),
+        ).all()
+        appointment_conflict = sum(kind == "PRIMARY" for _, _, kind in appointments) > 1
+        appointed = {(str(profile), str(department) if department else None)
+                     for profile, department, _ in appointments if profile}
+    eligible: dict[str, list[str]] = {}
+    for code, assignment_id, scope_department, profile_id, constraints in grants:
+        if constraints:
+            result[code] = CapabilityDecision(False, "CONSTRAINT_UNRESOLVED")
+            continue
+        if scope_department is not None and (
+            department_id is None or str(scope_department) != str(department_id)
+        ):
+            result[code] = CapabilityDecision(False, "OUTSIDE_AUTHORISED_SCOPE")
+            continue
+        if code in PROTECTED_DECISION_CAPABILITIES and not any(
+            profile == str(profile_id) and (scope_department is None or department == str(scope_department))
+            for profile, department in appointed
+        ):
+            result[code] = CapabilityDecision(False, "APPROVAL_AUTHORITY_MISSING")
+            continue
+        if code in PROTECTED_DECISION_CAPABILITIES and appointment_conflict:
+            result[code] = CapabilityDecision(False, "APPOINTMENT_CONFLICT")
+            continue
+        eligible.setdefault(code, []).append(str(assignment_id))
+    result.update({code: CapabilityDecision(True, "ALLOWED", tuple(sorted(ids)))
+                   for code, ids in eligible.items()})
+    return result
+
 
 OPERATIONAL_CAPABILITIES = {
     "doc_control.document.create": ("documents", "Create controlled-document records."),
@@ -98,6 +216,8 @@ QUALITY_AUDITOR_CAPABILITIES = frozenset({
     "qms.audit.view", "qms.audit.execute", "qms.finding.view",
     "qms.finding.create", "qms.car.view", "qms.document.view",
     "qms.evidence.view", "qms.evidence.download",
+    "qms.management_review.view", "qms.supplier.view", "qms.equipment.view",
+    "qms.risk.view", "qms.change.view", "qms.training.view",
 })
 QUALITY_SUPPORT_CAPABILITIES = frozenset({
     "qms.people.view",
@@ -567,6 +687,7 @@ def _active_assignment_query(db: Session, *, amo_id: str, user_id: str):
         or_(models.AuthUserRoleAssignment.valid_from.is_(None), models.AuthUserRoleAssignment.valid_from <= now),
         or_(models.AuthUserRoleAssignment.valid_to.is_(None), models.AuthUserRoleAssignment.valid_to >= now),
         models.AuthRoleDefinition.is_active.is_(True),
+        or_(models.AuthRoleDefinition.amo_id.is_(None), models.AuthRoleDefinition.amo_id == amo_id),
     )
 
 
@@ -786,10 +907,31 @@ def capability_codes_for_user(db: Session, *, user: models.User, include_admin_a
     if include_admin_authority and is_tenant_admin(user):
         # Publish the same tenant workflow authority used by server-side guards.
         # Personal certification and subscription entitlements remain separate.
-        codes.update(WORKFLOW_CAPABILITIES)
+        codes.update(code for code in WORKFLOW_CAPABILITIES
+                     if not code.startswith("qms.") and code not in PROTECTED_DECISION_CAPABILITIES)
         for module_code in MODULE_CODES:
             codes.add(_capability_code(module_code, "view"))
             codes.add(_capability_code(module_code, "manage"))
+    # The flat session list represents tenant-wide access only. Scoped grants
+    # are evaluated with record context and must not leak into global rights.
+    codes.difference_update(code for code in list(codes)
+                            if code.startswith("qms.") or code in PROTECTED_DECISION_CAPABILITIES)
+    candidates = _active_assignment_query(
+        db, amo_id=str(user.amo_id), user_id=str(user.id),
+    ).join(
+        models.AuthRoleCapabilityBinding,
+        models.AuthRoleCapabilityBinding.role_id == models.AuthUserRoleAssignment.role_id,
+    ).join(
+        models.AuthCapabilityDefinition,
+        models.AuthCapabilityDefinition.id == models.AuthRoleCapabilityBinding.capability_id,
+    ).filter(
+        models.AuthUserRoleAssignment.department_id.is_(None),
+    ).with_entities(models.AuthCapabilityDefinition.code).distinct().all()
+    decisions = effective_capability_decisions(
+        db, user=user, capability_codes=[code for (code,) in candidates
+                                        if code.startswith("qms.") or code in PROTECTED_DECISION_CAPABILITIES],
+    )
+    codes.update(code for code, decision in decisions.items() if decision.allowed)
     return sorted(codes)
 
 
@@ -829,6 +971,8 @@ def attach_user_access(db: Session, user: models.User) -> models.User:
 
 
 def user_has_capability(db: Session, *, user: models.User, capability_code: str) -> bool:
+    if capability_code.startswith("qms.") or capability_code in PROTECTED_DECISION_CAPABILITIES:
+        return evaluate_capability(db, user=user, capability_code=capability_code).allowed
     if is_tenant_admin(user) and capability_code.startswith(("portal.", "qms.", "training.", "workforce.", "roster.", "leave.", "attendance.", "timesheet.", "overtime.", "payroll.")):
         return True
     capabilities = capability_codes_for_user(db, user=user)

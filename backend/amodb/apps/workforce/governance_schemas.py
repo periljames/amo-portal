@@ -13,6 +13,33 @@ class GovernanceSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
+class ReportingRelationshipRead(GovernanceSchema):
+    user_id: str
+    code: str
+    manager_user_id: str | None = None
+    candidate_user_ids: list[str] = Field(default_factory=list)
+    reporting_chain: list[str] = Field(default_factory=list)
+    chain_status: str
+    functional_manager_user_id: str | None = None
+    functional_status: str
+
+
+class OrganogramPositionRead(GovernanceSchema):
+    position_id: str
+    title: str
+    reports_to_position_id: str | None = None
+    holder_user_ids: list[str] = Field(default_factory=list)
+    vacant: bool
+
+
+class OrganogramRead(GovernanceSchema):
+    as_of: date
+    topology_basis: Literal["CURRENT"] = "CURRENT"
+    positions: list[OrganogramPositionRead]
+    relationships: list[ReportingRelationshipRead]
+    unresolved_user_ids: list[str]
+
+
 class GovernedPeopleFilterInput(hr_schemas.HrPeopleFilterInput):
     org_unit_id: str | None = None
     include_descendants: bool = True

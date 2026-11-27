@@ -15,7 +15,7 @@ from amodb.apps.accounts.tenant_authority import (
 )
 from amodb.apps.training.permissions import ALL_TRAINING_CAPABILITIES, training_capabilities_for
 from amodb.apps.workforce.permissions import ALL_PERMISSIONS, has_permission, permissions_for_user
-from amodb.apps.quality.tenant_security import _has_role_permission
+from amodb.apps.accounts.access_control import evaluate_capability, PROTECTED_DECISION_CAPABILITIES
 from amodb.apps.doc_control.workspace_service import is_control_user, is_accountable_approver
 from amodb.apps.doc_control.workspace_decision_policy import is_decision_approver
 from amodb.apps.reliability.advanced_services import ALL_CAPABILITIES, capabilities_for_user
@@ -46,9 +46,6 @@ def test_administrator_inherits_all_tenant_role_and_module_authority(delegated):
     assert set(permissions_for_user(db, user=user)) == ALL_PERMISSIONS
     assert all(has_permission(db, user=user, permission=code) for code in ALL_PERMISSIONS)
     assert set(capabilities_for_user(db, user)) == set(ALL_CAPABILITIES)
-    assert all(_has_role_permission(user, permission) for permission in (
-        "qms.audit.programme.approve", "qms.audit.programme.quality_review", "qms.car.close",
-    ))
     assert is_control_user(user) and is_accountable_approver(user) and is_decision_approver(user)
 
 
@@ -299,12 +296,12 @@ def test_organisation_profile_is_own_tenant_only_and_excludes_platform_controls(
     assert error.value.status_code == 422
 
 
-def test_administrator_exposes_document_workflow_capabilities(governed_tenant):
+def test_administrator_does_not_inherit_controlled_decision_capabilities(governed_tenant):
     from amodb.apps.accounts import access_control
     db, _, users = governed_tenant
     codes = access_control.capability_codes_for_user(db, user=users["admin"])
-    assert set(access_control.WORKFLOW_CAPABILITIES).issubset(codes)
-    assert access_control.user_has_capability(db, user=users["admin"], capability_code="doc_control.revision.publish")
+    assert not (PROTECTED_DECISION_CAPABILITIES & set(codes))
+    assert not access_control.user_has_capability(db, user=users["admin"], capability_code="doc_control.revision.publish")
 
 
 def test_admin_cannot_demote_another_legacy_admin(governed_tenant):

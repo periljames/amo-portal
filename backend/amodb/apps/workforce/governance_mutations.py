@@ -8,6 +8,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..accounts import models as account_models, services as account_services
+from ..accounts.tenant_authority import tenant_member
 from ..audit import services as audit_services
 from ..foundations import models as foundation_models
 from . import governance_models, hierarchy_roles, models, permissions, supervisor_governance
@@ -22,6 +23,8 @@ MUTATION_TYPES = {
     "UPDATE_CONTRACT_SETTINGS",
     "SCHEDULE_OFFBOARDING",
 }
+
+_SOURCE_END = object()
 
 
 def _utcnow() -> datetime:
@@ -175,7 +178,7 @@ def _end_placement(row, *, effective_on: date):
 def _new_placement(db: Session, *, amo_id: str, user_id: str, org_unit_id: str, placement_type: str,
                    effective_on: date, actor_user_id: str, source=None, position_id: str | None = None,
                    preferred_title: str | None = None, base_station_id: str | None = None,
-                   supervisor_user_id: str | None = None):
+                   supervisor_user_id: str | None = None, effective_to=_SOURCE_END):
     row = governance_models.WorkforcePersonPlacement(
         amo_id=amo_id,
         user_id=user_id,
@@ -187,7 +190,7 @@ def _new_placement(db: Session, *, amo_id: str, user_id: str, org_unit_id: str, 
         supervisor_user_id=(supervisor_user_id if supervisor_user_id is not None
                             else getattr(source, "supervisor_user_id", None)),
         effective_from=effective_on,
-        effective_to=getattr(source, "effective_to", None),
+        effective_to=getattr(source, "effective_to", None) if effective_to is _SOURCE_END else effective_to,
         created_by_user_id=actor_user_id,
         updated_by_user_id=actor_user_id,
     )
@@ -214,7 +217,7 @@ def _assign_organization(db: Session, *, amo_id: str, user, payload, actor_user_
     row = _new_placement(
         db, amo_id=amo_id, user_id=str(user.id), org_unit_id=str(org.id),
         placement_type=placement_type, effective_on=payload["effective_on"], actor_user_id=actor_user_id,
-        source=current,
+        source=current, effective_to=old_end,
     )
     row.effective_to = old_end
     if placement_type == "PRIMARY" and org.legacy_department_id:
@@ -258,7 +261,7 @@ def _assign_position(db: Session, *, amo_id: str, user, payload, actor_user_id: 
     row = _new_placement(
         db, amo_id=amo_id, user_id=str(user.id), org_unit_id=str(current.org_unit_id),
         placement_type="PRIMARY", effective_on=payload["effective_on"], actor_user_id=actor_user_id,
-        source=current, position_id=str(position.id), preferred_title=preferred_title,
+        source=current, position_id=str(position.id), preferred_title=preferred_title, effective_to=old_end,
     )
     row.effective_to = old_end
     supervisor_cleared = False
@@ -337,7 +340,13 @@ def _assign_supervisor(db: Session, *, amo_id: str, user, payload, actor_user_id
     source_contract = _contract_on(db, amo_id=amo_id, user_id=str(user.id), on_date=payload["effective_on"])
     if source_contract is None:
         raise ValueError("The person has no contract to update")
-    if str(source_contract.supervisor_user_id or "") == str(supervisor.id):
+    primary_placement = _placement_on(
+        db, amo_id=amo_id, user_id=str(user.id), placement_type="PRIMARY", on_date=payload["effective_on"]
+    )
+    if primary_placement is None:
+        raise ValueError("A primary appointment is required before assigning a reporting manager")
+    if (str(source_contract.supervisor_user_id or "") == str(supervisor.id)
+            and str(primary_placement.supervisor_user_id or "") == str(supervisor.id)):
         return "SKIPPED", "SUPERVISOR_ALREADY_ASSIGNED", "Supervisor already matches", {
             "supervisor_user_id": str(supervisor.id),
         }
@@ -346,10 +355,16 @@ def _assign_supervisor(db: Session, *, amo_id: str, user, payload, actor_user_id
     )
     contract.supervisor_user_id = supervisor.id
     contract.updated_by_user_id = actor_user_id
-    primary_placement = _placement_on(
-        db, amo_id=amo_id, user_id=str(user.id), placement_type="PRIMARY", on_date=payload["effective_on"]
-    )
-    if primary_placement:
+    if primary_placement.effective_from < payload["effective_on"]:
+        original_end = primary_placement.effective_to
+        primary_placement.effective_to = payload["effective_on"] - timedelta(days=1)
+        replacement = _new_placement(
+            db, amo_id=amo_id, user_id=str(user.id), org_unit_id=str(primary_placement.org_unit_id),
+            placement_type="PRIMARY", effective_on=payload["effective_on"], actor_user_id=actor_user_id,
+            source=primary_placement, supervisor_user_id=str(supervisor.id), effective_to=original_end,
+        )
+        replacement.effective_to = original_end
+    else:
         primary_placement.supervisor_user_id = supervisor.id
         primary_placement.updated_by_user_id = actor_user_id
     return "SUCCEEDED", "SUPERVISOR_ASSIGNED", "Governed supervisor assigned", {
@@ -477,9 +492,12 @@ def _execute_offboarding(db: Session, *, plan, actor_user_id: str | None = None)
 
 
 def process_personnel_mutation_item(db: Session, *, operation, item, actor):
+    if not tenant_member(actor, operation.amo_id):
+        raise ValueError("Personnel mutations require an active member of the operation's tenant")
     permissions.require_permission(
         db, user=actor, permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS
     )
+    supervisor_governance.lock_organisation(db, amo_id=str(operation.amo_id))
     payload = dict(item.input_json or operation.payload_json or {})
     mutation_type = operation.operation_type
     if mutation_type not in MUTATION_TYPES:

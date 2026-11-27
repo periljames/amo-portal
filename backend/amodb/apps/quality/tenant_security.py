@@ -4,7 +4,7 @@ from amodb.apps.accounts.tenant_authority import is_tenant_admin, tenant_member
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Callable
 
 from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy import event, text
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, lazyload
 
 from amodb.database import get_read_db, get_write_db
 from amodb.security import get_current_active_user
-from amodb.apps.accounts import models as account_models
+from amodb.apps.accounts import access_control, models as account_models
 from amodb.apps.platform import models as platform_models
 
 
@@ -42,132 +42,6 @@ class TenantContext:
     admin_authority: bool = False
 
 
-_QUALITY_ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "QUALITY_MANAGER": {"qms.*"},
-    "QUALITY_INSPECTOR": {
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.calendar.view",
-        "qms.audit.view",
-        "qms.audit.execute",
-        "qms.finding.view",
-        "qms.finding.create",
-        "qms.car.view",
-        "qms.document.view",
-        "qms.evidence.view",
-        "qms.evidence.download",
-        "qms.people.view",
-    },
-    "AUDITOR": {
-        "qms.people.view",
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.calendar.view",
-        "qms.audit.view",
-        "qms.audit.execute",
-        "qms.finding.view",
-        "qms.finding.create",
-        "qms.car.view",
-        "qms.document.view",
-        "qms.evidence.view",
-        "qms.evidence.download",
-    },
-    "QUALITY_OFFICER": {
-        "qms.training.manage",
-        "qms.people.view",
-        "qms.authorization.prepare",
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.calendar.view",
-        "qms.audit.view",
-        "qms.audit.execute",
-        "qms.audit.manage",
-        "qms.audit.notice.manage",
-        "qms.finding.view",
-        "qms.finding.create",
-        "qms.car.view",
-        "qms.car.manage",
-        "qms.document.view",
-        "qms.evidence.view",
-        "qms.evidence.download",
-        "qms.management_review.view",
-        "qms.supplier.view",
-        "qms.equipment.view",
-        "qms.risk.view",
-        "qms.change.view",
-        "qms.training.view",
-        "qms.reports.view",
-        "qms.reports.export",
-        "qms.external.view",
-    },
-    "QUALITY_SUPPORT_OFFICER": {
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.calendar.view",
-        "qms.audit.view",
-        "qms.finding.view",
-        "qms.car.view",
-        "qms.document.view",
-        "qms.evidence.view",
-        "qms.training.view",
-        "qms.reports.view",
-        "qms.people.view",
-    },
-    "DOCUMENT_CONTROL_OFFICER": {
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.document.view",
-        "qms.evidence.view",
-        "qms.evidence.download",
-        "qms.training.view",
-        "qms.people.view",
-    },
-    "VIEW_ONLY": {
-        "qms.dashboard.view",
-        "qms.inbox.view",
-        "qms.calendar.view",
-        "qms.audit.view",
-        "qms.finding.view",
-        "qms.car.view",
-        "qms.document.view",
-        "qms.training.view",
-        "qms.supplier.view",
-        "qms.equipment.view",
-        "qms.risk.view",
-        "qms.change.view",
-        "qms.management_review.view",
-        "qms.reports.view",
-        "qms.external.view",
-        "qms.evidence.view",
-        "qms.evidence.download",
-        "qms.people.view",
-    },
-}
-
-# Appointed technical/Safety managers may inspect provider qualification and
-# record their own departmental decision through the separate role-guarded API,
-# but receive no blanket Quality approval or audit-edit privilege.
-for _review_role in (
-    "BASE_MAINTENANCE_MANAGER", "LINE_MAINTENANCE_MANAGER",
-    "WORKSHOP_MANAGER", "SAFETY_MANAGER",
-):
-    _QUALITY_ROLE_PERMISSIONS.setdefault(_review_role,set()).add("qms.supplier.view")
-
-_QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"] = {"qms.*"}
-
-# The Accountable Executive has governed oversight visibility, not Quality
-# mutation rights. Quality independence remains with the Quality Manager.
-_QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"] = set(_QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"])
-_QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"].update(
-    {
-        "qms.external.view",
-        "qms.reports.export",
-        "qms.reports.attest_authority",
-        "qms.audit.programme.approve",
-        "qms.authorization.oversight",
-    }
-)
-
 _READ_ONLY_SUPPORT_PERMISSIONS = {
     "qms.dashboard.view",
     "qms.inbox.view",
@@ -195,101 +69,39 @@ def _normalise(value: object) -> str:
     return str(raw or "").strip()
 
 
-def _permission_matches(grant: str, permission: str) -> bool:
-    if grant == "*":
-        return True
-    if grant.endswith(".*"):
-        return permission.startswith(grant[:-1])
-    return grant == permission
-
-
 def _is_platform_superuser(user: account_models.User) -> bool:
     return bool(getattr(user, "is_superuser", False) or getattr(user, "is_platform_context", False))
 
 
 
 def _support_level_allows(level: str | None, permission: str) -> bool:
+    if permission not in access_control.WORKFLOW_CAPABILITIES or permission in access_control.PROTECTED_DECISION_CAPABILITIES:
+        return False
     access_level = str(level or "").upper()
     if access_level == "ADMIN":
         return True
     if access_level == "READ_ONLY":
-        return permission in _READ_ONLY_SUPPORT_PERMISSIONS or permission.endswith(".view")
+        return permission in _READ_ONLY_SUPPORT_PERMISSIONS
     return False
 
 
-def _has_role_permission(user: account_models.User, permission: str) -> bool:
-    if _is_platform_superuser(user):
-        return False
-    if is_tenant_admin(user):
-        return permission.startswith("qms.")
-    role_name = _normalise(getattr(user, "role", ""))
-    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
-        return role_name == "ACCOUNTABLE_EXECUTIVE"
-    if permission == "qms.audit.programme.quality_review":
-        return role_name == "QUALITY_MANAGER"
-    grants = _QUALITY_ROLE_PERMISSIONS.get(role_name, set())
-    return any(_permission_matches(grant, permission) for grant in grants)
-
-
-def _has_capability_permission(db: Session, *, amo_id: str, user_id: str, permission: str) -> Optional[bool]:
-    """Return an explicit grant result; fail closed when the auth store is unhealthy."""
-    bind = db.get_bind()
-    if bind.dialect.name != "postgresql":
-        return None
+def _has_capability_permission(
+    db: Session, *, amo_id: str, user_id: str, permission: str,
+    department_id: str | None = None,
+) -> bool:
+    """Use the canonical access evaluator on every database, without role fallback."""
     try:
-        capability_exists = db.execute(
-            text("""
-                SELECT to_regclass('public.auth_capability_definitions') IS NOT NULL
-                   AND to_regclass('public.auth_user_role_assignments') IS NOT NULL
-                   AND to_regclass('public.auth_role_capability_bindings') IS NOT NULL
-            """)
-        ).scalar()
-        if not capability_exists:
-            return None
-        capability_defined = db.execute(
-            text("SELECT 1 FROM auth_capability_definitions WHERE code = :permission LIMIT 1"),
-            {"permission": permission},
+        user = db.query(account_models.User).options(lazyload("*")).filter(
+            account_models.User.id == user_id,
+            account_models.User.amo_id == amo_id,
+            account_models.User.is_active.is_(True),
+            account_models.User.is_system_account.is_(False),
         ).first()
-        if not capability_defined:
-            return None
-        primary_assignment = db.execute(
-            text("""
-                SELECT 1
-                FROM auth_user_role_assignments ura
-                JOIN auth_role_definitions rd ON rd.id = ura.role_id
-                WHERE ura.amo_id = :amo_id
-                  AND ura.user_id = :user_id
-                  AND ura.is_primary = TRUE
-                  AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
-                  AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
-                  AND rd.is_active = TRUE
-                LIMIT 1
-            """),
-            {"amo_id": amo_id, "user_id": user_id},
-        ).first()
-        if not primary_assignment:
-            # Compatibility during staged rollout: personas remain the source
-            # until the tenant access framework assigns a primary profile.
-            return None
-        allowed = db.execute(
-            text("""
-                SELECT 1
-                FROM auth_user_role_assignments ura
-                JOIN auth_role_definitions rd ON rd.id = ura.role_id
-                JOIN auth_role_capability_bindings rcb ON rcb.role_id = ura.role_id
-                JOIN auth_capability_definitions cd ON cd.id = rcb.capability_id
-                WHERE ura.amo_id = :amo_id
-                  AND ura.user_id = :user_id
-                  AND ura.is_primary = TRUE
-                  AND rd.is_active = TRUE
-                  AND cd.code = :permission
-                  AND (ura.valid_from IS NULL OR ura.valid_from <= NOW())
-                  AND (ura.valid_to IS NULL OR ura.valid_to >= NOW())
-                LIMIT 1
-            """),
-            {"amo_id": amo_id, "user_id": user_id, "permission": permission},
-        ).first()
-        return bool(allowed)
+        if user is None:
+            return False
+        return access_control.evaluate_capability(
+            db, user=user, capability_code=permission, department_id=department_id,
+        ).allowed
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -452,57 +264,28 @@ def require_quality_write_permission(permission: str) -> Callable[[TenantContext
 
 
 def _enforce_quality_permission(
-    *,
-    ctx: TenantContext,
-    current_user: account_models.User,
-    db: Session,
-    permission: str,
+    *, ctx: TenantContext, current_user: account_models.User,
+    db: Session, permission: str,
 ) -> TenantContext:
-    if not ctx.is_superuser and is_tenant_admin(current_user, ctx.amo_id):
-        return ctx
-    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
-        if not ctx.is_superuser and _has_role_permission(current_user, permission):
-            return ctx
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
-    if ctx.is_superuser:
-        if _support_level_allows(ctx.support_access_level, permission):
-            return ctx
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Support session does not allow '{permission}'.")
-    if is_tenant_admin(current_user) and _has_role_permission(current_user, permission):
-        return ctx
-    capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
-    if capability_result is True:
-        return ctx
-    if capability_result is False:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
-    if _has_role_permission(current_user, permission):
+    if str(current_user.id) != ctx.user_id:
+        raise HTTPException(status_code=403, detail="Quality identity does not match the tenant context.")
+    if has_quality_permission(db, ctx, permission):
         return ctx
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission '{permission}' is required.")
 
 
-def has_quality_permission(db: Session, ctx: TenantContext, permission: str) -> bool:
-    """Return whether the resolved tenant user/support session has a Quality permission."""
+def has_quality_permission(
+    db: Session, ctx: TenantContext, permission: str, *, department_id: str | None = None,
+) -> bool:
+    """Evaluate effective scoped grants, never an administrative approval overlay."""
     if ctx.is_superuser:
-        if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
+        if permission in access_control.PROTECTED_DECISION_CAPABILITIES:
             return False
         return _support_level_allows(ctx.support_access_level, permission)
-    user = db.query(account_models.User).filter(
-        account_models.User.id == ctx.user_id,
-        account_models.User.amo_id == ctx.amo_id,
-        account_models.User.is_active.is_(True),
-    ).first()
-    if not user or _is_platform_superuser(user):
-        return False
-    if ctx.admin_authority or is_tenant_admin(user, ctx.amo_id):
-        return permission.startswith("qms.")
-    if permission in {"qms.reports.attest_authority", "qms.audit.programme.approve"}:
-        return _has_role_permission(user, permission)
-    if is_tenant_admin(user) and _has_role_permission(user, permission):
-        return True
-    capability_result = _has_capability_permission(db, amo_id=ctx.amo_id, user_id=ctx.user_id, permission=permission)
-    if capability_result is not None:
-        return bool(capability_result)
-    return _has_role_permission(user, permission)
+    return _has_capability_permission(
+        db, amo_id=ctx.amo_id, user_id=ctx.user_id,
+        permission=permission, department_id=department_id,
+    )
 
 
 def assert_quality_permission(db: Session, ctx: TenantContext, permission: str) -> None:

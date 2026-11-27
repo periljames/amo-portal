@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 
 from amodb.apps.accounts import access_control
-from amodb.apps.quality import audit_assignment_guard, people_authorization_router, people_router, tenant_security
+from amodb.apps.quality import audit_assignment_guard, people_authorization_router, people_router
 from amodb.apps.quality.people_models import QualityPrivilegeDecision
 from amodb.apps.quality.people_authorization_models import (
     QualityAuthorizationCase,
@@ -37,7 +37,7 @@ def test_people_surface_has_one_governed_authorization_lifecycle() -> None:
 
 
 def test_quality_officer_prepares_but_does_not_approve_authorizations() -> None:
-    officer = tenant_security._QUALITY_ROLE_PERMISSIONS["QUALITY_OFFICER"]
+    officer = access_control.QUALITY_OFFICER_CAPABILITIES
     assert "qms.people.view" in officer
     assert "qms.authorization.prepare" in officer
     assert "qms.authorization.approve" not in officer
@@ -51,29 +51,20 @@ def test_quality_officer_prepares_but_does_not_approve_authorizations() -> None:
     assert "qms.authorization.exemption.approve" in access_control.QUALITY_MANAGER_CAPABILITIES
 
 
-def test_amo_admin_inherits_all_quality_manager_authority() -> None:
-    admin = tenant_security._QUALITY_ROLE_PERMISSIONS["AMO_ADMIN"]
-    manager = tenant_security._QUALITY_ROLE_PERMISSIONS["QUALITY_MANAGER"]
-    assert "qms.*" in admin
+def test_quality_authorization_capabilities_are_explicit_and_protected() -> None:
+    manager = access_control.QUALITY_MANAGER_CAPABILITIES
+    assert "qms.*" not in manager
+    assert "qms.authorization.prepare" in manager
     for permission in (
-        "qms.authorization.prepare",
-        "qms.authorization.approve",
-        "qms.authorization.review",
+        "qms.authorization.approve", "qms.authorization.review",
         "qms.authorization.exemption.approve",
-        "qms.authorization.policy.manage",
     ):
-        assert any(
-            grant == "qms.*" or grant == permission
-            for grant in admin
-        )
-        assert any(
-            grant == "qms.*" or grant == permission
-            for grant in manager
-        )
+        assert permission in manager
+        assert permission in access_control.PROTECTED_DECISION_CAPABILITIES
 
 
 def test_accountable_executive_has_oversight_without_mutation_authority() -> None:
-    executive = tenant_security._QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"]
+    executive = access_control.QUALITY_EXECUTIVE_CAPABILITIES
     assert "qms.people.view" in executive
     assert "qms.authorization.oversight" in executive
     assert "qms.authorization.prepare" not in executive
