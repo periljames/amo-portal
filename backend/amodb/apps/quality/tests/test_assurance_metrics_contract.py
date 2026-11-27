@@ -4,7 +4,19 @@ from types import SimpleNamespace
 
 from amodb.apps.quality import canonical_router
 from amodb.apps.quality.assurance_metrics_router import SOURCE_REGISTRY
-from amodb.apps.quality.tenant_security import _QUALITY_ROLE_PERMISSIONS, _has_role_permission
+from amodb.apps.accounts import access_control
+
+# Templates describe seeded grants; they never authorize a runtime decision.
+_PROFILE_TEMPLATE_CAPABILITIES = {
+    item["code"]: access_control._workflow_capabilities_for_profile(
+        profile_code=item["code"], base_role_key=item["base"], module_permissions=item["modules"],
+    ) for item in access_control.DEFAULT_ACCESS_PROFILE_TEMPLATES
+}
+
+
+def _template_has_permission(user, permission):
+    return permission in _PROFILE_TEMPLATE_CAPABILITIES.get(str(user.role), set())
+
 
 
 def _route(router, path: str, method: str):
@@ -34,7 +46,7 @@ def test_canonical_due_date_is_available_to_shared_validity_sources() -> None:
 
 def test_inspectors_and_auditors_can_read_cross_module_assurance_without_management_rights() -> None:
     for role in ("QUALITY_INSPECTOR", "AUDITOR"):
-        permissions = _QUALITY_ROLE_PERMISSIONS[role]
+        permissions = _PROFILE_TEMPLATE_CAPABILITIES[role]
         assert "qms.management_review.view" in permissions
         assert "qms.supplier.view" in permissions
         assert "qms.equipment.view" in permissions
@@ -44,7 +56,7 @@ def test_inspectors_and_auditors_can_read_cross_module_assurance_without_managem
 
 
 def test_quality_officer_and_accountable_executive_permissions_are_bounded() -> None:
-    officer = _QUALITY_ROLE_PERMISSIONS["QUALITY_OFFICER"]
+    officer = _PROFILE_TEMPLATE_CAPABILITIES["QUALITY_OFFICER"]
     assert "qms.audit.execute" in officer
     assert "qms.audit.manage" in officer
     assert "qms.audit.notice.manage" in officer
@@ -54,13 +66,13 @@ def test_quality_officer_and_accountable_executive_permissions_are_bounded() -> 
     assert "qms.reports.view" in officer
     assert "qms.external.view" in officer
 
-    accountable = _QUALITY_ROLE_PERMISSIONS["ACCOUNTABLE_EXECUTIVE"]
+    accountable = _PROFILE_TEMPLATE_CAPABILITIES["ACCOUNTABLE_EXECUTIVE"]
     assert "qms.external.view" in accountable
     assert "qms.reports.export" in accountable
     assert "qms.reports.attest_authority" in accountable
     assert "qms.audit.manage" not in accountable
-    assert "qms.external.view" in _QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"]
-    assert "qms.reports.attest_authority" not in _QUALITY_ROLE_PERMISSIONS["VIEW_ONLY"]
+    assert "qms.external.view" in _PROFILE_TEMPLATE_CAPABILITIES["VIEW_ONLY"]
+    assert "qms.reports.attest_authority" not in _PROFILE_TEMPLATE_CAPABILITIES["VIEW_ONLY"]
 
 
 def test_attestation_permission_ignores_qms_wildcard_roles() -> None:
@@ -68,6 +80,6 @@ def test_attestation_permission_ignores_qms_wildcard_roles() -> None:
     amo_admin = SimpleNamespace(role="AMO_ADMIN", is_superuser=False, is_platform_context=False)
     accountable = SimpleNamespace(role="ACCOUNTABLE_EXECUTIVE", is_superuser=False, is_platform_context=False)
 
-    assert _has_role_permission(quality_manager, "qms.reports.attest_authority") is False
-    assert _has_role_permission(amo_admin, "qms.reports.attest_authority") is False
-    assert _has_role_permission(accountable, "qms.reports.attest_authority") is True
+    assert _template_has_permission(quality_manager, "qms.reports.attest_authority") is False
+    assert _template_has_permission(amo_admin, "qms.reports.attest_authority") is False
+    assert _template_has_permission(accountable, "qms.reports.attest_authority") is True

@@ -15,7 +15,19 @@ from amodb.apps.quality import audit_authority_pack as authority_pack
 from amodb.apps.quality.audit_authority_pack import build_authority_pack_zip
 from amodb.apps.quality.audit_external_access_router import AUDITEE_ALLOWED
 from amodb.apps.quality.router import _require_audit_fieldwork_write_access
-from amodb.apps.quality.tenant_security import _QUALITY_ROLE_PERMISSIONS, _has_role_permission
+from amodb.apps.accounts import access_control
+
+# Templates describe seeded grants; they never authorize a runtime decision.
+_PROFILE_TEMPLATE_CAPABILITIES = {
+    item["code"]: access_control._workflow_capabilities_for_profile(
+        profile_code=item["code"], base_role_key=item["base"], module_permissions=item["modules"],
+    ) for item in access_control.DEFAULT_ACCESS_PROFILE_TEMPLATES
+}
+
+
+def _template_has_permission(user, permission):
+    return permission in _PROFILE_TEMPLATE_CAPABILITIES.get(str(user.role), set())
+
 
 
 def _user(role: str, user_id: str = "user-1"):
@@ -37,8 +49,8 @@ def test_assigned_auditor_can_execute_but_unassigned_auditor_cannot() -> None:
         observer_auditor_user_id="observer-1",
         assistant_auditor_user_id="assistant-1",
     )
-    assert _has_role_permission(assigned, "qms.audit.execute") is True
-    assert _has_role_permission(assigned, "qms.audit.manage") is False
+    assert _template_has_permission(assigned, "qms.audit.execute") is True
+    assert _template_has_permission(assigned, "qms.audit.manage") is False
     _require_audit_fieldwork_write_access(assigned, audit)
 
     with pytest.raises(HTTPException) as exc:
@@ -48,32 +60,32 @@ def test_assigned_auditor_can_execute_but_unassigned_auditor_cannot() -> None:
 
 def test_quality_officer_can_prepare_audits_but_not_review_approve_or_close() -> None:
     officer = _user("QUALITY_OFFICER")
-    assert _has_role_permission(officer, "qms.audit.execute") is True
-    assert _has_role_permission(officer, "qms.audit.manage") is True
-    assert _has_role_permission(officer, "qms.audit.programme.quality_review") is False
-    assert _has_role_permission(officer, "qms.audit.programme.approve") is False
-    assert _has_role_permission(officer, "qms.audit.notice.manage") is True
-    assert _has_role_permission(officer, "qms.car.manage") is True
-    assert _has_role_permission(officer, "qms.car.close") is False
-    assert _has_role_permission(officer, "qms.reports.view") is True
-    assert _has_role_permission(officer, "qms.training.manage") is True
+    assert _template_has_permission(officer, "qms.audit.execute") is True
+    assert _template_has_permission(officer, "qms.audit.manage") is True
+    assert _template_has_permission(officer, "qms.audit.programme.quality_review") is False
+    assert _template_has_permission(officer, "qms.audit.programme.approve") is False
+    assert _template_has_permission(officer, "qms.audit.notice.manage") is True
+    assert _template_has_permission(officer, "qms.car.manage") is True
+    assert _template_has_permission(officer, "qms.car.close") is False
+    assert _template_has_permission(officer, "qms.reports.view") is True
+    assert _template_has_permission(officer, "qms.training.manage") is True
 
 
-def test_authority_attestation_is_accountable_executive_or_tenant_admin() -> None:
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.reports.attest_authority") is True
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.reports.export") is True
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.external.view") is True
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.manage") is False
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.quality_review") is False
-    assert _has_role_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.approve") is True
-    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.reports.attest_authority") is False
-    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.quality_review") is True
-    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.approve") is False
-    assert _has_role_permission(_user("AMO_ADMIN"), "qms.reports.attest_authority") is True
-    assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.programme.quality_review") is True
-    assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.programme.approve") is True
-    assert _has_role_permission(_user("QUALITY_MANAGER"), "qms.audit.notice.manage") is True
-    assert _has_role_permission(_user("AMO_ADMIN"), "qms.audit.notice.manage") is True
+def test_authority_template_excludes_administrative_overlay() -> None:
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.reports.attest_authority") is True
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.reports.export") is True
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.external.view") is True
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.manage") is False
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.quality_review") is False
+    assert _template_has_permission(_user("ACCOUNTABLE_EXECUTIVE"), "qms.audit.programme.approve") is True
+    assert _template_has_permission(_user("QUALITY_MANAGER"), "qms.reports.attest_authority") is False
+    assert _template_has_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.quality_review") is True
+    assert _template_has_permission(_user("QUALITY_MANAGER"), "qms.audit.programme.approve") is False
+    assert _template_has_permission(_user("AMO_ADMIN"), "qms.reports.attest_authority") is False
+    assert _template_has_permission(_user("AMO_ADMIN"), "qms.audit.programme.quality_review") is False
+    assert _template_has_permission(_user("AMO_ADMIN"), "qms.audit.programme.approve") is False
+    assert _template_has_permission(_user("QUALITY_MANAGER"), "qms.audit.notice.manage") is True
+    assert _template_has_permission(_user("AMO_ADMIN"), "qms.audit.notice.manage") is False
 
 
 def test_guest_allowlist_has_no_tenant_quality_capability() -> None:
@@ -185,5 +197,5 @@ def test_authority_pack_records_zip_hash_and_manifest(tmp_path: Path, monkeypatc
 
 
 def test_permission_catalogue_contains_no_invented_authority_or_customer_role() -> None:
-    assert "QUALITY_OFFICER" in _QUALITY_ROLE_PERMISSIONS
-    assert not ({"AUTHORITY", "KCAA", "GCAA", "CUSTOMER", "SUPPLIER"} & set(_QUALITY_ROLE_PERMISSIONS))
+    assert "QUALITY_OFFICER" in _PROFILE_TEMPLATE_CAPABILITIES
+    assert not ({"AUTHORITY", "KCAA", "GCAA", "CUSTOMER", "SUPPLIER"} & set(_PROFILE_TEMPLATE_CAPABILITIES))

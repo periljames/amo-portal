@@ -11,7 +11,7 @@ from ...database import get_db
 from ...security import get_current_active_user
 from ..accounts import access_control, models as account_models
 from ..audit import services as audit_services
-from . import governance_directory, governance_schemas, hierarchy_roles, permissions, services
+from . import governance_directory, governance_schemas, hierarchy_roles, permissions, services, supervisor_governance
 
 router = APIRouter(prefix="/workforce/hr", tags=["workforce-governance"])
 
@@ -32,6 +32,41 @@ def _view(db: Session, user: account_models.User):
 
 def _manage(db: Session, user: account_models.User):
     permissions.require_permission(db, user=user, permission=permissions.PermissionCode.WORKFORCE_MANAGE_CONTRACTS)
+
+
+@router.get("/organogram", response_model=governance_schemas.OrganogramRead)
+def organogram(
+    db: Session = Depends(get_db),
+    current_user: account_models.User = Depends(get_current_active_user),
+):
+    _view(db, current_user)
+    amo_id = _amo(current_user)
+    day = governance_directory._today(db, amo_id=amo_id)
+    snapshot = supervisor_governance.organisation_snapshot(db, amo_id=amo_id, on_date=day)
+    relationships = []
+    for user_id in sorted(snapshot.by_user):
+        manager = snapshot.direct_manager(user_id)
+        functional = snapshot.direct_manager(user_id, placement_type="MATRIX")
+        chain, chain_status = snapshot.reporting_chain(user_id)
+        relationships.append(governance_schemas.ReportingRelationshipRead(
+            user_id=user_id, code=manager.code, manager_user_id=manager.manager_user_id,
+            candidate_user_ids=list(manager.candidate_user_ids), reporting_chain=chain,
+            chain_status=chain_status, functional_manager_user_id=functional.manager_user_id,
+            functional_status=functional.code,
+        ))
+    return governance_schemas.OrganogramRead(
+        as_of=day,
+        positions=[governance_schemas.OrganogramPositionRead(
+            position_id=position_id, title=row.canonical_title,
+            reports_to_position_id=row.reports_to_position_id,
+            holder_user_ids=sorted({str(holder.user_id) for holder in snapshot.by_position[position_id]}),
+            vacant=not bool(snapshot.by_position[position_id]),
+        ) for position_id, row in sorted(snapshot.positions.items())],
+        relationships=relationships,
+        unresolved_user_ids=[item.user_id for item in relationships
+                             if item.code not in {"RESOLVED", "ROOT_POSITION"}
+                             or item.chain_status != "ROOT_POSITION"],
+    )
 
 
 def _filters(**values):

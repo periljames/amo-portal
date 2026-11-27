@@ -89,7 +89,7 @@ def test_platform_superuser_requires_active_support_session(monkeypatch) -> None
 def test_capability_store_failure_fails_closed() -> None:
     db = MagicMock()
     db.get_bind.return_value.dialect.name = "postgresql"
-    db.execute.side_effect = OperationalError("authorization lookup", {}, Exception("database unavailable"))
+    db.query.side_effect = OperationalError("authorization lookup", {}, Exception("database unavailable"))
 
     with pytest.raises(HTTPException) as exc:
         tenant_security._has_capability_permission(

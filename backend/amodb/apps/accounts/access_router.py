@@ -1,7 +1,8 @@
 """Tenant role framework and current-user access context endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from amodb.database import get_db
@@ -13,6 +14,29 @@ from . import access_control, models, schemas
 
 admin_router = APIRouter(tags=["accounts_access"])
 context_router = APIRouter(tags=["accounts_access"])
+
+
+@context_router.get("/access-context/evaluate", response_model=access_control.CapabilityDecision)
+def evaluate_current_access(
+    capability: str = Query(min_length=1, max_length=120),
+    department_id: str | None = Query(default=None, max_length=36),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """Explain a current grant; this does not perform a controlled decision."""
+    tenant_id = _tenant_id(current_user)
+    try:
+        if department_id is not None and db.query(models.Department.id).filter(
+            models.Department.id == department_id,
+            models.Department.amo_id == tenant_id,
+            models.Department.is_active.is_(True),
+        ).first() is None:
+            return access_control.CapabilityDecision(False, "OUTSIDE_AUTHORISED_SCOPE")
+        return access_control.evaluate_capability(
+            db, user=current_user, capability_code=capability, department_id=department_id,
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Effective access could not be verified.") from exc
 
 
 def _tenant_id(current_user: models.User, requested_amo_id: str | None = None) -> str:

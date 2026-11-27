@@ -9,7 +9,7 @@ from typing import Iterable
 from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import Session, aliased, joinedload
 
-from ..accounts import models as account_models
+from ..accounts import access_control, models as account_models
 from ..foundations import models as foundation_models
 from . import (
     governance_models,
@@ -150,6 +150,9 @@ def _ensure_org_references(db: Session, *, amo_id: str, payload, row_id: str | N
 
 
 def upsert_org_unit(db: Session, *, amo_id: str, actor_user_id: str, payload, org_unit_id: str | None = None):
+    from .supervisor_governance import lock_organisation
+
+    lock_organisation(db, amo_id=amo_id)
     _ensure_org_references(db, amo_id=amo_id, payload=payload, row_id=org_unit_id)
     row = None
     if org_unit_id:
@@ -333,6 +336,9 @@ def list_positions(db: Session, *, amo_id: str, include_inactive: bool = False):
 
 
 def upsert_position(db: Session, *, amo_id: str, payload, row_id: str | None = None):
+    from .supervisor_governance import lock_organisation
+
+    lock_organisation(db, amo_id=amo_id)
     _validate_position_references(db, amo_id=amo_id, payload=payload, row_id=row_id)
     row = None
     if row_id:

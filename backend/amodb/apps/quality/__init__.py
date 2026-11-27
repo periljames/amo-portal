@@ -26,7 +26,7 @@ for _helper_name in (
 ):
     setattr(router, _helper_name, getattr(_router_module, _helper_name))
 
-# Register extension metadata and assurance permission alignment before route
+# Register extension metadata before route
 # dependencies are evaluated during application startup.
 from . import excellence_models as _excellence_models  # noqa: F401,E402
 from . import mission_models as _mission_models  # noqa: F401,E402
@@ -39,7 +39,6 @@ from . import audit_preparation_models as _audit_preparation_models  # noqa: F40
 from . import car_control_loop_models as _car_control_loop_models  # noqa: F401,E402
 from . import car_rca_models as _car_rca_models  # noqa: F401,E402
 from . import car_feedback_router as _car_feedback_router  # noqa: F401,E402
-from . import assurance_permissions as _assurance_permissions  # noqa: F401,E402
 
 # Focused extensions are loaded after the base router is complete.
 from . import audit_file_controls as _audit_file_controls  # noqa: F401,E402
