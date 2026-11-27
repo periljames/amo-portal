@@ -1,11 +1,13 @@
-# Organisational authority verification â€” interim
+# Organisational authority verification — interim
 
 Acceptance: NOT COMPLETE. Phase 1 is IN PROGRESS. Phases 2 and 3 are NOT STARTED.
 Baseline: `d760894749bb9154ccf06c6fefb6046bdc3a197e`.
 Branch: `feat/enterprise-organisation-authority-qms`.
+Initial checkpoint: `2ce640c755a5472de24d38e2d46c231ded9fd693`.
+Follow-up checkpoint: `e94ad1eeaf65c62671211e779b234585f27550f8`.
 Current implementation commit: consult `git rev-parse HEAD`; the implementation
 ledger identifies checkpoints without embedding a self-referential commit hash.
-PR: pending creation at this checkpoint.
+PR: [#575](https://github.com/periljames/amo-portal/pull/575), DRAFT, targeting `main`.
 
 ## Evidence collected
 

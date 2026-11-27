@@ -2,7 +2,7 @@
 
 Repository: `periljames/amo-portal`. Branch: `feat/enterprise-organisation-authority-qms`.
 Baseline: `d760894749bb9154ccf06c6fefb6046bdc3a197e`. Phase 1: IN PROGRESS.
-PR: pending creation. Frontend implementation/testing has not started.
+PR: [#575](https://github.com/periljames/amo-portal/pull/575), DRAFT, targeting `main`. Frontend implementation/testing has not started.
 User constraint: all frontend testing must use the live portal on this computer.
 
 ## Checkpoint changes
@@ -120,3 +120,17 @@ starting frontend work. Phase 3 alone executes comprehensive backend/security
 verification; frontend verification must be live on this computer.
 
 No merge, deployment or production acceptance is authorized by this ledger.
+
+## Committed checkpoints
+
+- `2ce640c755a5472de24d38e2d46c231ded9fd693`: initial scoped-QMS/reporting implementation;
+  pushed to the programme branch and opened as draft PR #575.
+- `e94ad1eeaf65c62671211e779b234585f27550f8`: protected decisions also block
+  overlapping effective primary appointments; organogram includes active people
+  with missing appointments.
+- Source API-contract comparison inspected 36 distinct QMS capability literals
+  at shared gates; each appeared in the Accounts capability owner. This is source
+  inspection only, not runtime authorization verification.
+- No migration introduced. Existing tenant grant reconciliation remains a
+  deployment blocker. No backend suite, frontend suite, CI polling or live UI
+  acceptance was performed. Working HEAD is obtained from `git rev-parse HEAD`.
