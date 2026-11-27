@@ -20,6 +20,7 @@ from .knowledge_workspace_router import router as knowledge_workspace_router
 from .reminder_lifecycle_router import router as reminder_lifecycle_router
 from .workspace_access import enforce_workspace_access
 from .workspace_administration_router import router as workspace_administration_router
+from .microsoft_router import workspace_router as microsoft_workspace_router, callback_router as microsoft_callback_router
 from .workspace_applicability_router import router as workspace_applicability_router
 from .workspace_authority_router import router as workspace_authority_router
 from .workspace_change_router import router as workspace_change_router
@@ -73,6 +74,8 @@ quarantine_legacy_copy_mutations(workspace_router)
 quarantine_legacy_core_mutations(core_router)
 
 router = APIRouter()
+router.include_router(microsoft_callback_router, prefix="/doc-control")
+router.include_router(microsoft_workspace_router, prefix="/doc-control", dependencies=[Depends(enforce_workspace_access)])
 router.include_router(reminder_lifecycle_router)
 router.include_router(evidence_pack_job_lifecycle_router)
 router.include_router(core_router)

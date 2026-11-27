@@ -58,6 +58,7 @@ from amodb.apps.doc_control import domain_models as document_control_domain_mode
 from amodb.apps.doc_control import knowledge_models as document_control_knowledge_models  # noqa: F401, E402
 from amodb.apps.doc_control import library_models as document_control_library_models  # noqa: F401, E402
 from amodb.apps.doc_control import records_vault_models as document_control_records_vault_models  # noqa: F401, E402
+from amodb.apps.doc_control import microsoft_models as document_control_microsoft_models  # noqa: F401, E402
 from amodb.apps.ai import models as ai_models  # noqa: F401, E402
 
 
